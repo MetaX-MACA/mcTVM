@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=invalid-name,missing-function-docstring,unused-variable
-"""Intrinsics for tensorization on Metax GPU."""
+"""Intrinsics for tensorization on MetaX GPU."""
 from typing import Dict, Literal, Optional, Tuple
 
 from tvm._ffi import register_func

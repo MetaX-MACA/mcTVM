@@ -15,7 +15,7 @@
 <!--- specific language governing permissions and limitations -->
 <!--- under the License. -->
 
-# Metax TVM: Open Deep Learning Compiler Stack
+# MetaX TVM: Open Deep Learning Compiler Stack
 [English](README.md) | 中文版
 
 ![logo](./imgs/logo.png)
@@ -28,14 +28,14 @@
 
 [Apache TVM](https://github.com/apache/tvm)是发展最早和最成功的AI编译器之一，支持从主流的深度学习框架比如pytorch导入模型，在优化编译到多种硬件后端，有着非常活跃的[社区讨论](https://discuss.tvm.apache.org/)和完善的[文档支持](https://tvm.apache.org/docs/)。
 
-本项目（mcTVM）在 [TVM v0.18.0 release](https://github.com/apache/tvm/tree/v0.18.0) 的基础上，增加了对[沐曦](https://www.metax-tech.com)（Metax）GPU的支持。
+本项目（mcTVM）在 [TVM v0.18.0 release](https://github.com/apache/tvm/tree/v0.18.0) 的基础上，增加了对[沐曦](https://www.metax-tech.com)（MetaX）GPU的支持。
 
 ## 快速开始
 
 ### 源码编译
 
 依赖：
-- 沐曦MACA(Metx Advanced Compute Architecture)编程环境，参见[沐曦开发者社区](https://developer.metax-tech.com)的《曦云系列_通用计算GPU_快速上手指南》
+- 沐曦MACA(MetaX Advanced Compute Architecture)编程环境，参见[沐曦开发者社区](https://developer.metax-tech.com)的《曦云系列_通用计算GPU_快速上手指南》
 - 其他环境要求请参考[TVM社区文档](https://tvm.apache.org/docs/install/from_source.html#step-1-install-dependencies)
 
 ```shell

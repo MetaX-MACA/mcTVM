@@ -31,7 +31,7 @@ mcTVM 采用 [Git branching model](http://nvie.com/posts/a-successful-git-branch
 
 1. 派生
 
-   请先[派生mcTVM](https://github.com/apache/Metax-MACA/mcTVM/fork)到个人账户下。
+   请先[派生mcTVM](https://github.com/apache/MetaX-MACA/mcTVM/fork)到个人账户下。
 
 1. 克隆
 
@@ -67,7 +67,7 @@ mcTVM 采用 [Git branching model](http://nvie.com/posts/a-successful-git-branch
    经验丰富的Git用户习惯频繁地从官方仓库拉取更新--每天甚至每小时，以便及时感知冲突，从而更容易地解决。
 
    ```bash
-   git remote add upstream https://github.com/Metax-MACA/mcTVM
+   git remote add upstream https://github.com/MetaX-MACA/mcTVM
    git pull upstream 0.18.0
    ```
 

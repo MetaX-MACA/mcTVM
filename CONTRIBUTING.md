@@ -31,7 +31,7 @@ mcTVM uses this [Git branching model](http://nvie.com/posts/a-successful-git-bra
 
 1. Fork
 
-   To contribute, first [create a fork of mcTVM](https://github.com/apache/Metax-MACA/mcTVM/fork)
+   To contribute, first [create a fork of mcTVM](https://github.com/apache/MetaX-MACA/mcTVM/fork)
 
 1. Clone
 
@@ -66,7 +66,7 @@ mcTVM uses this [Git branching model](http://nvie.com/posts/a-successful-git-bra
    An experienced Git user pulls from the official repo often -- daily or even hourly, so they notice conflicts with others work early, and it's easier to resolve smaller conflicts.
 
    ```bash
-   git remote add upstream https://github.com/Metax-MACA/mcTVM
+   git remote add upstream https://github.com/MetaX-MACA/mcTVM
    git pull upstream 0.18.0
    ```
 
