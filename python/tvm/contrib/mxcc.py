@@ -209,7 +209,7 @@ def get_maca_arch(maca_path="/opt/maca"):
         match = re.search(r"Name:\s+(XCORE\d+[a-zA-Z]*)", macainfo_output)
         if match:
             gpu_arch = match.group(1)
-        return gpu_arch
+        return gpu_arch.lower()
     except subprocess.CalledProcessError:
         print(
             f"Unable to execute macainfo command, \
@@ -263,20 +263,18 @@ def get_target_compute_version(target=None):
     Returns
     -------
     compute_version : str
-        compute capability of a GPU (e.g. "8.6")
+        compute capability of a GPU (e.g. "10.0" of xcore1000)
     """
     # 1. input target object
     # 2. Target.current()
-    target = target or Target.current()
-    if target and target.arch:
-        arch = target.arch.split("_")[1]
-        if len(arch) == 2:
-            major, minor = arch
-            return major + "." + minor
-        elif len(arch) == 3:
-            # This is for arch like "sm_90a"
-            major, minor, suffix = arch
-            return major + "." + minor + "." + suffix
+    target = target or tvm.target.Target.current()
+    if target and target.mcpu:
+        arch = target.mcpu[5:]
+        major = arch[:2]
+        minor = arch[2:]
+        if minor == "00":
+            minor = "0"
+        return major + "." + minor
 
     # 3. GPU compute version
     if tvm.maca(0).exist:
@@ -284,7 +282,7 @@ def get_target_compute_version(target=None):
 
     raise ValueError(
         "No MACA architecture was specified or GPU detected."
-        "Try specifying it by adding '-arch=sm_xx' to your target."
+        "Try specifying it by adding '-arch=xcorexxxx' to your target."
     )
 
 

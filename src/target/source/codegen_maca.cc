@@ -35,7 +35,6 @@
 
 #include "../../tir/transforms/ir_utils.h"
 #include "literal/maca_half_t.h"
-#include "literal/maca_int8_t.h"
 
 namespace tvm {
 namespace codegen {
@@ -269,14 +268,6 @@ std::string CodeGenMACA::Finish() {
     decl_stream << _maca_warp_intrinsic_util;
   }
 
-  if (enable_int8_) {
-    // TODO: int8 is not supported by MACA C500
-    decl_stream << "#if defined(__MACA_ARCH__) && (__MACA_ARCH__ >= 2000)\n";
-    decl_stream << "#include <sm_61_intrinsics.h>\n";
-    decl_stream << _maca_int8_t_def;
-    decl_stream << "#endif\n";
-  }
-
   if (need_math_constants_h_) {
     // decl_stream << "#include <math_constants.h>\n";
     decl_stream << "/* single precision constants */\n";
@@ -429,11 +420,7 @@ std::string CodeGenMACA::Finish() {
     decl_stream << "__forceinline__ __device__ unsigned int\n";
     decl_stream << "cast_smem_ptr_to_int(const void* const smem_ptr)\n";
     decl_stream << "{\n";
-    decl_stream << "  unsigned int smem_int;\n";
-    decl_stream << "  asm volatile (\"{ .reg .u64 smem_int; cvta.to.shared.u64 smem_int, %1; "
-                   "cvt.u32.u64 %0, smem_int; }\"\n";
-    decl_stream << "    : \"=r\"(smem_int) : \"l\"(smem_ptr));\n";
-    decl_stream << "  return smem_int;\n";
+    decl_stream << "  return __cvta_generic_to_shared(smem_ptr);\n";
     decl_stream << "}\n";
   }
 

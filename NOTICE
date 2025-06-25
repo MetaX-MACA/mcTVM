@@ -133,7 +133,6 @@ The following files are newly added by MetaX Integrated Circuits (Shanghai) Co.,
     added: src/target/source/codegen_maca.h
     added: src/target/source/intrin_rule_maca.cc
     added: src/target/source/literal/maca_half_t.h
-    added: src/target/source/literal/maca_int8_t.h
     added: src/tir/transforms/inject_mxc_cp_async.cc
     added: src/tir/transforms/inject_mxc_ldg.cc
 

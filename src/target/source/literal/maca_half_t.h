@@ -394,11 +394,11 @@ struct __align__(8) half4_bfloat164 {
       stream << R"(
   __host__ __device__ half4_bfloat164() : x(T(0)), y(T(0)), z(T(0)), w(T(0)) {}
   __host__ __device__ half4_bfloat164(T x, T y, T z, T w) : x(x), y(y), z(z), w(w) {}
-  __host__ __device__ half4_bfloat164(const __nv_fp8x4_e4m3& fp8x4) {
+  __host__ __device__ half4_bfloat164(const __maca_fp8x4_e4m3& fp8x4) {
     if constexpr (std::is_same_v<T, __half>) {
-      __nv_fp8x2_e4m3 lo_part, hi_part;
-      lo_part.__x = static_cast<__nv_fp8x2_storage_t>(fp8x4.__x & 0xFFFF);
-      hi_part.__x = static_cast<__nv_fp8x2_storage_t>((fp8x4.__x >> 16) & 0xFFFF);
+      __maca_fp8x2_e4m3 lo_part, hi_part;
+      lo_part.__x = static_cast<__maca_fp8x2_storage_t>(fp8x4.__x & 0xFFFF);
+      hi_part.__x = static_cast<__maca_fp8x2_storage_t>((fp8x4.__x >> 16) & 0xFFFF);
       TVec2 lo_half2 = static_cast<TVec2>(lo_part);
       TVec2 hi_half2 = static_cast<TVec2>(hi_part);
       x = reinterpret_cast<T*>(&lo_half2)[0];
@@ -406,11 +406,11 @@ struct __align__(8) half4_bfloat164 {
       z = reinterpret_cast<T*>(&hi_half2)[0];
       w = reinterpret_cast<T*>(&hi_half2)[1];
     } else {
-      __nv_fp8_storage_t elem0_raw = static_cast<__nv_fp8_storage_t>(fp8x4.__x & 0xFF);
-      __nv_fp8_storage_t elem1_raw = static_cast<__nv_fp8_storage_t>((fp8x4.__x >> 8) & 0xFF);
-      __nv_fp8_storage_t elem2_raw = static_cast<__nv_fp8_storage_t>((fp8x4.__x >> 16) & 0xFF);
-      __nv_fp8_storage_t elem3_raw = static_cast<__nv_fp8_storage_t>((fp8x4.__x >> 24) & 0xFF);
-      __nv_fp8_e4m3 elem0, elem1, elem2, elem3;
+      __maca_fp8_storage_t elem0_raw = static_cast<__maca_fp8_storage_t>(fp8x4.__x & 0xFF);
+      __maca_fp8_storage_t elem1_raw = static_cast<__maca_fp8_storage_t>((fp8x4.__x >> 8) & 0xFF);
+      __maca_fp8_storage_t elem2_raw = static_cast<__maca_fp8_storage_t>((fp8x4.__x >> 16) & 0xFF);
+      __maca_fp8_storage_t elem3_raw = static_cast<__maca_fp8_storage_t>((fp8x4.__x >> 24) & 0xFF);
+      __maca_fp8_e4m3 elem0, elem1, elem2, elem3;
       elem0.__x = elem0_raw;
       elem1.__x = elem1_raw;
       elem2.__x = elem2_raw;
@@ -486,23 +486,23 @@ __host__ __device__ half4 make_half4(__half x, __half y, __half z, __half w) {
   }
   if (enable_bf16) {
     stream << R"(
-using nv_bfloat164 = half4_bfloat164<nv_bfloat16, nv_bfloat162>;
-__host__ __device__ nv_bfloat164 make_nv_bfloat164(nv_bfloat16 x, nv_bfloat16 y, nv_bfloat16 z, nv_bfloat16 w) {
-    return nv_bfloat164(x, y, z, w);
+using maca_bfloat164 = half4_bfloat164<maca_bfloat16, maca_bfloat162>;
+__host__ __device__ maca_bfloat164 make_maca_bfloat164(maca_bfloat16 x, maca_bfloat16 y, maca_bfloat16 z, maca_bfloat16 w) {
+    return maca_bfloat164(x, y, z, w);
 }
-__host__ __device__ nv_bfloat162 make_nv_bfloat162(nv_bfloat16 x, nv_bfloat16 y) {
-    return nv_bfloat162(x, y);
+__host__ __device__ maca_bfloat162 make_maca_bfloat162(maca_bfloat16 x, maca_bfloat16 y) {
+    return maca_bfloat162(x, y);
 }
 )";
     if (enable_fp8) {
       stream << R"(
-__host__ __device__ nv_bfloat162 cast_to_nv_bfloat162(const __nv_fp8x2_e4m3& fp8x2) {
-    __nv_fp8_e4m3 elem0, elem1;
-    elem0.__x = static_cast<__nv_fp8_storage_t>(fp8x2.__x & 0xFF);
-    elem1.__x = static_cast<__nv_fp8_storage_t>((fp8x2.__x >> 8) & 0xFF);
-    nv_bfloat16 x = nv_bfloat16(elem0);
-    nv_bfloat16 y = nv_bfloat16(elem1);
-    return nv_bfloat162(x, y);
+__host__ __device__ maca_bfloat162 cast_to_maca_bfloat162(const __maca_fp8x2_e4m3& fp8x2) {
+    __maca_fp8_e4m3 elem0, elem1;
+    elem0.__x = static_cast<__maca_fp8_storage_t>(fp8x2.__x & 0xFF);
+    elem1.__x = static_cast<__maca_fp8_storage_t>((fp8x2.__x >> 8) & 0xFF);
+    maca_bfloat16 x = maca_bfloat16(elem0);
+    maca_bfloat16 y = maca_bfloat16(elem1);
+    return maca_bfloat162(x, y);
 }
       )";
     }

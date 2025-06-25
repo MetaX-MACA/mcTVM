@@ -240,7 +240,7 @@ TargetJSON UpdateNVPTXAttrs(TargetJSON target) {
 TargetJSON UpdateMACAAttrs(TargetJSON target) {
   using tvm::runtime::Registry;
   CheckOrSetAttr(&target, "mtriple", "mxc-metax-macahca");
-  // Update -mcpu=gfx
+  // Update -mcpu=xcore1000
   std::string arch = "xcore1000";
   if (target.count("mcpu")) {
     String mcpu = Downcast<String>(target.at("mcpu"));

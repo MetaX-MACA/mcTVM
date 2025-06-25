@@ -105,7 +105,6 @@ void MultiLevelTilingNode::InitializeWithTuneContext(const TuneContext& context)
         if (std::stoi(xcore) >= 1000) {
           // only stage = 4 & 5 is tested. all integer that is bigger than 2
           // is theoretically feasible, but no guarantee for great performance.
-          // TODO: 4 & 5 is not tested in maca, just follow cuda
           this->stages = {4, 5};
         }
       } catch (const std::invalid_argument& e) {
