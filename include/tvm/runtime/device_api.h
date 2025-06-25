@@ -52,6 +52,7 @@ enum DeviceAttrKind : int {
   kL2CacheSizeBytes = 13,
   kTotalGlobalMemory = 14,
   kAvailableGlobalMemory = 15,
+  kMxcArch = 16,
 };
 
 #ifdef TVM_KALLOC_ALIGNMENT

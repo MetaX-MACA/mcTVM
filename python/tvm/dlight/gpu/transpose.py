@@ -53,7 +53,7 @@ class Transpose(GPUScheduleRule):
         # pylint: disable=invalid-name
         if not isinstance(func, tir.PrimFunc) or not self.is_target_available(target):
             return None
-        if target.kind.name == "cuda":
+        if target.kind.name == "cuda" or target.kind.name == "maca":
             len_tx = 16
             len_ty = 8
             unroll_depth = 256

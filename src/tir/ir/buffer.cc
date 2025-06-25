@@ -286,6 +286,7 @@ Array<PrimExpr> BufferNode::ElemOffset(Array<PrimExpr> input_indices) const {
   arith::Analyzer ana;
 
   for (size_t i = 0; i < input_indices.size(); i++) {
+    // for (int i = input_indices.size() - 1; i >= 0; --i) {
     if ((current_output_axis < axis_separators.size()) &&
         (i == size_t(axis_separators[current_output_axis]->value))) {
       current_output_axis++;
@@ -297,7 +298,6 @@ Array<PrimExpr> BufferNode::ElemOffset(Array<PrimExpr> input_indices) const {
     } else {
       output_index = output_index * this->shape[i] + input_indices[i];
     }
-
     if (i > 0) {
       output_index = MergeMulMod(&ana, output_index);
     }

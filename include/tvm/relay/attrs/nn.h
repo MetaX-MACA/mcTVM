@@ -1588,6 +1588,15 @@ struct NLLLossAttrs : public tvm::AttrsNode<NLLLossAttrs> {
   }
 };  // struct NLLLossAttrs
 
+/*! \brief Attributes used in MultiHeadAttention */
+struct MultiHeadAttentionAttrs : public tvm::AttrsNode<MultiHeadAttentionAttrs> {
+  bool is_causal;
+
+  TVM_DECLARE_ATTRS(MultiHeadAttentionAttrs, "relay.attrs.MultiHeadAttentionAttrs") {
+    TVM_ATTR_FIELD(is_causal).set_default(false).describe("");
+  }
+};  // struct MultiHeadAttentionAttrs
+
 }  // namespace relay
 }  // namespace tvm
 #endif  // TVM_RELAY_ATTRS_NN_H_

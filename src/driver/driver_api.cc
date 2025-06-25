@@ -57,6 +57,8 @@ TVM_REGISTER_PASS_CONFIG_OPTION("tir.merge_static_smem", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("tir.instrument_lwp", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("tir.vtcm_capacity", Integer);
 TVM_REGISTER_PASS_CONFIG_OPTION("tir.ptx_ldg32", Bool);
+TVM_REGISTER_PASS_CONFIG_OPTION("tir.mxc_ldg", Bool);
+TVM_REGISTER_PASS_CONFIG_OPTION("tir.mxc_cp_async", Bool);
 
 // WARNING: May cause coherency issues resulting data miscompares
 // Experimental feature that, when enabled by the runtime, bypasses the cache when using DMA. When
@@ -683,6 +685,18 @@ transform::Sequential DeviceModulePassManager(IRModule mixed_mod, Target target)
   device_pass_list.push_back(tir::transform::LowerDeviceStorageAccessInfo());
   device_pass_list.push_back(tir::transform::LowerIntrin());
 
+  transform::PassContext pass_ctx = transform::PassContext::Current();
+  // [MXMACA]
+  // if copy async enabled, do it first
+  bool enable_mxc_cp_async = pass_ctx->GetConfig<Bool>("tir.mxc_cp_async", Bool(false)).value();
+  if (enable_mxc_cp_async) {
+    device_pass_list.push_back(tir::transform::InjectMXCCopyAsync());
+  }
+  // mxc_ldg is true by default
+  bool enable_mxc_ldg = pass_ctx->GetConfig<Bool>("tir.mxc_ldg", Bool(true)).value();
+  if (enable_mxc_ldg) {
+    device_pass_list.push_back(tir::transform::InjectMXCLDG());
+  }
   return transform::Sequential(device_pass_list);
 }
 

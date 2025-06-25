@@ -302,6 +302,10 @@ class ScheduleRule : public runtime::ObjectRef {
   TVM_DLL static Array<ScheduleRule, void> DefaultMicro();
   /*! \brief Create default schedule rules for ARM CPU (NEON and DOTPROD) */
   TVM_DLL static Array<ScheduleRule, void> DefaultARM(const String& type);
+  /*! \brief Create default schedule rules for MACA */
+  TVM_DLL static Array<ScheduleRule, void> DefaultMACA();
+  /*! \brief Create default postprocessors for MACA with TensorCore */
+  TVM_DLL static Array<ScheduleRule, void> DefaultMACATensorCore();
 
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(ScheduleRule, ObjectRef, ScheduleRuleNode);
 };

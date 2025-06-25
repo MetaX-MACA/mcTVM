@@ -175,6 +175,32 @@ TargetJSON UpdateCUDAAttrs(TargetJSON target) {
     }
     target.Set("arch", String("sm_") + std::to_string(archInt));
   }
+  // max thread per blocks
+  if (!target.count("max_threads_per_block")) {
+    int max_threads_per_block;
+    TVMRetValue value;
+    if (!DetectDeviceFlag({kDLCUDA, 0}, runtime::kMaxThreadsPerBlock, &value)) {
+      LOG(WARNING) << "Unable to detect CUDA max_threads_per_block, default to "
+                      "\"-max_threds_per_blocks=1024\" instead";
+      max_threads_per_block = 1024;
+    } else {
+      max_threads_per_block = value.operator int();
+    }
+    target.Set("max_threads_per_block", runtime::Int(max_threads_per_block));
+  }
+  // max_shared_memory_per_block
+  if (!target.count("max_shared_memory_per_block")) {
+    int max_shared_memory_per_block;
+    TVMRetValue value;
+    if (!DetectDeviceFlag({kDLCUDA, 0}, runtime::kMaxSharedMemoryPerBlock, &value)) {
+      LOG(WARNING) << "Unable to detect CUDA max_shared_memory_per_block, default to "
+                      "\"-max_shared_memory_per_block=49152\" instead";
+      max_shared_memory_per_block = 49152;
+    } else {
+      max_shared_memory_per_block = value.operator int();
+    }
+    target.Set("max_shared_memory_per_block", runtime::Int(max_shared_memory_per_block));
+  }
   return target;
 }
 
@@ -203,6 +229,32 @@ TargetJSON UpdateNVPTXAttrs(TargetJSON target) {
     }
     target.Set("mcpu", String("sm_") + std::to_string(arch));
   }
+  return target;
+}
+
+/*!
+ * \brief Update the attributes in the LLVM MACA target.
+ * \param target The Target to update
+ * \return The updated attributes
+ */
+TargetJSON UpdateMACAAttrs(TargetJSON target) {
+  using tvm::runtime::Registry;
+  CheckOrSetAttr(&target, "mtriple", "mxc-metax-macahca");
+  // Update -mcpu=gfx
+  std::string arch = "xcore1000";
+  if (target.count("mcpu")) {
+    String mcpu = Downcast<String>(target.at("mcpu"));
+    arch = ExtractStringWithPrefix(mcpu, "xcore");
+    ICHECK(!arch.empty()) << "ValueError: MACA target gets an invalid XCORE version: -mcpu="
+                          << mcpu;
+  } else {
+    TVMRetValue val;
+    if (const auto* f_get_maca_arch = Registry::Get("tvm_callback_maca_get_arch")) {
+      arch = (*f_get_maca_arch)().operator std::string();
+    }
+    target.Set("mcpu", String(arch));
+  }
+
   return target;
 }
 
@@ -352,6 +404,18 @@ TVM_REGISTER_TARGET_KIND("rocm", kDLROCM)
     .add_attr_option<runtime::Int>("thread_warp_size", runtime::Int(64))
     .set_default_keys({"rocm", "gpu"})
     .set_target_parser(UpdateROCmAttrs);
+
+TVM_REGISTER_TARGET_KIND("maca", kDLMACA)
+    .add_attr_option<String>("mcpu")
+    .add_attr_option<String>("mtriple")
+    .add_attr_option<Array<String>>("mattr")
+    .add_attr_option<runtime::Int>("max_num_threads", runtime::Int(1024))
+    .add_attr_option<runtime::Int>("max_threads_per_block", runtime::Int(1024))
+    .add_attr_option<runtime::Int>("max_shared_memory_per_block", runtime::Int(65536))
+    .add_attr_option<runtime::Int>("thread_warp_size", runtime::Int(64))
+    .add_attr_option<runtime::Int>("max_local_memory_per_block", runtime::Int(4095))
+    .set_default_keys({"maca", "gpu"})
+    .set_target_parser(UpdateMACAAttrs);
 
 TVM_REGISTER_TARGET_KIND("opencl", kDLOpenCL)
     .add_attr_option<runtime::Int>("max_threads_per_block", runtime::Int(256))

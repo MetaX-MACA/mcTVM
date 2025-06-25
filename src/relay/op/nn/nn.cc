@@ -199,6 +199,58 @@ RELAY_REGISTER_OP("nn.matmul")
 
 // ------------------- relay.nn.matmul
 
+// ------------------- relay.nn.multi_head_attention
+TVM_REGISTER_NODE_TYPE(MultiHeadAttentionAttrs);
+
+Expr MakeMultiHeadAttention(Expr query, Expr key, Expr value, Expr mask, bool is_causal) {
+  auto attrs = make_object<MultiHeadAttentionAttrs>();
+  attrs->is_causal = is_causal;
+  static const Op& mha_op = Op::Get("nn.multi_head_attention");
+  return Call(mha_op, {query, key, value, mask}, Attrs(attrs), {});
+}
+
+TVM_REGISTER_GLOBAL("relay.op.nn._make.multi_head_attention")
+    .set_body_typed(MakeMultiHeadAttention);
+
+bool MultiHeadAttentionRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
+                           const TypeReporter& reporter) {
+  ICHECK_EQ(types.size(), 5);
+  const auto* query = types[0].as<TensorTypeNode>();
+  if (query == nullptr) return false;
+
+  const MultiHeadAttentionAttrs* param = attrs.as<MultiHeadAttentionAttrs>();
+  ICHECK(param != nullptr);
+
+  // assign output type
+  reporter->Assign(types[4], TensorType(query->shape, query->dtype));
+  return true;
+}
+
+RELAY_REGISTER_OP("nn.multi_head_attention")
+    .describe(
+        R"code(Supports multi-query and grouped-query attention (MQA/GQA) by passing in KV with fewer heads
+than Q. Note that the number of heads in Q must be divisible by the number of heads in KV.
+For example, if Q has 6 heads and K, V have 2 heads, head 0, 1, 2 of Q will attention to head
+0 of K, V, and head 3, 4, 5 of Q will attention to head 1 of K, V.
+
+- **query**: `(batch_size, seqlen, nheads, headdim)`
+- **key**: `(batch_size, seqlen, nheads_k, headdim)`
+- **value**: `(batch_size, seqlen, nheads_k, headdim)`
+- **mask**: `(bs/1,  hdim/1,  q/1,   k/1)`
+
+)code" TVM_ADD_FILELINE)
+    .set_attrs_type<MultiHeadAttentionAttrs>()
+    .set_num_inputs(4)
+    .add_argument("query", "4D Tensor", "The query Tensor.")
+    .add_argument("key", "4D Tensor", "The key Tensor.")
+    .add_argument("value", "4D Tensor", "The value Tensor.")
+    .add_argument("mask", "4D Tensor", "The mask Tensor.")
+    .set_support_level(3)
+    .add_type_rel("MultiHeadAttention", MultiHeadAttentionRel)
+    .set_attr<TOpPattern>("TOpPattern", kOpaque);
+
+// ------------------- relay.nn.multi_head_attention
+
 // ------------------- relay.nn.dense
 TVM_REGISTER_NODE_TYPE(DenseAttrs);
 

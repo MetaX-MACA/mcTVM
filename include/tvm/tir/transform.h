@@ -797,6 +797,18 @@ TVM_DLL Pass InjectPTXAsyncCopy();
 TVM_DLL Pass InjectPTXLDG32(bool enable_ptx_ldg32 = true);
 
 /*!
+ * \brief Pass to rewrite global to local memory copy on MACA with ldg instruction.
+ * \return The pass.
+ */
+TVM_DLL Pass InjectMXCLDG();
+
+/*!
+ * \brief Pass to rewrite global to shared memory copy on MACA with asyncronous copy.
+ * \return The pass.
+ */
+TVM_DLL Pass InjectMXCCopyAsync();
+
+/*!
  * \brief Remove the weight layout rewrite block
  * \param skip_ndarray_rewrite If True, exact rewrite of NDArray, according to the given index map,
  *  will be skipped. Only the shape of the NDArray is transformed correctly, and the content of

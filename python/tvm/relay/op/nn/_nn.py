@@ -1035,6 +1035,19 @@ def compute_space_to_depth(attrs, inputs, out_dtype):
 reg.register_injective_schedule("nn.space_to_depth")
 
 
+# multi_head_attention
+@reg.register_compute("nn.multi_head_attention")
+def compute_multi_head_attention(attrs, inputs, out_type):
+    return [
+        topi.nn.multi_head_attention(
+            inputs[0], inputs[1], inputs[2], inputs[3], is_causal=attrs.is_causal
+        )
+    ]
+
+
+reg.register_strategy("nn.multi_head_attention", strategy.multi_head_attention_strategy)
+
+
 # correlation
 reg.register_strategy("nn.correlation", strategy.correlation_strategy)
 

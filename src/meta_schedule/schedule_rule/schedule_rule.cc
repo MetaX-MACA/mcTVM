@@ -273,6 +273,139 @@ Array<ScheduleRule> ScheduleRule::DefaultCUDATensorCore() {
   return results;
 }
 
+Array<ScheduleRule> ScheduleRule::DefaultMACA() {
+  return {
+      ScheduleRule::ApplyCustomRule(),
+      ScheduleRule::MultiLevelTiling(
+          /*structure=*/"SSSRRSRS",
+          /*tile_binds=*/Array<String>{"blockIdx.x", "vthread.x", "threadIdx.x"},
+          /*max_innermost_factor=*/Integer(64),
+          /*vector_load_lens=*/Array<Integer>{1, 2, 3, 4, 8, 16},
+          /*reuse_read=*/
+          Map<String, ObjectRef>{{"req", String("must")},
+                                 {"levels", Array<Integer>{4}},  //
+                                 {"scope", String("shared")}},
+          /*reuse_write=*/
+          Map<String, ObjectRef>{{"req", String("must")},
+                                 {"levels", Array<Integer>{3}},  //
+                                 {"scope", String("local")}}),
+      ScheduleRule::InlineConstantScalars(),
+      ScheduleRule::AutoInline(
+          /*into_producer=*/true,
+          /*into_consumer=*/true,
+          /*inline_const_tensor=*/true,
+          /*disallow_if_then_else=*/false,
+          /*require_injective=*/false,
+          /*require_ordered=*/false,
+          /*disallow_op=*/Array<String>{}),
+      ScheduleRule::CrossThreadReduction(
+          /*thread_extents=*/Array<runtime::Int>{4, 8, 16, 32, 64, 128, 256, 512}),
+      ScheduleRule::ParallelizeVectorizeUnroll(
+          /*max_jobs_per_core=*/-1,
+          /*max_vectorize_extent=*/-1,
+          /*unroll_max_steps=*/Array<runtime::Int>{0, 16, 64, 512, 1024},
+          /*unroll_explicit=*/true),
+      ScheduleRule::AutoBind(
+          /*max_threadblocks=*/512,
+          /*thread_extents*/ Array<Integer>{32, 64, 128, 256, 512, 1024}),
+  };
+}
+
+Array<ScheduleRule> ScheduleRule::DefaultMACATensorCore() {
+  // TODO: ENABLE MMA OF MACA
+  Array<Map<String, String>> wmma_intrin_groups = {
+      // Tensor Cores f32 += f8 * f8
+      {
+          {"init", "maca_wmma_fill_16x16x16_f32"},
+          {"load_a", "maca_wmma_load_16x16x16_f8_a_shared_dyn"},
+          {"load_b", "maca_wmma_load_16x16x16_f8_b_shared_dyn"},
+          {"compute", "maca_wmma_sync_16x16x16_f8f8f32"},
+          {"store", "maca_wmma_store_16x16x16_f32_shared_dyn"},
+      },
+      // Tensor Cores f32 += f32 * f32
+      {
+          {"init", "maca_wmma_fill_16x16x4_f32"},
+          {"load_a", "maca_wmma_load_16x16x4_f32_a_shared_dyn"},
+          {"load_b", "maca_wmma_load_16x16x4_f32_b_shared_dyn"},
+          {"compute", "maca_wmma_sync_16x16x4_f32f32f32"},
+          {"store", "maca_wmma_store_16x16x4_f32_shared_dyn"},
+      },
+      {
+          {"init", "maca_wmma_fill_16x16x4_f32"},
+          {"load_a", "maca_wmma_load_16x16x4_f32_a_shared_dyn"},
+          {"load_b", "maca_wmma_load_16x16x4_f32_b_trans_shared_dyn"},
+          {"compute", "maca_wmma_sync_16x16x4_f32f32f32_trans"},
+          {"store", "maca_wmma_store_16x16x4_f32_shared_dyn"},
+      },
+      // Tensor Cores f32 += f16 * f16
+      {
+          {"init", "maca_wmma_fill_16x16x16_f32"},
+          {"load_a", "maca_wmma_load_16x16x16_f16_a_shared_dyn"},
+          {"load_b", "maca_wmma_load_16x16x16_f16_b_shared_dyn"},
+          {"compute", "maca_wmma_sync_16x16x16_f16f16f32"},
+          {"store", "maca_wmma_store_16x16x16_f32_shared_dyn"},
+      },
+      {
+          {"init", "maca_wmma_fill_16x16x16_f32"},
+          {"load_a", "maca_wmma_load_16x16x16_f16_a_shared_dyn"},
+          {"load_b", "maca_wmma_load_16x16x16_f16_b_trans_shared_dyn"},
+          {"compute", "maca_wmma_sync_16x16x16_f16f16f32_trans"},
+          {"store", "maca_wmma_store_16x16x16_f32_shared_dyn"},
+      },
+      // Tensor Cores f16 += f16 * f16
+      {
+          {"init", "maca_wmma_fill_16x16x16_f16"},
+          {"load_a", "maca_wmma_load_16x16x16_f16_a_shared_dyn"},
+          {"load_b", "maca_wmma_load_16x16x16_f16_b_shared_dyn"},
+          {"compute", "maca_wmma_sync_16x16x16_f16f16f16"},
+          {"store", "maca_wmma_store_16x16x16_f16_shared_dyn"},
+      },
+      {
+          {"init", "maca_wmma_fill_16x16x16_f16"},
+          {"load_a", "maca_wmma_load_16x16x16_f16_a_shared_dyn"},
+          {"load_b", "maca_wmma_load_16x16x16_f16_b_trans_shared_dyn"},
+          {"compute", "maca_wmma_sync_16x16x16_f16f16f16_trans"},
+          {"store", "maca_wmma_store_16x16x16_f16_shared_dyn"},
+      },
+      // Tensor Cores s32 += s8 * s8
+      {
+          {"init", "maca_wmma_fill_16x16x16_s32"},
+          {"load_a", "maca_wmma_load_16x16x16_s8_a_shared_dyn"},
+          {"load_b", "maca_wmma_load_16x16x16_s8_b_shared_dyn"},
+          {"compute", "maca_wmma_sync_16x16x16_s8s8s32"},
+          {"store", "maca_wmma_store_16x16x16_s32_shared_dyn"},
+      },
+      {
+          {"init", "maca_wmma_fill_16x16x16_s32"},
+          {"load_a", "maca_wmma_load_16x16x16_s8_a_shared_dyn"},
+          {"load_b", "maca_wmma_load_16x16x16_s8_b_trans_shared_dyn"},
+          {"compute", "maca_wmma_sync_16x16x16_s8s8s32_trans"},
+          {"store", "maca_wmma_store_16x16x16_s32_shared_dyn"},
+      },
+  };
+  Array<ScheduleRule> results{
+      ScheduleRule::ApplyCustomRule(),
+      ScheduleRule::MultiLevelTilingTensorCore(
+          /*intrin_groups=*/wmma_intrin_groups,
+          /*structure=*/"SSSRRSRS",
+          /*tile_binds=*/Array<String>{"blockIdx.y", "blockIdx.x", "threadIdx.y"},
+          /*max_innermost_factor=*/Integer(4),
+          /*vector_load_lens=*/Array<Integer>{1, 2, 3, 4, 8, 16},
+          /*reuse_read=*/
+          Map<String, ObjectRef>{{"req", String("must")},
+                                 {"levels", Array<Integer>{4}},  //
+                                 {"scope", String("shared.dyn")}},
+          /*reuse_write=*/
+          Map<String, ObjectRef>{{"req", String("must")},
+                                 {"levels", Array<Integer>{2}},  //
+                                 {"scope", String("shared.dyn")}},
+          /*use_software_pipeline=*/false),  //
+  };
+  Array<ScheduleRule> append = ScheduleRule::DefaultMACA();
+  results.insert(results.end(), append.begin() + 1, append.end());
+  return results;
+}
+
 Array<ScheduleRule> ScheduleRule::DefaultHexagon() {
   return {
       ScheduleRule::ApplyCustomRule(),
@@ -447,6 +580,9 @@ TVM_REGISTER_GLOBAL("meta_schedule.ScheduleRuleDefaultMicro")
     .set_body_typed(ScheduleRule::DefaultMicro);
 TVM_REGISTER_GLOBAL("meta_schedule.ScheduleRuleDefaultARM")
     .set_body_typed(ScheduleRule::DefaultARM);
-
+TVM_REGISTER_GLOBAL("meta_schedule.ScheduleRuleDefaultMACA")
+    .set_body_typed(ScheduleRule::DefaultMACA);
+TVM_REGISTER_GLOBAL("meta_schedule.ScheduleRuleDefaultMACATensorCore")
+    .set_body_typed(ScheduleRule::DefaultMACATensorCore);
 }  // namespace meta_schedule
 }  // namespace tvm

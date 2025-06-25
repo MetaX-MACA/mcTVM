@@ -1127,6 +1127,17 @@ def InjectPTXAsyncCopy():
     return _ffi_api.InjectPTXAsyncCopy()  # type: ignore
 
 
+def InjectMXCCopyAsync():
+    """Rewrite global to shared memory copy on MACA with asyncronous copy.
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.InjectMXCCopyAsync()  # type: ignore
+
+
 def RemoveWeightLayoutRewriteBlock(skip_ndarray_rewrite=False):
     """Remove weight layout rewrite block before benchmarking during tuning stage.
 

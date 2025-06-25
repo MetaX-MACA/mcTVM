@@ -55,7 +55,8 @@ inline bool IsCPUTask(const SearchTask& task) {
 inline bool IsGPUTask(const SearchTask& task) {
   int device_type = (task)->target->GetTargetDeviceType();
   return device_type == kDLCUDA || device_type == kDLOpenCL || device_type == kDLVulkan ||
-         device_type == kDLMetal || device_type == kDLROCM || device_type == kOpenGL;
+         device_type == kDLMetal || device_type == kDLROCM || device_type == kOpenGL ||
+         device_type == kDLMACA;
 }
 
 /*! \brief Return whether the search task is targeting a Hexagon. */

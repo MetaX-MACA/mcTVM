@@ -11,9 +11,14 @@ include(cmake/utils/FindOpenCL.cmake)
 include(cmake/utils/FindVulkan.cmake)
 include(cmake/utils/FindLLVM.cmake)
 include(cmake/utils/FindROCM.cmake)
+include(cmake/utils/FindMACA.cmake)
 include(cmake/utils/FindRCCL.cmake)
 include(cmake/utils/FindEthosN.cmake)
 include(cmake/utils/FindNVSHMEM.cmake)
+
+# FIXME: add maca defination in dlpack,
+# it can be removed after we push a pr to dlpack
+add_maca_defination_of_dlpack()
 
 if(EXISTS ${CMAKE_BINARY_DIR}/config.cmake)
   include(${CMAKE_BINARY_DIR}/config.cmake)
@@ -579,6 +584,7 @@ include(cmake/modules/OpenMP.cmake)
 include(cmake/modules/Vulkan.cmake)
 include(cmake/modules/Metal.cmake)
 include(cmake/modules/ROCM.cmake)
+include(cmake/modules/MACA.cmake)
 include(cmake/modules/LLVM.cmake)
 include(cmake/modules/Micro.cmake)
 include(cmake/modules/contrib/EthosN.cmake)

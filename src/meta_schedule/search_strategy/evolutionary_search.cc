@@ -717,8 +717,17 @@ Optional<Array<MeasureCandidate>> EvolutionarySearchNode::State::GenerateMeasure
   std::vector<Schedule> unmeasured = SampleInitPopulation(pop - measured.size());
   if (static_cast<int>(unmeasured.size()) < self->init_min_unmeasured) {
     TVM_PY_LOG(WARNING, self->ctx_->logger)
-        << "Cannot sample enough initial population, evolutionary search failed.";
-    return NullOpt;
+        << "Cannot sample enough initial population, may reduce performance of volutionary "
+           "search.\n"
+        << "initial population: " << unmeasured.size()
+        << ", init min unmeasured: " << self->init_min_unmeasured;
+    if (static_cast<int>(unmeasured.size()) < 1) {
+      TVM_PY_LOG(ERROR, self->ctx_->logger)
+          << "Cannot sample enough initial population, less than 1, evolutionary search failed.\n"
+          << "initial population: " << unmeasured.size()
+          << ", init min unmeasured: " << self->init_min_unmeasured;
+      return NullOpt;
+    }
   }
   TVM_PY_LOG(INFO, self->ctx_->logger) << "Sampled " << unmeasured.size() << " candidate(s)";
   inits.insert(inits.end(), measured.begin(), measured.end());

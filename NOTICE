@@ -1,5 +1,145 @@
+The mcTVM project is modified from apache/tvm (https://github.com/apache/tvm).  Please see the LICENSE for the license for this project.
+
+The following files  may have been Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. in 2025.
+    modified: .pre-commit-config.yaml
+    modified: CMakeLists.txt
+    modified: README.md
+    modified: cmake/config.cmake
+    modified: cmake/modules/LibInfo.cmake
+    modified: include/tvm/meta_schedule/mutator.h
+    modified: include/tvm/meta_schedule/postproc.h
+    modified: include/tvm/meta_schedule/schedule_rule.h
+    modified: include/tvm/relay/attrs/nn.h
+    modified: include/tvm/runtime/c_runtime_api.h
+    modified: include/tvm/runtime/data_type.h
+    modified: include/tvm/runtime/device_api.h
+    modified: include/tvm/runtime/ndarray.h
+    modified: include/tvm/runtime/packed_func.h
+    modified: include/tvm/script/ir_builder/tir/ir.h
+    modified: include/tvm/tir/builtin.h
+    modified: include/tvm/tir/op.h
+    modified: include/tvm/tir/transform.h
+    modified: python/setup.py
+    modified: python/tvm/__init__.py
+    modified: python/tvm/_ffi/runtime_ctypes.py
+    modified: python/tvm/auto_scheduler/search_task.py
+    modified: python/tvm/contrib/popen_pool.py
+    modified: python/tvm/contrib/rocm.py
+    modified: python/tvm/contrib/tvmjs.py
+    modified: python/tvm/dlight/benchmark/bench.py
+    modified: python/tvm/dlight/gpu/gemv.py
+    modified: python/tvm/dlight/gpu/general_reduction.py
+    modified: python/tvm/dlight/gpu/low_batch_gemv.py
+    modified: python/tvm/dlight/gpu/matmul.py
+    modified: python/tvm/dlight/gpu/rmsnorm.py
+    modified: python/tvm/dlight/gpu/transpose.py
+    modified: python/tvm/dlight/gpu/utils.py
+    modified: python/tvm/meta_schedule/builder/local_builder.py
+    modified: python/tvm/meta_schedule/schedule_rule/schedule_rule.py
+    modified: python/tvm/meta_schedule/space_generator/space_generator.py
+    modified: python/tvm/meta_schedule/testing/relay_workload.py
+    modified: python/tvm/meta_schedule/testing/space_generation.py
+    modified: python/tvm/meta_schedule/tune.py
+    modified: python/tvm/relax/backend/contrib/cublas.py
+    modified: python/tvm/relax/backend/contrib/hipblas.py
+    modified: python/tvm/relax/frontend/onnx/onnx_frontend.py
+    modified: python/tvm/relax/frontend/torch/base_fx_graph_translator.py
+    modified: python/tvm/relax/frontend/torch/exported_program_translator.py
+    modified: python/tvm/relax/frontend/torch/fx_translator.py
+    modified: python/tvm/relay/frontend/onnx.py
+    modified: python/tvm/relay/op/nn/_nn.py
+    modified: python/tvm/relay/op/nn/nn.py
+    modified: python/tvm/relay/op/strategy/generic.py
+    modified: python/tvm/runtime/ndarray.py
+    modified: python/tvm/script/ir_builder/tir/ir.py
+    modified: python/tvm/target/__init__.py
+    modified: python/tvm/target/detect_target.py
+    modified: python/tvm/target/tag.py
+    modified: python/tvm/target/target.py
+    modified: python/tvm/testing/plugin.py
+    modified: python/tvm/testing/utils.py
+    modified: python/tvm/tir/op.py
+    modified: python/tvm/tir/tensor_intrin/__init__.py
+    modified: python/tvm/tir/tensor_intrin/cuda.py
+    modified: python/tvm/tir/transform/transform.py
+    modified: python/tvm/topi/nn/__init__.py
+    modified: src/auto_scheduler/search_policy/utils.h
+    modified: src/auto_scheduler/search_task.cc
+    modified: src/driver/driver_api.cc
+    modified: src/ir/expr.cc
+    modified: src/meta_schedule/feature_extractor/per_store_feature.cc
+    modified: src/meta_schedule/mutator/mutator.cc
+    modified: src/meta_schedule/postproc/postproc.cc
+    modified: src/meta_schedule/postproc/verify_gpu_code.cc
+    modified: src/meta_schedule/schedule_rule/cross_thread_reduction.cc
+    modified: src/meta_schedule/schedule_rule/multi_level_tiling.cc
+    modified: src/meta_schedule/schedule_rule/multi_level_tiling_tensor_core.cc
+    modified: src/meta_schedule/schedule_rule/schedule_rule.cc
+    modified: src/meta_schedule/search_strategy/evolutionary_search.cc
+    modified: src/meta_schedule/space_generator/space_generator.cc
+    modified: src/meta_schedule/utils.h
+    modified: src/relax/backend/contrib/utils.h
+    modified: src/relay/op/nn/nn.cc
+    modified: src/relay/transforms/to_mixed_precision.cc
+    modified: src/runtime/contrib/cublas/cublas.cc
+    modified: src/runtime/module.cc
+    modified: src/runtime/ndarray.cc
+    modified: src/script/ir_builder/tir/ir.cc
+    modified: src/support/libinfo.cc
+    modified: src/support/scalars.h
+    modified: src/target/llvm/codegen_llvm.cc
+    modified: src/target/source/codegen_cuda.cc
+    modified: src/target/source/literal/cuda_half_t.h
+    modified: src/target/source/ptx.cc
+    modified: src/target/tag.cc
+    modified: src/target/target_kind.cc
+    modified: src/tir/analysis/verify_memory.cc
+    modified: src/tir/ir/buffer.cc
+    modified: src/tir/op/builtin.cc
+    modified: src/tir/op/op.cc
+    modified: src/tir/schedule/primitive/compute_inline.cc
+    modified: src/tir/transforms/default_gpu_schedule.cc
+    modified: src/tir/transforms/dtype_conversion.h
+    modified: src/tir/transforms/lower_thread_allreduce.cc
+    modified: src/tir/transforms/lower_warp_memory.cc
+    modified: src/tir/transforms/unsupported_dtype_legalize.cc
+    modified: tests/lint/check_file_type.py
+    modified: tests/lint/rat-excludes
+Modification copyright 2025 MetaX Integrated Circuits (Shanghai) Co.,Ltd.
+
+The following files are newly added by MetaX Integrated Circuits (Shanghai) Co., Ltd. in 2025.   All rights reserved.
+    added: CONTRIBUTING.md
+    added: CONTRIBUTING_ZH.md
+    added: README_TVM.md
+    added: README_ZH.md
+    added: cmake/modules/MACA.cmake
+    added: cmake/utils/FindMACA.cmake
+    added: imgs/logo.png
+    added: python/tvm/contrib/flashattn.py
+    added: python/tvm/contrib/mxcc.py
+    added: python/tvm/relax/backend/contrib/mcdnn.py
+    added: python/tvm/tir/tensor_intrin/maca.py
+    added: src/relay/backend/contrib/flashattn/target.cc
+    added: src/runtime/contrib/flashattn/flashattn.cc
+    added: src/runtime/contrib/mcdnn/mcdnn_json_runtime.cc
+    added: src/runtime/contrib/mcdnn/mcdnn_utils.h
+    added: src/runtime/maca/maca_common.h
+    added: src/runtime/maca/maca_device_api.cc
+    added: src/runtime/maca/maca_module.cc
+    added: src/runtime/maca/maca_module.h
+    added: src/target/opt/build_maca_off.cc
+    added: src/target/opt/build_maca_on.cc
+    added: src/target/source/codegen_maca.cc
+    added: src/target/source/codegen_maca.h
+    added: src/target/source/intrin_rule_maca.cc
+    added: src/target/source/literal/maca_half_t.h
+    added: src/target/source/literal/maca_int8_t.h
+    added: src/tir/transforms/inject_mxc_cp_async.cc
+    added: src/tir/transforms/inject_mxc_ldg.cc
+
+------------------------------------------------------------------------------------
+The following is content of the NOTICE file of apache/tvm:
 Apache TVM
 Copyright 2019-2023 The Apache Software Foundation
-
 This product includes software developed at
 The Apache Software Foundation (http://www.apache.org/).

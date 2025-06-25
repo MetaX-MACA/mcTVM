@@ -32,7 +32,7 @@ from ._ffi import register_object, register_func, register_extension, get_global
 # tvm.runtime
 from .runtime.object import Object
 from .runtime.ndarray import device, cpu, cuda, gpu, opencl, cl, vulkan, metal, mtl
-from .runtime.ndarray import vpi, rocm, ext_dev, hexagon
+from .runtime.ndarray import vpi, rocm, maca, ext_dev, hexagon
 from .runtime import ndarray as nd
 
 # tvm.error
@@ -73,7 +73,7 @@ from . import arith
 from . import support
 
 # Contrib initializers
-from .contrib import rocm as _rocm, nvcc as _nvcc, sdaccel as _sdaccel
+from .contrib import rocm as _rocm, nvcc as _nvcc, sdaccel as _sdaccel, mxcc as _mxcc
 
 # Relay and Relax contain modules that are only available in compiler package
 # Do not import them if TVM is built with runtime only

@@ -371,6 +371,9 @@ class PopenPoolExecutor:
             raise TypeError("initializer must be callable for PopenPoolExecutor")
 
     def __del__(self):
+        if self._threadpool._shutdown:
+            return
+
         self._lock.acquire()
         for worker in self._worker_map.values():
             try:
@@ -408,6 +411,9 @@ class PopenPoolExecutor:
             return MapResult(status=StatusKind.TIMEOUT, value=exception)
         except Exception as exception:
             return MapResult(status=StatusKind.EXCEPTION, value=exception)
+
+    def shutdown(self):
+        self.__del__()
 
     def submit(self, fn, *args, **kwargs) -> concurrent.futures.Future:
         """Submit a new function job to the pool

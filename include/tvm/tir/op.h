@@ -811,6 +811,32 @@ inline const int64_t* as_const_int(const PrimExpr& x) {
 }
 
 /*!
+ * \brief Get x as constant float expression.
+ * \param x The expression
+ * \return the address to the int expression,
+ *         return nullptr, if x is not IntImm.
+ */
+inline const double* as_const_float(const PrimExpr& x) {
+  if (!x.defined()) return nullptr;
+  if (const tir::FloatImmNode* op = x.as<tir::FloatImmNode>()) {
+    return &(op->value);
+  }
+
+  return nullptr;
+}
+
+/*!
+ * \brief Check whether x is a constant float expression.
+ * \param x The input argument
+ * \param value the value to be compared against.
+ * \return whether x is constant expression.
+ */
+inline bool is_const_float(const PrimExpr& x, double value) {
+  const double* as_float = as_const_float(x);
+  return as_float && (*as_float == value);
+}
+
+/*!
  * \brief Check whether x is a constant integer expression.
  * \param x The input argument
  * \param value the value to be compared against.

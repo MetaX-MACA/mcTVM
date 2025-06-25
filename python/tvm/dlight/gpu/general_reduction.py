@@ -37,7 +37,7 @@ class GeneralReduction(GPUScheduleRule):
         if not isinstance(func, tir.PrimFunc) or not self.is_target_available(target):
             return None
 
-        if target.kind.name == "cuda":
+        if target.kind.name == "cuda" or target.kind.name == "maca":
             len_tx = 256
             unroll_depth = 256
         elif target.kind.name == "opencl":

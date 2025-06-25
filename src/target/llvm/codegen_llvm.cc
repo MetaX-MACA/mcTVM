@@ -359,7 +359,8 @@ void CodeGenLLVM::Verify() const {
 std::unique_ptr<llvm::Module> CodeGenLLVM::Finish() {
   this->AddStartupFunction();
   for (size_t i = 0; i < link_modules_.size(); ++i) {
-    ICHECK(!llvm::Linker::linkModules(*module_, std::move(link_modules_[i])))
+    ICHECK(!llvm::Linker::linkModules(*module_, std::move(link_modules_[i]),
+                                      llvm::Linker::Flags::LinkOnlyNeeded))
         << "Failed to link modules";
   }
   link_modules_.clear();
@@ -590,7 +591,7 @@ llvm::Type* CodeGenLLVM::DTypeToLLVMType(const DataType& dtype) const {
       default:
         LOG(FATAL) << "do not support " << dtype;
     }
-  } else if (dtype.code() == DataType::kE4M3Float || dtype.code() == DataType::kE5M2Float) {
+  } else if (dtype.code() == DataType::kFloat8_e4m3fn || dtype.code() == DataType::kFloat8_e5m2) {
     etype = llvm::Type::getInt8Ty(*ctx);
   }
   if (!dtype.is_scalar()) {

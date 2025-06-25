@@ -74,6 +74,8 @@ register_tag(
     config={
         "kind": "cuda",
         "arch": "sm_61",
+        "max_threads_per_block": 1024,
+        "max_shared_memory_per_block": 49152,
     },
 )
 

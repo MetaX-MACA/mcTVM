@@ -100,6 +100,8 @@ def benchmark(
         dev = tvm.cpu()
     elif target.kind.name == "cuda":
         dev = tvm.cuda()
+    elif target.kind.name == "maca":
+        dev = tvm.maca()
     else:
         raise ValueError(f"Unsupported device type from {target.kind.name}")
     # populate input shapes
@@ -134,9 +136,9 @@ def benchmark(
             number=evaluator_config.number,
             repeat=evaluator_config.repeat,
             min_repeat_ms=evaluator_config.min_repeat_ms,
-            f_preproc="cache_flush_cpu_non_first_arg"
-            if evaluator_config.enable_cpu_cache_flush
-            else "",
+            f_preproc=(
+                "cache_flush_cpu_non_first_arg" if evaluator_config.enable_cpu_cache_flush else ""
+            ),
         )(*input_tensors)
     else:
         from tvm.testing import rpc_run  # pylint: disable=import-outside-toplevel

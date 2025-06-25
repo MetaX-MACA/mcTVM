@@ -294,6 +294,8 @@ def _target_to_requirement(target):
         return utils.requires_cuda.marks()
     if target.kind.name == "rocm":
         return utils.requires_rocm.marks()
+    if target.kind.name == "maca":
+        return utils.requires_maca.marks()
     if target.kind.name == "vulkan":
         return utils.requires_vulkan.marks()
     if target.kind.name == "nvptx":

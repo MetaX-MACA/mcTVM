@@ -264,6 +264,8 @@ TVM_REGISTER_CUDA_TAG("nvidia/nvs-5200m", "sm_21", 49152, 32768);
 TVM_REGISTER_CUDA_TAG("nvidia/nvs-4200m", "sm_21", 49152, 32768);
 TVM_REGISTER_CUDA_TAG("nvidia/geforce-rtx-4090", "sm_89", 49152, 65536)
     .with_config("l2_cache_size_bytes", runtime::Int(75497472));
+TVM_REGISTER_CUDA_TAG("nvidia/geforce-rtx-4080", "sm_89", 49152, 65536)
+    .with_config("l2_cache_size_bytes", runtime::Int(67108864));
 TVM_REGISTER_CUDA_TAG("nvidia/geforce-rtx-3090-ti", "sm_86", 49152, 65536);
 TVM_REGISTER_CUDA_TAG("nvidia/geforce-rtx-3090", "sm_86", 49152, 65536);
 TVM_REGISTER_CUDA_TAG("nvidia/geforce-rtx-3080-ti", "sm_86", 49152, 65536);
@@ -411,6 +413,21 @@ TVM_REGISTER_CUDA_TAG("nvidia/jetson-tx1", "sm_53", 49152, 32768);
 TVM_REGISTER_CUDA_TAG("nvidia/tegra-x1", "sm_53", 49152, 32768);
 
 #undef TVM_REGISTER_CUDA_TAG
+
+#define TVM_REGISTER_MACA_TAG(Name, CPU, TRIPLE, SharedMem)     \
+  TVM_REGISTER_TARGET_TAG(Name).set_config({                    \
+      {"kind", String("maca")},                                 \
+      {"keys", Array<String>{"maca", "gpu"}},                   \
+      {"mcpu", String(CPU)},                                    \
+      {"mtriple", String(TRIPLE)},                              \
+      {"max_shared_memory_per_block", runtime::Int(SharedMem)}, \
+      {"max_threads_per_block", runtime::Int(1024)},            \
+      {"thread_warp_size", runtime::Int(64)},                   \
+  })
+
+TVM_REGISTER_MACA_TAG("metax/mxc-c500", "xcore1000", "mxc-metax-macahca", 65536);
+
+#undef TVM_REGISTER_MACA_TAG
 
 #define TVM_REGISTER_TAG_AWS_C5(Name, Cores, Arch)                                 \
   TVM_REGISTER_TARGET_TAG(Name).set_config({{"kind", String("llvm")},              \

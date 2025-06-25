@@ -15,39 +15,55 @@
 <!--- specific language governing permissions and limitations -->
 <!--- under the License. -->
 
-<img src=https://raw.githubusercontent.com/apache/tvm-site/main/images/logo/tvm-logo-small.png width=128/> Open Deep Learning Compiler Stack
-==============================================
-[Documentation](https://tvm.apache.org/docs) |
-[Contributors](CONTRIBUTORS.md) |
-[Community](https://tvm.apache.org/community) |
-[Release Notes](NEWS.md)
+# Metax TVM: Open Deep Learning Compiler Stack
+English | [中文版](README_ZH.md)
 
-[![Build Status](https://ci.tlcpack.ai/buildStatus/icon?job=tvm/main)](https://ci.tlcpack.ai/job/tvm/job/main/)
-[![WinMacBuild](https://github.com/apache/tvm/workflows/WinMacBuild/badge.svg)](https://github.com/apache/tvm/actions?query=workflow%3AWinMacBuild)
+![logo](./imgs/logo.png)
 
-Apache TVM is a compiler stack for deep learning systems. It is designed to close the gap between the
-productivity-focused deep learning frameworks, and the performance- and efficiency-focused hardware backends.
-TVM works with deep learning frameworks to provide end to end compilation to different backends.
+[![GitHub license](https://img.shields.io/github/license/MetaX-MACA/mcTVM?style=flat-square)](./LICENSE)
+[![GitHub tag](https://img.shields.io/github/tag/MetaX-MACA/mcTVM?style=flat-square)](https://github.com/MetaX-MACA/mcTVM/releases/?include_prereleases&sort=semver "View GitHub releases")
+[![Documentation](https://img.shields.io/badge/documentation-wiki-blue.svg?style=flat-square)](https://tvm.apache.org/docs/)
 
-License
--------
-TVM is licensed under the [Apache-2.0](LICENSE) license.
+## Introduction
 
-Getting Started
----------------
-Check out the [TVM Documentation](https://tvm.apache.org/docs/) site for installation instructions, tutorials, examples, and more.
-The [Getting Started with TVM](https://tvm.apache.org/docs/tutorial/introduction.html) tutorial is a great
-place to start.
+[Apache TVM](https://github.com/apache/tvm) is one of the earliest and most successful AI compiler，it can take models from popular deep learning frameworks like pytorch and optimize them for diverse hardware. The [TVM community](https://discuss.tvm.apache.org/) is also highly active and [well-documented](https://tvm.apache.org/docs).
 
-Contribute to TVM
------------------
-TVM adopts apache committer model, we aim to create an open source project that is maintained and owned by the community.
-Check out the [Contributor Guide](https://tvm.apache.org/docs/contribute/).
+This project(mcTVM) is based on [TVM v0.18.0 release](https://github.com/apache/tvm/tree/v0.18.0), and supports [Metax](https://www.metax-tech.com) GPU.
 
-Acknowledgement
----------------
-We learned a lot from the following projects when building TVM.
-- [Halide](https://github.com/halide/Halide): Part of TVM's TIR and arithmetic simplification module
-  originates from Halide. We also learned and adapted some part of lowering pipeline from Halide.
-- [Loopy](https://github.com/inducer/loopy): use of integer set analysis and its loop transformation primitives.
-- [Theano](https://github.com/Theano/Theano): the design inspiration of symbolic scan operator for recurrence.
+## Getting Started
+
+### Build From Source
+
+Dependencies:
+- Metax MACA(Metx Advanced Compute Architecture) programming environment，follow the 《曦云系列_通用计算GPU_快速上手指南》 from [Metax developer community](https://developer.metax-tech.com)
+- Other requirements refer to [TVM Documents](https://tvm.apache.org/docs/install/from_source.html#step-1-install-dependencies)
+
+```shell
+git clone https://github.com/MetaX-MACA/mcTVM.git mcTVM
+cd mcTVM
+git submodule update --init --recursive
+rm -rf build && mkdir build && cd build
+cp ../cmake/config.cmake ./
+# USE_MACA is ON by default
+cmake ../ && make -j $(nproc)
+export TVM_HOME=/path-to-mcTVM
+export PYTHONPATH=$TVM_HOME/python:$PYTHONPATH
+```
+
+### Using MACA backend
+
+```python
+import tvm
+# define maca target by kind name
+target = tvm.target.Target("maca")
+# or specific target by tag name
+target = tvm.target.Target("metax/mxc-c500")
+# define maca device
+dev = tvm.maca()
+# or
+dev = tvm.device("maca")
+```
+
+## Contribute to mcTVM
+
+check out the [CONTRIBUTING.md](./CONTRIBUTING.md)

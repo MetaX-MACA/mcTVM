@@ -139,6 +139,10 @@ class Mutator : public runtime::ObjectRef {
   TVM_DLL static Map<Mutator, FloatImm, void> DefaultHexagon();
   /*! \brief Create default mutators for Micro */
   TVM_DLL static Map<Mutator, FloatImm, void> DefaultMicro();
+  /*! \brief Create default mutators for MACA */
+  TVM_DLL static Map<Mutator, FloatImm, void> DefaultMACA();
+  /*! \brief Create default mutators for MACA with TensorCore */
+  TVM_DLL static Map<Mutator, FloatImm, void> DefaultMACATensorCore();
 
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(Mutator, ObjectRef, MutatorNode);
 };

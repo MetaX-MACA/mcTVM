@@ -139,6 +139,70 @@ class TorchFXImporter(BaseFXGraphImporter):
 
         return self.block_builder.emit(relax.TupleGetItem(res_tuple, 0))
 
+    def _batch_norm_function(self, node: fx.Node) -> relax.Var:
+        import numpy as np
+        import torch
+
+        params = {
+            "input": None,
+            "running_mean": None,
+            "running_var": None,
+            "weight": None,
+            "bias": None,
+        }
+        for i, arg in enumerate(node.args):
+            if isinstance(arg, torch.fx.Node) and hasattr(arg, "target"):
+                arg_name = str(arg.target).lower()
+                for key in params:
+                    if key in arg_name:
+                        params[key] = self.env[arg]
+                        break
+            if i == 0:
+                params["input"] = self.env[arg]
+
+        if params["running_mean"] is None and len(node.args) > 1:
+            params["running_mean"] = self.env[node.args[1]]
+        if params["running_var"] is None and len(node.args) > 2:
+            params["running_var"] = self.env[node.args[2]]
+        if params["weight"] is None and len(node.args) > 3:
+            params["weight"] = self.env[node.args[3]]
+        if params["bias"] is None and len(node.args) > 4:
+            params["bias"] = self.env[node.args[4]]
+
+        x = params["input"]
+        channel = (
+            int(self.shape_of(params["running_mean"])[0])
+            if params["running_mean"] is not None
+            else (
+                int(self.shape_of(params["weight"])[0])
+                if params["weight"] is not None
+                else int(self.shape_of(x)[1])
+            )
+        )
+        dtype = x.struct_info.dtype
+
+        running_mean = params["running_mean"] or relax.const(np.zeros(channel), dtype=dtype)
+        running_var = params["running_var"] or relax.const(np.ones(channel), dtype=dtype)
+        weight = params["weight"] or relax.const(np.ones(channel), dtype=dtype)
+        bias = params["bias"] or relax.const(np.zeros(channel), dtype=dtype)
+
+        momentum = node.kwargs.get("momentum", 0.1)
+        eps = node.kwargs.get("eps", 1e-5)
+
+        res_tuple = self.block_builder.emit(
+            relax.op.nn.batch_norm(
+                x,
+                weight,
+                bias,
+                running_mean,
+                running_var,
+                axis=1,
+                epsilon=eps,
+                momentum=momentum,
+            )
+        )
+        return self.block_builder.emit(relax.TupleGetItem(res_tuple, 0))
+
     def _conv_transpose1d_module(self, node: fx.Node) -> relax.Var:
         x = self.env[node.args[0]]
         module = self.named_modules[node.target]
@@ -378,6 +442,123 @@ class TorchFXImporter(BaseFXGraphImporter):
 
         return self._max_pool2d_impl(x, kernel_size, stride, padding, dilation, ceil_mode)
 
+    ########## quantized ###########
+
+    def quantized_model(self, node: fx.Node) -> relax.Var:
+        input = self.env[node.args[0]]
+        module = self.named_modules[node.target]
+
+        scale = relax.const(module.scale.numpy()[0])
+        zero_point = relax.const(module.zero_point.numpy()[0], "int8")
+        return self.block_builder.emit(
+            relax.op.quantize(
+                data=input, scale=scale, zero_point=zero_point, axis=-1, out_dtype="int8"
+            )
+        )
+
+    def quantized_convrelu2d_module(self, node: fx.Node) -> relax.Var:
+        x = self.env[node.args[0]]
+        module = self.named_modules[node.target]
+        weight = module.weight().int_repr().numpy()
+        weight_relax = relax.const(weight, weight.dtype)
+        bias = relax.const(module.bias().numpy(), weight.dtype) if module.bias else None
+        conv2d = self._conv2d_impl(
+            x,
+            weight_relax,
+            bias=bias,
+            strides=module.stride,
+            padding=module.padding,
+            dilation=module.dilation,
+            groups=module.groups,
+        )
+
+        relu = self.block_builder.emit(relax.op.nn.relu(conv2d))
+
+        if relu.struct_info.dtype == "int8":
+            return relu
+
+        scale = relax.const(module.scale, "float32")
+        zero_point = relax.const(module.zero_point, "int8")
+        return self.block_builder.emit(
+            relax.op.quantize(
+                data=relu, scale=scale, zero_point=zero_point, axis=-1, out_dtype="int8"
+            )
+        )
+
+    def quantized_conv2d_module(self, node: fx.Node) -> relax.Var:
+        x = self.env[node.args[0]]
+        module = self.named_modules[node.target]
+        weight = module.weight().int_repr().numpy()
+        weight_relax = relax.const(weight, weight.dtype)
+        bias = relax.const(module.bias().detach().numpy(), weight.dtype) if module.bias else None
+        conv2d = self._conv2d_impl(
+            x,
+            weight_relax,
+            bias=bias,
+            strides=module.stride,
+            padding=module.padding,
+            dilation=module.dilation,
+            groups=module.groups,
+        )
+        if conv2d.struct_info.dtype == "int8":
+            return conv2d
+        scale = relax.const(module.scale, "float32")
+        zero_point = relax.const(module.zero_point, "int8")
+        return self.block_builder.emit(
+            relax.op.quantize(
+                data=conv2d, scale=scale, zero_point=zero_point, axis=-1, out_dtype="int8"
+            )
+        )
+
+    def quantized_linear_module(self, node: fx.Node) -> relax.Var:
+        x = self.env[node.args[0]]
+        module = self.named_modules[node.target]
+        weight = module.weight().int_repr().numpy()
+        weight_relax = relax.const(weight, weight.dtype)
+        bias = relax.const(module.bias().detach().numpy(), weight.dtype) if module.bias else None
+
+        linear_output = self.block_builder.emit(
+            relax.op.linear(x, weight_relax, bias, out_dtype=x.struct_info.dtype)
+        )
+        if linear_output.struct_info.dtype == "int8":
+            return linear_output
+
+        scale = relax.const(module.scale)
+        zero_point = relax.const(module.zero_point, "int8")
+        return self.block_builder.emit(
+            relax.op.quantize(
+                data=linear_output, scale=scale, zero_point=zero_point, axis=-1, out_dtype="int8"
+            )
+        )
+
+    def dequantized_module(self, node: fx.Node) -> relax.Var:
+        x = self.env[node.args[0]]
+        module = self.named_modules[node.prev.target]
+        scale = relax.const(module.scale)
+        zero_point = relax.const(module.zero_point, "int8")
+
+        return self.block_builder.emit(
+            relax.op.dequantize(x, scale, zero_point, axis=-1, out_dtype="float32")
+        )
+
+    def quantized_add_relu(self, node: fx.Node) -> relax.Var:
+        import operator
+
+        x = self.env[node.args[0]]
+        y = self.env[node.args[1]]
+        add = self.block_builder.emit(relax.op.add(x, y))
+        relu = self.block_builder.emit(relax.op.nn.relu(add))
+        if relu.struct_info.dtype == "int8":
+            return relu
+        scale = relax.const(node.kwargs["scale"], "float32")
+        zero_point = relax.const(node.kwargs["zero_point"], "int8")
+
+        return self.block_builder.emit(
+            relax.op.quantize(
+                data=relu, scale=scale, zero_point=zero_point, axis=-1, out_dtype="int8"
+            )
+        )
+
     ########## Manipulation ##########
 
     def _chunk(self, node: fx.Node) -> relax.Var:
@@ -589,6 +770,12 @@ class TorchFXImporter(BaseFXGraphImporter):
             nn.modules.sparse.Embedding: self._embedding_module,
             # tensor manipulation
             nn.Flatten: self._flatten_module,
+            # quantized
+            nn.quantized.modules.Quantize: self.quantized_model,
+            nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d: self.quantized_convrelu2d_module,
+            nn.quantized.modules.conv.Conv2d: self.quantized_conv2d_module,
+            nn.quantized.modules.linear.Linear: self.quantized_linear_module,
+            nn.quantized.modules.DeQuantize: self.dequantized_module,
             ## call_function and call_method
             # unary
             "acos": self._unary_op(relax.op.acos),
@@ -604,6 +791,7 @@ class TorchFXImporter(BaseFXGraphImporter):
             "exp": self._unary_op(relax.op.exp),
             "gelu": self._gelu,
             "hardsigmoid": self._hardsigmoid,
+            "hardtanh": self._hardtanh,
             "hardswish": self._hardswish,
             "leaky_relu": self._leakyrelu,
             "log_softmax": self._log_softmax,
@@ -659,6 +847,10 @@ class TorchFXImporter(BaseFXGraphImporter):
             "scaled_dot_product_attention": self._scaled_dot_product_attention,
             "stochastic_depth": lambda node: self.env[node.args[0]],
             "unbind": self._unbind,
+            "batch_norm": self._batch_norm_function,
+            "embedding": lambda node: self._embedding_impl(
+                self.env[node.args[0]], self.env[node.args[1]]
+            ),
             # statistical
             "mean": self._mean,
             "sum": self._sum,
@@ -706,6 +898,8 @@ class TorchFXImporter(BaseFXGraphImporter):
             "getattr": self._getattr,
             "getitem": self._getitem,
             "sym_size.int": self._sym_size_int,
+            # quantized
+            "add_relu": self.quantized_add_relu,
         }
 
     def update_convert_map(self, custom_convert_map: dict):

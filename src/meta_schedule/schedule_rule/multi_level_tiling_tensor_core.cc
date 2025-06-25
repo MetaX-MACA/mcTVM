@@ -278,10 +278,11 @@ void MultiLevelTilingTensorCoreNode::TileAndAnnotateTensorize(
     const String& permuted_layout_annotate_value) const {
   Optional<LoopRV> loop = TileWithTensorIntrin(*sch, block_rv, intrin_name).value();
   ICHECK(loop.defined());
-  BlockRV blockized_outer = (*sch)->Blockize(loop.value());
-  (*sch)->Annotate(blockized_outer, tir::attr::meta_schedule_auto_tensorize, intrin_name);
   if (!permuted_layout_annotate_value.empty()) {
+    BlockRV blockized_outer = (*sch)->Blockize(loop.value());
     (*sch)->Annotate(blockized_outer, "permuted_layout", permuted_layout_annotate_value);
+  } else {
+    (*sch)->Tensorize(loop.value(), intrin_name);
   }
 }
 
@@ -608,6 +609,8 @@ std::vector<State> MultiLevelTilingTensorCoreNode::AddReadReuseTensorCore(
     const DataType& dtype = cache_read_buffer->dtype;
     if (dtype.is_float16()) {
       sch->StorageAlign(cache_read, 0, -2, 32, 8);
+    } else if (dtype.is_float()) {
+      sch->StorageAlign(cache_read, 0, -2, 32, 4);
     } else if (dtype.is_int() && dtype.bits() == 8) {
       sch->StorageAlign(cache_read, 0, -2, 32, 16);
     } else {

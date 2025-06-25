@@ -913,6 +913,13 @@ void ReverseComputeInlineImpl(ScheduleState self, const StmtSRef& consumer_block
   StmtSRef producer_block_sref =
       NonSingleProducerError::Check(self, consumer_block_sref, scope_root_sref);
   CheckNotOutputBlock(self, producer_block_sref, scope_root_sref);
+  // [MXMACA] the producer should have only one consumer, avoid the output of producer being
+  // eliminated
+  Array<tir::StmtSRef> consumer_srefs = GetConsumers(self, producer_block_sref);
+  if (consumer_srefs.size() != 1) {
+    throw NonSingleProducerError(self->mod,
+                                 GetRef<Block>(producer_block_sref->StmtAs<BlockNode>()));
+  }
   // Step 4. Analyze the block body
   ReverseComputeInliner inliner(inlined_buffer, producer_block_sref->StmtAs<BlockNode>(),
                                 consumer_block_realize, scope_root_sref, self->mod);

@@ -53,6 +53,7 @@
 #include "../support/nd_int_set.h"
 #include "../support/table_printer.h"
 #include "../support/utils.h"
+#include "../tir/schedule/error.h"
 #include "../tir/schedule/primitive.h"
 #include "../tir/schedule/utils.h"
 
@@ -527,8 +528,8 @@ inline void CloneRules(const SpaceGeneratorNode* src, SpaceGeneratorNode* dst) {
 
 /*! \brief Returns true if the given target is one of the supported gpu targets. */
 inline bool IsGPUTarget(const std::string& target_name) {
-  static const std::unordered_set<std::string> gpu_targets{"cuda", "rocm", "vulkan", "metal",
-                                                           "opencl"};
+  static const std::unordered_set<std::string> gpu_targets{"cuda",  "rocm",   "vulkan",
+                                                           "metal", "opencl", "maca"};
   return gpu_targets.count(target_name);
 }
 
@@ -545,6 +546,8 @@ inline ScheduleRule GetDefaultAutoInline(const std::string& target_name) {
     rules = ScheduleRule::DefaultHexagon();
   } else if (target_name == "c") {
     rules = ScheduleRule::DefaultMicro();
+  } else if (target_name == "maca") {
+    rules = ScheduleRule::DefaultMACA();
   } else if (IsGPUTarget(target_name)) {
     rules = ScheduleRule::DefaultCUDA();
   } else {

@@ -100,9 +100,9 @@ def tune_tasks(
     if max_trials_per_task is None:
         max_trials_per_task = max_trials_global
     if not isinstance(builder, Builder):
-        builder = Builder.create(builder, max_workers=num_cores)
+        builder = Builder.create(builder, max_workers=num_cores, timeout_sec=600.0)
     if not isinstance(runner, Runner):
-        runner = Runner.create(runner, max_workers=num_cores)
+        runner = Runner.create(runner, max_workers=num_cores, timeout_sec=600.0)
     if database == "json":
         database = Database.create(database, work_dir=work_dir, module_equality=module_equality)
     elif not isinstance(database, Database):

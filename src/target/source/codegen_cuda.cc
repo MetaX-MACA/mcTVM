@@ -51,14 +51,18 @@ std::string GetFP8Type(DataType type) {
     vec = "x2";
   } else if (lanes == 4) {
     vec = "x4";
+  } else if (lanes == 8) {
+    vec = "x8";
+  } else if (lanes == 16) {
+    vec = "x16";
   } else {
-    LOG(FATAL) << "Only support scalar and vector types of width (2, 4, 8) for FP8";
+    LOG(FATAL) << "Only support scalar and vector types of width (2, 4, 8, 16) for FP8";
   }
   stream << "__nv_fp8";
   std::string suffix;
-  if (type.code() == DataType::kE4M3Float) {
+  if (type.code() == DataType::kFloat8_e4m3fn) {
     suffix = "_e4m3";
-  } else if (type.code() == DataType::kE5M2Float) {
+  } else if (type.code() == DataType::kFloat8_e5m2) {
     suffix = "_e5m2";
   } else {
     LOG(FATAL) << "Unsupported FP8 type in CUDA codegen";
@@ -147,9 +151,19 @@ std::string CodeGenCUDA::Finish() {
   if (enable_fp8_) {
     decl_stream << "#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 890)\n";
     decl_stream << "#include <cuda_fp8.h>\n";
+    decl_stream << "using fp8_e4_t = __nv_fp8_e4m3;\n";
+    decl_stream << "using fp8_e4x2_t = __nv_fp8x2_e4m3;\n";
+    decl_stream << "using fp8_e4x4_t = __nv_fp8x4_e4m3;\n";
+    decl_stream << "struct fp8_e4x8_t {\n fp8_e4_t data[8]; \n};\n";
+    decl_stream << "struct fp8_e4x16_t {\n fp8_e4_t data[16]; \n};\n";
+    decl_stream << "using fp8_e5_t = __nv_fp8_e5m2;\n";
+    decl_stream << "using fp8_e5x2_t = __nv_fp8x2_e5m2;\n";
+    decl_stream << "using fp8_e5x4_t = __nv_fp8x4_e5m2;\n";
+    decl_stream << "struct fp8_e5x8_t {\n fp8_e5_t data[8]; \n};\n";
+    decl_stream << "struct fp8_e5x16_t {\n fp8_e5_t data[16]; \n};\n";
     decl_stream << "#endif\n\n";
   }
-  declare_vector_type_extensions(decl_stream, enable_fp16_, enable_fp8_);
+  declare_vector_type_extensions(decl_stream, enable_fp16_, enable_bf16_, enable_fp8_);
 
   if (enable_warp_shuffle_) {
     decl_stream << _cuda_warp_intrinsic_util;
@@ -286,8 +300,12 @@ void CodeGenCUDA::PrintType(DataType t, std::ostream& os) {  // NOLINT(*)
     if (t.is_scalar()) {
       os << "nv_bfloat16";
     } else if (lanes <= 8) {
-      ICHECK_EQ(lanes % 2, 0) << "only support even lane for half type";
-      os << "uint" << lanes / 2;
+      ICHECK_EQ(lanes % 2, 0) << "only support even lane for bfloat16 type";
+      if (lanes <= 4) {
+        os << "nv_bfloat16" << lanes;
+      } else {
+        os << "uint" << lanes / 2;
+      }
     } else {
       fail = true;
     }
@@ -522,7 +540,11 @@ void CodeGenCUDA::PrintVecElemLoad(const std::string& vec, DataType t, int i,
       os << "((half2*)(&(" << vec << "." << access[i / 2] << ")))->" << access[i % 2];
     }
   } else if (t.is_bfloat16()) {
-    os << "((nv_bfloat162*)(&(" << vec << "." << access[i / 2] << ")))->" << access[i % 2];
+    if (t.lanes() <= 4) {
+      os << vec << "." << access[i];
+    } else {
+      os << "((nv_bfloat162*)(&(" << vec << "." << access[i / 2] << ")))->" << access[i % 2];
+    }
   } else if (t.lanes() > 4 && t.lanes() <= 8) {
     std::string type_name;
     if (t.bits() == 16) {
@@ -574,8 +596,12 @@ void CodeGenCUDA::PrintVecElemStore(const std::string& vec, DataType t, int i,
     }
 
   } else if (t.is_bfloat16()) {
-    stream << "((nv_bfloat162*)(&(" << vec << "." << access[i / 2] << ")))->" << access[i % 2]
-           << " = " << value << ";\n";
+    if (t.lanes() <= 4) {
+      stream << vec << "." << access[i] << " = " << value << ";\n";
+    } else {
+      stream << "((nv_bfloat162*)(&(" << vec << "." << access[i / 2] << ")))->" << access[i % 2]
+             << " = " << value << ";\n";
+    }
   } else if (t.lanes() > 4 && t.lanes() <= 8) {
     std::string type_name;
     if (t.bits() == 16) {
@@ -676,12 +702,16 @@ void CodeGenCUDA::VisitExpr_(const CastNode* op, std::ostream& os) {
   // Emit simple C-style type conversion.
   if (from_ty.is_scalar()) return CodeGenC::VisitExpr_(op, os);
 
-  if (target_ty.code() == DataType::kE4M3Float || target_ty.code() == DataType::kE5M2Float ||
-      from_ty.code() == DataType::kE4M3Float || from_ty.code() == DataType::kE5M2Float) {
+  if (target_ty.code() == DataType::kFloat8_e4m3fn || target_ty.code() == DataType::kFloat8_e5m2 ||
+      from_ty.code() == DataType::kFloat8_e4m3fn || from_ty.code() == DataType::kFloat8_e5m2) {
     std::ostringstream val;
-    val << "(";
-    PrintType(target_ty, val);
-    val << ")(" << PrintExpr(op->value) << ")";
+    if (target_ty.code() == DataType::kBFloat && target_ty.lanes() == 2) {
+      val << "cast_to_nv_bfloat162(" << PrintExpr(op->value) << ")";
+    } else {
+      val << "(";
+      PrintType(target_ty, val);
+      val << ")(" << PrintExpr(op->value) << ")";
+    }
     os << val.str();
     return;
   }
@@ -1251,9 +1281,16 @@ void CodeGenCUDA::VisitExpr_(const BroadcastNode* op, std::ostream& os) {  // NO
     std::string v = PrintExpr(op->value);
     PrintVecConstructor(op->dtype, os);
     os << '(';
-    for (int i = 0; i < lanes / 2; ++i) {
-      if (i != 0) os << ", ";
-      os << "__pack_nv_bfloat162(" << v << ", " << v << ")";
+    if (lanes > 4) {
+      for (int i = 0; i < lanes / 2; ++i) {
+        if (i != 0) os << ", ";
+        os << "__pack_nv_bfloat162(" << v << ", " << v << ")";
+      }
+    } else {
+      for (int i = 0; i < lanes; ++i) {
+        if (i != 0) os << ", ";
+        os << v;
+      }
     }
     os << ')';
     return;
@@ -1373,7 +1410,7 @@ inline void PrintConst(const FloatImmNode* op, std::ostream& os, CodeGenCUDA* p)
     os << '(' << std::scientific << op->value << 'f' << ')';
     return;
   }
-  // Type code is kE5M2Float or kE4M4Float
+  // Type code is kFloat8_e5m2 or kE4M4Float
   if (op->dtype.is_float8()) {
     p->PrintType(op->dtype, os);
     os << '(' << std::scientific << op->value << 'f' << ')';
@@ -1527,15 +1564,10 @@ void CodeGenCUDA::PrintVecElemLoadExpr(DataType t, int i, const std::string& val
       PrintVecConstructor(t, os);
       os << '(';
     }
-    if (i % 2 == 0) {
-      os << "__pack_bfloat162(" << value;
+    if (i == t.lanes() - 1) {
+      os << value << ")";
     } else {
-      os << "," << value << ")";
-      if (i != t.lanes() - 1) {
-        os << ",";
-      } else {
-        os << ")";
-      }
+      os << value << ",";
     }
     return;
   }

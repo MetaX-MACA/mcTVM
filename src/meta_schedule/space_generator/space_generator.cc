@@ -71,7 +71,16 @@ String GetRuleKindFromTarget(const Target& target) {
     }
     return "cuda";
   }
-
+  if (target->kind->name == "maca") {
+    if (const auto* f_have_matrixcore =
+            tvm::runtime::Registry::Get("tvm_callback_maca_have_matrixcore")) {
+      bool have_matrixcore = (*f_have_matrixcore)();
+      if (have_matrixcore) {
+        return "maca-tensorcore";
+      }
+    }
+    return "maca";
+  }
   if (IsGPUTarget(target->kind->name)) {
     return "cuda";
   }
@@ -129,6 +138,14 @@ void SpaceGeneratorNode::InitializeWithTuneContext(const TuneContext& context) {
       default_sch_rules = ScheduleRule::DefaultARM("dotprod");
       default_postprocs = Postproc::DefaultCPUTensorization();
       default_mutator_probs = Mutator::DefaultLLVM();
+    } else if (kind == "maca") {
+      default_sch_rules = ScheduleRule::DefaultMACA();
+      default_postprocs = Postproc::DefaultMACA();
+      default_mutator_probs = Mutator::DefaultMACA();
+    } else if (kind == "maca-tensorcore") {
+      default_sch_rules = ScheduleRule::DefaultMACATensorCore();
+      default_postprocs = Postproc::DefaultMACATensorCore();
+      default_mutator_probs = Mutator::DefaultMACATensorCore();
     } else {
       LOG(FATAL) << "Unsupported kind: " << kind;
       throw;

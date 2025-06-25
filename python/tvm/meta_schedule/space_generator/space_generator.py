@@ -134,15 +134,15 @@ class SpaceGenerator(Object):
 ScheduleFnType = SpaceGenerator.ScheduleFnType
 ScheduleRuleType = Union[
     List["ScheduleRule"],
-    Literal["llvm", "cuda", "cuda-tensorcore", "hexagon", "from-target"],
+    Literal["llvm", "cuda", "cuda-tensorcore", "maca", "maca-tensorcore", "hexagon", "from-target"],
 ]
 PostprocType = Union[
     List["Postproc"],
-    Literal["llvm", "cuda", "cuda-tensorcore", "hexagon", "from-target"],
+    Literal["llvm", "cuda", "cuda-tensorcore", "maca", "maca-tensorcore", "hexagon", "from-target"],
 ]
 MutatorProbType = Union[
     Dict["Mutator", float],
-    Literal["llvm", "cuda", "cuda-tensorcore", "hexagon", "from-target"],
+    Literal["llvm", "cuda", "cuda-tensorcore", "maca", "maca-tensorcore", "hexagon", "from-target"],
 ]
 create = SpaceGenerator.create  # pylint: disable=invalid-name
 
