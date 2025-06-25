@@ -126,6 +126,10 @@ class VerifyGPUCodeNode : public PostprocNode {
         {"max_vthread", Integer(8)},
         {"max_vector_bytes", Integer(16)},
     };
+    if (context->target.value()->kind->name == "maca") {
+      this->target_constraints_.Set("max_local_memory_per_block",
+                                    Extract(this->target_, "max_local_memory_per_block"));
+    }
     thread_warp_size_ = Extract(this->target_, "thread_warp_size").IntValue();
   }
 

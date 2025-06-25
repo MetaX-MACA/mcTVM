@@ -57,9 +57,20 @@ HardwareParams HardwareParamsNode::GetDefaultHardwareParams(const Target& target
   const auto device_type = target->GetTargetDeviceType();
   if (device_type == kDLCPU) {
     return HardwareParams(tvm::runtime::threading::MaxConcurrency(), 64, 64, 0, 0, 0, 0, 0);
-  } else if (device_type == kDLCUDA || device_type == kDLROCM) {
+  } else if (device_type == kDLCUDA || device_type == kDLROCM || device_type == kDLMACA) {
     auto dev = Device{static_cast<DLDeviceType>(device_type), 0};
-    auto device_name = device_type == kDLCUDA ? "device_api.cuda" : "device_api.rocm";
+    String device_name = "";
+    switch (device_type) {
+      case kDLCUDA:
+        device_name = "device_api.cuda";
+        break;
+      case kDLROCM:
+        device_name = "device_api.rocm";
+        break;
+      case kDLMACA:
+        device_name = "device_api.maca";
+        break;
+    }
     auto func = tvm::runtime::Registry::Get(device_name);
     ICHECK(func != nullptr) << "Cannot find CUDA device_api in registry";
     auto device_api = static_cast<tvm::runtime::DeviceAPI*>(((*func)()).operator void*());

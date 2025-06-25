@@ -551,6 +551,11 @@ class SearchTask(Object):
             sch, args = self.compute_dag.apply_steps_from_state(inp.state)
             func = build(sch, args, "cuda")
             return func.imported_modules[0].get_source()
+        if print_mode == "maca":
+            assert self.target.kind.name == "maca"
+            sch, args = self.compute_dag.apply_steps_from_state(inp.state)
+            func = build(sch, args, self.target)
+            return func.imported_modules[0].get_source()
         raise ValueError(f"Invalid print_mode: {print_mode}")
 
     def __getstate__(self):

@@ -844,7 +844,7 @@ class Conv(OnnxOpConverter):
 def is_ort_version_greater_than(ver):
     import onnxruntime as ort
 
-    v11, v12, v13 = tuple(int(v) for v in ort.__version__.split("."))
+    v11, v12, v13 = tuple(int(v) for v in ort.__version__.split("+")[0].split("."))
     v21, v22, v23 = tuple(int(v) for v in ver.split("."))
 
     return (v11 > v21) or (v11 == v21 and v12 > v22) or ((v11, v12) == (v21, v22) and v13 > v23)
@@ -1854,6 +1854,21 @@ class QAttention(OrtAttentionBase, OnnxOpConverter):
         )
 
         return _expr.TupleWrapper(_expr.Tuple([output, present]), 2)
+
+
+class MultiHeadAttention(OrtAttentionBase, OnnxOpConverter):
+    """Operator converter for Attention from Microsoft onnxruntime contrib opset.
+
+    This is the multi-head attention mechanism used in bert models.
+    """
+
+    @classmethod
+    def _impl_v1(cls, inputs, attr, params):
+        query = inputs[0]
+        key = inputs[1]
+        value = inputs[2]
+        mask = inputs[3]
+        return _op.nn.multi_head_attention(query, key, value, mask)
 
 
 class Gemm(OnnxOpConverter):
@@ -6607,6 +6622,7 @@ def _get_convert_map(opset):
         "FastGelu": FastGelu.get_converter(opset),
         "BiasGelu": BiasGelu.get_converter(opset),
         "Mish": Mish.get_converter(opset),
+        "LayerNorm": LayerNormalization.get_converter(opset),
         "LayerNormalization": LayerNormalization.get_converter(opset),
         # TODO: We need a better way to handle different domains, in case
         # of name collisions. EmbedLayerNormalization, SkipLayerNormalization, and Attention
@@ -6615,6 +6631,7 @@ def _get_convert_map(opset):
         "SkipLayerNormalization": SkipLayerNormalization.get_converter(opset),
         "Attention": Attention.get_converter(opset),
         "QAttention": QAttention.get_converter(opset),
+        "MultiHeadAttentionV1": MultiHeadAttention.get_converter(opset),
         "Exp": Renamer("exp"),
         "Greater": Renamer("greater"),
         "GreaterOrEqual": Renamer("greater_equal"),

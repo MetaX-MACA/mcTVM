@@ -315,6 +315,15 @@ TIR_DEFINE_BUILTIN_FUNC(ptx_arrive_barrier_expect_tx)
 TIR_DEFINE_BUILTIN_FUNC(ptx_wait_barrier)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+// mxc builtin define
+TIR_DEFINE_BUILTIN_FUNC(mxc_ldg_predicator)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure));
+
+TIR_DEFINE_BUILTIN_FUNC(mxc_cp_async)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque))
+    .set_attr<TScriptDtypePrintLocation>("TScriptDtypePrintLocation",
+                                         Integer(ScriptDtypePrintLocation::kFirst));
+
 TIR_DEFINE_BUILTIN_FUNC(create_barriers)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 

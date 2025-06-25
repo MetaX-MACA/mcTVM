@@ -40,14 +40,13 @@ def _get_network(
     input_shape: List[int]
     layout: Optional[str]
     name, input_shape, layout = args
-
     if layout == "None":
         layout = None
-
     mod: IRModule
     if name in [
         "resnet_18",
         "resnet_50",
+        "resnet_34",
         "wide_resnet_50",
         "resnext_50",
         "mobilenet_v2",
@@ -56,6 +55,13 @@ def _get_network(
         "densenet_121",
         "resnet3d_18",
         "vgg_16",
+        "vgg_19",
+        "mobilenet_v3_large",
+        "squeezenet1_0",
+        "squeezenet1_1",
+        "alexnet",
+        "mnasnet1_0",
+        "shufflenet_v2_x1_0",
     ]:
         import torch  # type: ignore
         from torchvision import models  # type: ignore
@@ -63,25 +69,34 @@ def _get_network(
         assert layout is None or layout in ["NCHW", "NHWC"]
 
         params: Dict[str, Any] = {}
-        if name in ["resnet_18", "resnet_50"]:
+        if name in ["resnet_18", "resnet_50", "resnet_34"]:
             model = getattr(models, name.replace("_", ""))
         elif name == "wide_resnet_50":
             model = getattr(models, "wide_resnet50_2")
         elif name == "resnext_50":
             model = getattr(models, "resnext50_32x4d")
-        elif name == "mobilenet_v2":
+        elif name in ["mobilenet_v2", "shufflenet_v2_x1_0"]:
             model = getattr(models, name)
         elif name == "mobilenet_v3":
             model = getattr(models, name + "_large")
         elif name == "inception_v3":
             model = getattr(models, name)
             params["aux_logits"] = False
-        elif name == "densenet_121":
+        elif name in ["densenet_121"]:
             model = getattr(models, name.replace("_", ""))
         elif name == "resnet3d_18":
             model = models.video.r3d_18
-        elif name == "vgg_16":
+        elif name in ["vgg_16", "vgg_19"]:
             model = getattr(models, name.replace("_", ""))
+        elif name in [
+            "mobilenet_v3_large",
+            "squeezenet1_0",
+            "squeezenet1_1",
+            "alexnet",
+            "mnasnet1_0",
+            "shufflenet_v2_x1_0",
+        ]:
+            model = getattr(models, name)
         try:
             model = model(**params, weights=None)
         except TypeError:
@@ -173,7 +188,7 @@ def _get_network(
         mod, params = relay.testing.dcgan.get_workload(
             batch_size=batch_size,
             oshape=oshape,
-            layout="NHWC",
+            layout="NCHW",
         )
         inputs = ("data", [100], "float32")
     else:

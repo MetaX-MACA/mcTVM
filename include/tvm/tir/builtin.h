@@ -723,6 +723,10 @@ TVM_DLL const Op& ptx_arrive_barrier_expect_tx();
  */
 TVM_DLL const Op& ptx_wait_barrier();
 
+// mxc builtin definations
+TVM_DLL const Op& mxc_ldg_predicator();
+TVM_DLL const Op& mxc_cp_async();
+
 /*!
  * \brief tvm intrinsics to create N barriers
  *

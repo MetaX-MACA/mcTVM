@@ -229,8 +229,8 @@ class WarpIndexFinder : private StmtVisitor {
 // Mutator to change the read pattern
 class WarpAccessRewriter : protected StmtExprMutator {
  public:
-  explicit WarpAccessRewriter(int warp_size, arith::Analyzer* analyzer)
-      : warp_size_(warp_size), analyzer_(analyzer) {}
+  explicit WarpAccessRewriter(int warp_size, arith::Analyzer* analyzer, const TargetNode* target)
+      : warp_size_(warp_size), analyzer_(analyzer), target_(target) {}
   // Rewrite the allocate statement which transforms
   // warp memory to local memory.
   Stmt Rewrite(const AllocateNode* op) {
@@ -330,8 +330,8 @@ class WarpAccessRewriter : protected StmtExprMutator {
     if (analyzer_->CanProveEqual(group, warp_index_)) {
       return std::move(load);
     }
-
-    PrimExpr mask = Call(DataType::UInt(32), builtin::tvm_warp_activemask(), {});
+    DataType mask_dtype = target_->kind->name == "maca" ? DataType::UInt(64) : DataType::UInt(32);
+    PrimExpr mask = Call(mask_dtype, builtin::tvm_warp_activemask(), {});
     return Call(load.dtype(), builtin::tvm_warp_shuffle(), {mask, load, group, width_, warp_size_});
   }
 
@@ -380,6 +380,8 @@ class WarpAccessRewriter : protected StmtExprMutator {
   int warp_group_{0};
   // Internal analyzer
   arith::Analyzer* analyzer_;
+  // The target.
+  const TargetNode* target_ = nullptr;
 };
 
 // Bind bound information of variables to make analyzer more effective
@@ -418,8 +420,8 @@ class BindVarBoundInfo : public StmtVisitor {
 // Mutator to change the read pattern
 class WarpMemoryRewriter : private StmtMutator {
  public:
-  explicit WarpMemoryRewriter(int warp_size) : warp_size_(warp_size) {}
-
+  explicit WarpMemoryRewriter(int warp_size, const TargetNode* target)
+      : warp_size_(warp_size), target_(target) {}
   Stmt Rewrite(Stmt stmt) {
     if (warp_size_ == 1) return stmt;
     BindVarBoundInfo binder(&analyzer_);
@@ -436,7 +438,7 @@ class WarpMemoryRewriter : private StmtMutator {
     op = ret.as<AllocateNode>();
     if (GetPtrStorageScope(op->buffer_var) == "warp") {
       new_storage_scopes_[op->buffer_var.get()] = "local";
-      WarpAccessRewriter rewriter(warp_size_, &analyzer_);
+      WarpAccessRewriter rewriter(warp_size_, &analyzer_, target_);
       ret = rewriter.Rewrite(op);
     }
     return ret;
@@ -444,6 +446,8 @@ class WarpMemoryRewriter : private StmtMutator {
 
   int warp_size_{0};
   arith::Analyzer analyzer_;
+  // The target
+  const TargetNode* target_ = nullptr;
   // variable domain
   std::unordered_map<const VarNode*, Range> var_dom_;
 };
@@ -456,7 +460,8 @@ Pass LowerWarpMemory() {
     auto target = f->GetAttr<Target>(tvm::attr::kTarget);
     ICHECK(target.defined()) << "LowerWarpMemory: Require the target attribute";
     int warp_size = target.value()->GetAttr<Integer>("thread_warp_size", 1).value().IntValue();
-    WarpMemoryRewriter warp_memory_rewriter(warp_size);
+    const TargetNode* target_node = target.as<TargetNode>();
+    WarpMemoryRewriter warp_memory_rewriter(warp_size, target_node);
     auto stmt = warp_memory_rewriter.Rewrite(std::move(n->body));
     n->body = UpdatePointerStorageScope(warp_memory_rewriter.new_storage_scopes_)(stmt);
     return f;

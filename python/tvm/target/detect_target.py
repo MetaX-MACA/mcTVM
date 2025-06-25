@@ -46,6 +46,20 @@ def _detect_cuda(dev: Device) -> Target:
     )
 
 
+def _detect_maca(dev: Device) -> Target:
+    return Target(
+        {
+            "kind": "maca",
+            "max_num_threads": 1024,
+            "max_shared_memory_per_block": dev.max_shared_memory_per_block,
+            "max_threads_per_block": dev.max_threads_per_block,
+            "mcpu": "xcore1000",
+            "mtriple": "mxc-metax-macahca",
+            "thread_warp_size": dev.warp_size,
+        }
+    )
+
+
 def _detect_rocm(dev: Device) -> Target:
     return Target(
         {
@@ -141,6 +155,7 @@ def detect_target_from_device(dev: Union[str, Device]) -> Target:
 SUPPORT_DEVICE = {
     "cpu": _detect_cpu,
     "cuda": _detect_cuda,
+    "maca": _detect_maca,
     "metal": _detect_metal,
     "vulkan": _detect_vulkan,
     "rocm": _detect_rocm,

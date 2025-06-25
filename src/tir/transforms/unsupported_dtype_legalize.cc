@@ -700,13 +700,16 @@ namespace transform {
 
 bool CheckDataTypeSupport(const Target& target, const std::string& support_func_name) {
   bool has_native_support = false;
+  std::string version_func_name;
   if (target->kind->name == "cuda") {
-    if (const PackedFunc* get_cv =
-            tvm::runtime::Registry::Get("tvm.contrib.nvcc.get_compute_version")) {
-      std::string compute_version = (*get_cv)(target);
-      if (const PackedFunc* check_support = tvm::runtime::Registry::Get(support_func_name)) {
-        has_native_support = (*check_support)(compute_version);
-      }
+    version_func_name = "tvm.contrib.nvcc.get_compute_version";
+  } else if (target->kind->name == "maca") {
+    version_func_name = "tvm.contrib.mxcc.get_compute_version";
+  }
+  if (const PackedFunc* get_cv = tvm::runtime::Registry::Get(version_func_name)) {
+    std::string compute_version = (*get_cv)(target);
+    if (const PackedFunc* check_support = tvm::runtime::Registry::Get(support_func_name)) {
+      has_native_support = (*check_support)(compute_version);
     }
   }
   return has_native_support;
@@ -735,7 +738,13 @@ TVM_REGISTER_GLOBAL("tir.transform.BF16StorageLegalize").set_body_typed(BF16Stor
 Pass FP8ComputeLegalize(String promote_dtype_str) {
   auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
     auto target = f->GetAttr<Target>(tvm::attr::kTarget).value();
-    if (CheckDataTypeSupport(target, "tvm.contrib.nvcc.supports_fp8")) {
+    std::string support_func_name;
+    if (target->kind->name == "cuda") {
+      support_func_name = "tvm.contrib.nvcc.supports_fp8";
+    } else if (target->kind->name == "maca") {
+      support_func_name = "tvm.contrib.mxcc.supports_fp8";
+    }
+    if (CheckDataTypeSupport(target, support_func_name)) {
       return f;
     }
     return FP8ComputeLegalizer(DataType(String2DLDataType(promote_dtype_str))).Legalize(f);

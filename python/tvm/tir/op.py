@@ -711,14 +711,24 @@ def tvm_warp_shuffle_down(mask, value, offset, width, warp_size):
 
 
 def tvm_warp_activemask():
-    """Return a 32-bit mask indicates currently active threads in a calling warp.
+    """
+    Return a dtype mask indicates currently active threads in a calling warp.
+    If the target is "maca", the dtype of the result is uint64.
+    Otherwise, the default dtype is uint32
 
     Returns
     -------
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("uint32", "tir.tvm_warp_activemask")
+
+    from tvm.target import Target
+
+    if Target.current() and Target.current().kind.name == "maca":
+        dtype = "uint64"
+    else:
+        dtype = "uint32"
+    return call_intrin(dtype, "tir.tvm_warp_activemask")
 
 
 def type_annotation(dtype):

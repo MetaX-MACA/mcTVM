@@ -285,7 +285,7 @@ def find_rocm_path():
     (out, _) = proc.communicate()
     out = out.decode("utf-8").strip()
     if proc.returncode == 0:
-        return os.path.realpath(os.path.join(out, "../.."))
+        return os.path.realpath(os.path.join(out, "../../.."))
     rocm_path = "/opt/rocm"
     if os.path.exists(os.path.join(rocm_path, "bin/hipcc")):
         return rocm_path

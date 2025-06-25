@@ -136,7 +136,7 @@ class ExportedProgramImporter(BaseFXGraphImporter):
     def _select(self, node: fx.Node) -> relax.Var:
         x = self.env[node.args[0]]
         dim = node.args[1]
-        index = relax.const(node.args[2], "int64")
+        index = relax.PrimValue(node.args[2])
         return self.block_builder.emit(relax.op.take(x, index, dim))
 
     def _slice(self, node: fx.Node) -> relax.Var:
@@ -175,6 +175,7 @@ class ExportedProgramImporter(BaseFXGraphImporter):
             "log_softmax.int": self._log_softmax,
             "neg.default": self._unary_op(relax.op.negative),
             "relu.default": self._unary_op(relax.op.nn.relu),
+            "relu_.default": self._unary_op(relax.op.nn.relu),
             "round.default": self._round,
             "rsqrt.default": self._unary_op(relax.op.rsqrt),
             "sigmoid.default": self._unary_op(relax.op.sigmoid),
@@ -189,6 +190,7 @@ class ExportedProgramImporter(BaseFXGraphImporter):
             "triu.default": self._tril_triu(relax.op.triu),
             # binary
             "add.Tensor": self._binary_op(relax.op.add, operator.add),
+            "add_.Tensor": self._binary_op(relax.op.add, operator.add),
             "div.Tensor": self._binary_op(relax.op.divide, operator.truediv),
             "eq.Scalar": self._binary_op(relax.op.equal, operator.eq),
             "eq.Tensor": self._binary_op(relax.op.equal, operator.eq),
@@ -203,8 +205,10 @@ class ExportedProgramImporter(BaseFXGraphImporter):
             "pow.Tensor_Scalar": self._binary_op(relax.op.power, operator.pow),
             "pow.Tensor_Tensor": self._binary_op(relax.op.power, operator.pow),
             "sub.Tensor": self._binary_op(relax.op.subtract, operator.sub),
+            "rsub.Scalar": self._binary_op(relax.op.subtract, operator.sub, True),
             # neural network
             "_native_batch_norm_legit_no_training.default": self._batch_norm_legit_no_training,
+            "batch_norm.default": self._batch_norm_legit_no_training,
             "adaptive_avg_pool2d.default": self._adaptive_avg_pool2d,
             "addmm.default": self._addmm,
             "avg_pool2d.default": self._avg_pool2d,
@@ -260,8 +264,10 @@ class ExportedProgramImporter(BaseFXGraphImporter):
             "empty.memory_format": self._empty,
             "fill.Scalar": self._fill,
             "new_ones.default": self._new_ones,
+            "masked_fill.Scalar": self._masked_fill,
             # other
             "getitem": self._getitem,
+            "flatten.using_ints": self._flatten,
         }
 
     def create_input_vars(

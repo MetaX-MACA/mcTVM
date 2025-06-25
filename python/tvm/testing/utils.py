@@ -452,6 +452,7 @@ def _get_targets(target_names=None):
 
 
 DEFAULT_TEST_TARGETS = [
+    "maca -mtriple=mxc-metax-macahca -mcpu=xcore1000",
     "llvm",
     "cuda",
     "nvptx",
@@ -828,6 +829,7 @@ def _any_gpu_exists():
         or tvm.opencl().exist
         or tvm.metal().exist
         or tvm.vulkan().exist
+        or tvm.maca().exist
     )
 
 
@@ -938,6 +940,16 @@ requires_rocm = Feature(
     cmake_flag="USE_ROCM",
     target_kind_enabled="rocm",
     target_kind_hardware="rocm",
+    parent_features="gpu",
+)
+
+# Mark a test as requiring the maca runtime
+requires_maca = Feature(
+    "maca",
+    "MACA",
+    cmake_flag="USE_MACA",
+    target_kind_enabled="maca",
+    target_kind_hardware="maca",
     parent_features="gpu",
 )
 

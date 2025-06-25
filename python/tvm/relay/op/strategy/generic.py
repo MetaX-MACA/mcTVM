@@ -112,6 +112,7 @@ def schedule_reduce(attrs, outs, target):
 _op._schedule_injective = schedule_injective
 _op._schedule_reduce = schedule_reduce
 
+
 # concatenate
 @generic_func
 def schedule_concatenate(attrs, outs, target):
@@ -222,6 +223,7 @@ get_auto_scheduler_rewritten_layout = _ffi.get_global_func(
 get_meta_schedule_original_shape = _ffi.get_global_func(
     "relay.attrs.get_meta_schedule_original_shape"
 )
+
 
 # conv2d
 def wrap_compute_conv2d(
@@ -2095,3 +2097,22 @@ def wrap_compute_layout_transform(topi_compute, schedule_rule="None"):
         return [topi_compute(inputs[0], attrs.src_layout, attrs.dst_layout, schedule_rule)]
 
     return _compute_layout_transform
+
+
+def wrap_compute_multi_head_attention(topi_compute):
+
+    def _compute_multi_head_attention(attrs, inputs, _):
+        return [topi_compute(inputs[0], inputs[1], inputs[2], inputs[3], attrs.is_causal)]
+
+    return _compute_multi_head_attention
+
+
+@override_native_generic_func("multi_head_attention_strategy")
+def multi_head_attention_strategy(attrs, inputs, out_type, target):
+    strategy = _op.OpStrategy()
+    strategy.add_implementation(
+        wrap_compute_multi_head_attention(topi.nn.multi_head_attention),
+        wrap_topi_schedule(topi.generic.schedule_extern),
+        name="multi_head_attention.generic",
+    )
+    return strategy

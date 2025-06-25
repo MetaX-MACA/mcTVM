@@ -547,6 +547,8 @@ inline Device GetPreferredHostDevice(Device device) {
     return Device{DLDeviceType::kDLCUDAHost, 0};
   } else if (device.device_type == DLDeviceType::kDLROCM) {
     return Device{DLDeviceType::kDLROCMHost, 0};
+  } else if (device.device_type == DLDeviceType::kDLMACA) {
+    return Device{DLDeviceType::kDLMACAHost, 0};
   } else {
     // Fallback to CPU.
     return Device{DLDeviceType::kDLCPU, 0};

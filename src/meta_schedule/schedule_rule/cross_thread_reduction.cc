@@ -93,6 +93,9 @@ class CrossThreadReductionNode : public ScheduleRuleNode {
         }
       } else {
         thread_extent = GetThreadIdxExtentFromTrace(tmp_sch->trace().value());
+        if (!thread_extent.defined()) {
+          return {sch};
+        }
       }
       // Step 3.2. Do the compute-at.
       tmp_sch->ComputeAt(block_rv, target_loop, /*preserve_unit_loops=*/true);
@@ -150,11 +153,14 @@ class CrossThreadReductionNode : public ScheduleRuleNode {
                              tir::ExprRV* extent) {
     for (const tir::Instruction& inst : trace->insts) {
       if (inst->kind->name == "Split") {
-        int i = std::find(inst->outputs.begin(), inst->outputs.end(), loop) - inst->outputs.begin();
-        CHECK(inst->inputs[1 + i].defined())
-            << "ValueError: Extracting an extent which needs inference is not supported so far";
-        *extent = Downcast<tir::ExprRV>(inst->inputs[1 + i]);
-        return true;
+        auto iter = std::find(inst->outputs.begin(), inst->outputs.end(), loop);
+        if (iter != inst->outputs.end()) {
+          int i = std::distance(inst->outputs.begin(), iter);
+          CHECK(inst->inputs[1 + i].defined())
+              << "ValueError: Extracting an extent which needs inference is not supported so far";
+          *extent = Downcast<tir::ExprRV>(inst->inputs[1 + i]);
+          return true;
+        }
       }
     }
     return false;
@@ -174,8 +180,7 @@ class CrossThreadReductionNode : public ScheduleRuleNode {
         }
       }
     }
-    CHECK(false) << "ValueError: Unable to get the extent of \"threadIdx.x\"";
-    throw;
+    return extent;
   }
 
   /*!

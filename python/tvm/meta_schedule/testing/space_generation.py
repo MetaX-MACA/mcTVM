@@ -31,7 +31,7 @@ from tvm.tir.schedule.testing import verify_trace_roundtrip
 
 
 def get_rules(
-    kind: Literal["llvm", "cuda", "cuda-tensorcore", "hexagon"],
+    kind: Literal["llvm", "cuda", "cuda-tensorcore", "maca", "maca-tensorcore", "hexagon"],
     types: Union[type, Tuple[type, ...]],
 ) -> List[ms.ScheduleRule]:
     """Get default schedule rules"""
@@ -43,6 +43,7 @@ def structural_equal_no_gs(mod1: IRModule, mod2: IRModule) -> bool:
     """
     Checks structural equality but ignores global symbols
     """
+
     # for every function in the modules, remove global symbols from the attrs and then compare
     def remove_global_symbols(mod: IRModule) -> IRModule:
         stripped_mod = IRModule()
@@ -55,7 +56,7 @@ def structural_equal_no_gs(mod1: IRModule, mod2: IRModule) -> bool:
 
 
 def generate_design_space(
-    kind: Literal["llvm", "cuda", "cuda-tensorcore", "hexagon"],
+    kind: Literal["llvm", "cuda", "cuda-tensorcore", "maca", "maca-tensorcore", "hexagon"],
     mod: IRModule,
     target: Target,
     types: Union[type, Tuple[type, ...]],

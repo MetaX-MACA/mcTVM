@@ -172,6 +172,10 @@ class Postproc : public runtime::ObjectRef {
   TVM_DLL static Array<Postproc, void> DefaultHexagon();
   /*! \brief Create default postprocessors for Micro */
   TVM_DLL static Array<Postproc, void> DefaultMicro();
+  /*! \brief Create default postprocessors for MACA */
+  TVM_DLL static Array<Postproc, void> DefaultMACA();
+  /*! \brief Create default postprocessors for MACA with TensorCore */
+  TVM_DLL static Array<Postproc, void> DefaultMACATensorCore();
 
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(Postproc, ObjectRef, PostprocNode);
 };

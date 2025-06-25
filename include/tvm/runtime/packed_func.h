@@ -1472,6 +1472,10 @@ inline const char* DLDeviceType2Str(int type) {
       return "vpi";
     case kDLROCM:
       return "rocm";
+    case kDLMACA:
+      return "maca";
+    case kDLMACAHost:
+      return "maca_host";
     case kDLROCMHost:
       return "rocm_host";
     case kDLExtDev:

@@ -48,6 +48,14 @@
 # - /path/to/cuda: use specific path to cuda toolkit
 set(USE_CUDA OFF)
 
+# Whether enable MACA during compile,
+#
+# Possible values:
+# - ON: enable MACA with cmake's auto search
+# - OFF: disable MACA
+# - /path/to/maca: use specific path to maca toolkit
+set(USE_MACA ON)
+
 # Whether to enable NCCL support:
 # - ON: enable NCCL with cmake's auto search
 # - OFF: disable NCCL
@@ -164,7 +172,7 @@ set(USE_MICRO_STANDALONE_RUNTIME OFF)
 # - OFF: disable llvm, note this will disable CPU codegen
 #        which is needed for most cases
 # - /path/to/llvm-config: enable specific LLVM when multiple llvm-dev is available.
-set(USE_LLVM OFF)
+set(USE_LLVM llvm-config)
 
 # Whether use MLIR to help analyze, requires USE_LLVM is enabled
 # Possible values: ON/OFF
@@ -483,3 +491,8 @@ SET(CMAKE_VS_PLATFORM_NAME_DEFAULT "x64")
 
 # Set Windows Visual Studio default host (equivalent to -Thost=x64)
 SET(CMAKE_VS_PLATFORM_TOOLSET_HOST_ARCHITECTURE "x64")
+
+# Enable using flash-attn as a BYOC backend
+# Need to have USE_MACA=ON
+set(USE_FLASHATTN ON)
+set(USE_MCDNN ON)

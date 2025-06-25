@@ -37,9 +37,9 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
         self.env: Dict[fx.Node, relax.Expr] = {}
         self.params: Dict[torch.Tensor, relax.Expr] = {}
         self.block_builder: relax.BlockBuilder = None
-        self.convert_map: Dict[
-            Union[torch.nn.Module, str], Callable[[fx.Node], relax.Var]
-        ] = self.create_convert_map()
+        self.convert_map: Dict[Union[torch.nn.Module, str], Callable[[fx.Node], relax.Var]] = (
+            self.create_convert_map()
+        )
 
     ########## Utilities ##########
 
@@ -107,7 +107,8 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
         from torch import fx
 
         def convert(node: fx.Node) -> relax.Var:
-            return self.block_builder.emit(op(self.env[node.args[0]]))
+            input_var = self.env[node.args[0]]  # DataflowVar
+            return self.block_builder.emit(op(input_var))
 
         return convert
 
@@ -143,6 +144,13 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
         x0 = relax.op.add(x, relax.const(3, dtype))
         x1 = relax.op.clip(x0, 0, 6)
         return self.block_builder.emit(relax.op.divide(x1, relax.const(6, dtype)))
+
+    def _hardtanh(self, node: fx.Node) -> relax.Var:
+        args = self.retrieve_args(node)
+        x = args[0]
+        min_val = args[1]
+        max_val = args[2]
+        return self.block_builder.emit(relax.op.clip(x, min_val, max_val))
 
     def _hardswish(self, node: fx.Node) -> relax.Var:
         args = self.retrieve_args(node)
@@ -187,7 +195,9 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
 
     ########## Binary Ops ##########
 
-    def _binary_op(self, relax_op: Callable, intrinsic_op: Callable) -> Callable:
+    def _binary_op(
+        self, relax_op: Callable, intrinsic_op: Callable, reverse: bool = False
+    ) -> Callable:
         from torch import fx
 
         def convert(node: fx.Node) -> relax.Var:
@@ -207,7 +217,11 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
                 lhs, rhs = promote_binary_op_args(lhs, rhs)
                 return self.block_builder.emit(op(lhs, rhs))
 
-            lhs, rhs = self.retrieve_args(node)
+            if reverse:
+                rhs, lhs = self.retrieve_args(node)
+            else:
+                lhs, rhs = self.retrieve_args(node)
+
             if isinstance(lhs, relax.Var) or isinstance(rhs, relax.Var):
                 return call_binary_op(relax_op, lhs, rhs)
             elif isinstance(lhs, relax.expr.Constant):
@@ -469,7 +483,6 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
                 groups=groups,
                 data_layout="NCHW",
                 kernel_layout="OIHW",
-                out_dtype="float32",
             )
         )
 
@@ -631,7 +644,8 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
         x = args[0]
         weight = args[1]
         bias = args[2] if len(args) > 2 else None
-        return self.block_builder.emit(relax.op.linear(x, weight, bias, "float32"))
+        type = x.checked_type.dtype
+        return self.block_builder.emit(relax.op.linear(x, weight, bias, type))
 
     def _max_pool2d_impl(
         self,
@@ -663,7 +677,12 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
         padding = args[3] if len(args) > 3 else 0
         dilation = args[4] if len(args) > 4 else 1
         ceil_mode = args[5] if len(args) > 5 else False
-
+        # Here, the value of stride is taken from kwargs and assigned to stride
+        if "stride" in node.kwargs:
+            stride = node.kwargs.get("stride")
+        # There is no stride in the input parameters
+        # so it is set by default to be the same size as kernel_size in the subsequent operations
+        # but the stride printed by graph_module is 2
         return self._max_pool2d_impl(x, kernel_size, stride, padding, dilation, ceil_mode)
 
     def _scaled_dot_product_attention(self, node: fx.Node) -> relax.Var:
@@ -884,6 +903,13 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
         value = args[1] if isinstance(args[1], relax.Expr) else relax.const(args[1], dtype)
         return self.block_builder.emit(relax.op.full(x.struct_info.shape, value, dtype))
 
+    def _masked_fill(self, node: fx.Node) -> relax.Var:
+        x = self.env[node.args[0]]
+        mask = self.env[node.args[1]]
+        rx_value = relax.const(node.args[2])
+        values = self.block_builder.emit(relax.op.full_like(x, rx_value))
+        return self.block_builder.emit(relax.op.where(mask, values, x))
+
     def _new_ones(self, node: fx.Node) -> relax.Var:
         args = self.retrieve_args(node)
         self_var = args[0]
@@ -981,6 +1007,27 @@ class BaseFXGraphImporter(metaclass=abc.ABCMeta):
             return relax.const(x.data.numpy()[node.args[1]], dtype)
         else:
             assert False
+
+    def _flatten(self, node: fx.Node) -> relax.Var:
+        args = self.retrieve_args(node)
+        x = args[0]
+        start_dim = args[1]
+        out_shape = []
+        if isinstance(x, relax.Var):
+            assert isinstance(x.struct_info, relax.TensorStructInfo)
+            shape = x.struct_info.shape
+            assert start_dim < len(shape)
+            sum = 1
+            flag = False
+            for i, dim in enumerate(shape):
+                if i < start_dim:
+                    out_shape.append(dim)
+                else:
+                    flag = True
+                    sum = sum * dim
+            if flag:
+                out_shape.append(sum)
+        return self.block_builder.emit(relax.op.reshape(x, out_shape))
 
     @abc.abstractmethod
     def create_convert_map(

@@ -3821,3 +3821,8 @@ def conv2d_backward_weight(
         kernel_layout,
         out_dtype,
     )
+
+
+def multi_head_attention(query, key, value, mask, is_causal=False):
+    r"""Computes MultiHeadAttention."""
+    return _make.multi_head_attention(query, key, value, mask, is_causal)

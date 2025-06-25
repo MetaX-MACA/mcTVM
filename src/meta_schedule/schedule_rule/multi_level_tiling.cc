@@ -97,6 +97,22 @@ void MultiLevelTilingNode::InitializeWithTuneContext(const TuneContext& context)
       }
     }
   }
+  if (Optional<String> opt_xcore = context->target.value()->GetAttr<String>("mcpu")) {
+    std::string xcore = opt_xcore.value();
+    if (support::StartsWith(xcore, "xcore")) {
+      xcore = xcore.substr(5);
+      try {
+        if (std::stoi(xcore) >= 1000) {
+          // only stage = 4 & 5 is tested. all integer that is bigger than 2
+          // is theoretically feasible, but no guarantee for great performance.
+          this->stages = {4, 5};
+        }
+      } catch (const std::invalid_argument& e) {
+        LOG(WARNING) << "ValueError: Unable to parse `target.mcpu`: " << xcore
+                     << ". Details: " << e.what();
+      }
+    }
+  }
   logger = context->logger;
 }
 

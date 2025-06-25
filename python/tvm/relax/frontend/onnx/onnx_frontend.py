@@ -1831,6 +1831,23 @@ class Attention(OnnxOpConverter):
         return relax.Tuple([output, placeholder])
 
 
+class MultiHeadAttention(OnnxOpConverter):
+    """Convets an onnx MultiHeadAttention node into an equivalent Relax expression."""
+
+    @classmethod
+    def _impl_v1(cls, bb, inputs, attr, params):
+        query = bb.normalize(inputs[0])
+        key = bb.normalize(inputs[1])
+        value = bb.normalize(inputs[2])
+
+        if inputs[3] is not None:
+            bias = bb.normalize(inputs[3])
+        else:
+            bias = None
+        # Todo: add bias argument
+        return bb.emit(relax.op.nn.attention(query, key, value))
+
+
 class Identity(OnnxOpConverter):
     """Converts an onnx Identity node into an equivalent Relax expression."""
 
@@ -2522,7 +2539,7 @@ class OneHot(OnnxOpConverter):
         axis = attr.get("axis", -1)
         dtype = values.struct_info.dtype
         assert isinstance(depth, relax.Constant), "Only constant depth currently supported."
-        depth = depth.data.numpy().tolist()
+        depth = int(depth.data.numpy())
         assert isinstance(values, relax.Constant), "Only constant values currently supported."
         values = values.data.numpy().tolist()
         off_value, on_value = values
@@ -2604,15 +2621,11 @@ class DepthToSpace(OnnxOpConverter):
         mode = attr.get("mode", b"DCR").decode("utf-8")
         b, c, h, w = inputs[0].struct_info.shape
         if mode == "DCR":
-            x = relax.op.reshape(
-                inputs[0], (b, block_size, block_size, c // (block_size**2), h, w)
-            )
+            x = relax.op.reshape(inputs[0], (b, block_size, block_size, c // (block_size**2), h, w))
             x = relax.op.permute_dims(x, [0, 3, 4, 1, 5, 2])
             return relax.op.reshape(x, (b, c // (block_size**2), h * block_size, w * block_size))
         elif mode == "CRD":
-            x = relax.op.reshape(
-                inputs[0], (b, c // (block_size**2), block_size, block_size, h, w)
-            )
+            x = relax.op.reshape(inputs[0], (b, c // (block_size**2), block_size, block_size, h, w))
             x = relax.op.permute_dims(x, [0, 1, 4, 2, 5, 3])
             return relax.op.reshape(x, (b, c // (block_size**2), h * block_size, w * block_size))
         else:
@@ -2893,6 +2906,7 @@ def _get_convert_map():
         # Normalization
         "BatchNormalization": BatchNormalization,
         "LayerNormalization": LayerNormalization,
+        "LayerNorm": LayerNormalization,
         "SkipLayerNormalization": SkipLayerNormalization,
         "EmbedLayerNormalization": EmbedLayerNormalization,
         "InstanceNormalization": InstanceNormalization,
@@ -2915,6 +2929,7 @@ def _get_convert_map():
         "ConstantOfShape": ConstantOfShape,
         "Slice": Slice,
         "Attention": Attention,
+        "MultiHeadAttentionV1": MultiHeadAttention,
         "Pad": Pad,
         "Split": Split,
         "Tile": Tile,
