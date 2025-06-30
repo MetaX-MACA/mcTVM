@@ -24,10 +24,10 @@ name: CI
 on:
   push:
     branches:
-      - main
+      - v0.18.0
   pull_request:
     branches:
-      - main
+      - v0.18.0
   workflow_dispatch:
 
 concurrency:
@@ -36,7 +36,7 @@ concurrency:
 
 jobs:
   MacOS:
-    if: ${{ github.repository == 'apache/tvm' }}
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
     runs-on: macOS-latest
     steps:
       - uses: actions/checkout@v2
@@ -90,7 +90,7 @@ jobs:
 #          python -m pytest -v tests/python/contrib/test_rpc_server_device.py
 
   Windows:
-    if: ${{ github.repository == 'apache/tvm' }}
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
     runs-on: windows-2019
     steps:
       - uses: actions/checkout@v2
@@ -127,7 +127,7 @@ jobs:
   #         cmake --build . --config Release --target runtime
 
   Linux-Static-Runtime:
-    if: ${{ github.repository == 'apache/tvm' }}
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
     runs-on: Ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
@@ -144,7 +144,7 @@ jobs:
           cmake --build . --config Release --target runtime
 
   Android:
-    if: ${{ github.repository == 'apache/tvm' }}
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
     runs-on: Ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
