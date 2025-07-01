@@ -38,3 +38,4 @@ dependencies:
   - make
   - scipy
   - pillow
+  - py-lief=0.15
