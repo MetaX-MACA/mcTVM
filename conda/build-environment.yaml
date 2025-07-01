@@ -27,7 +27,7 @@ dependencies:
   - conda < 24.9.0
   - conda-build < 24.9.0
   - git
-  - llvmdev <=15
+  - llvmdev <=17
   - numpy
   - pytest
   - cython
