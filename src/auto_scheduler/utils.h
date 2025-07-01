@@ -29,6 +29,7 @@
 #include <tvm/tir/expr.h>
 
 #include <algorithm>
+#include <chrono>
 #include <deque>
 #include <exception>
 #include <future>
