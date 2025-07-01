@@ -30,6 +30,7 @@ cmake ^
       -DUSE_SORT=ON ^
       -DUSE_RANDOM=ON ^
       -DINSTALL_DEV=ON ^
+      -DUSE_PROFILER=OFF ^
       %SRC_DIR% || exit /b
 
 cd ..
