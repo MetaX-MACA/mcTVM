@@ -67,7 +67,7 @@ jobs:
 
   MetaXGPU:
     if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
-    runs-on: ub22-4c16g-mctvm
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v2
         with:
