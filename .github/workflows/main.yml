@@ -65,6 +65,26 @@ jobs:
           python -m pytest -v -s 'tests/python/codegen/test_target_codegen_gpu_common.py'
           python -m pytest -v -s 'tests/python/codegen/test_gpu_codegen_allreduce.py::test_allreduce_sum[dims0-metal]'
 
+  MetaXGPU:
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
+    runs-on: ub22-4c16g-mctvm
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: Set up environment
+        shell: bash -l {0}
+        run: >-
+          echo "Set up environment with MXMACA"
+      - name: Build
+        shell: bash -l {0}
+        run: >-
+          echo "Build mcTVM with USE_MACA=ON"
+      - name: Test
+        shell: bash -l {0}
+        run: >-
+          echo "Test cases for MetaXGPU"
+
   Windows:
     if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
     runs-on: windows-latest
