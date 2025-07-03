@@ -73,13 +73,14 @@ jobs:
         with:
           submodules: 'recursive'
       - name: Set up environment
+        uses: ./.github/actions/setup
+      - name: Conda Build
         shell: bash -l {0}
         run: >-
-          echo "Set up environment with MXMACA"
-      - name: Build
-        shell: bash -l {0}
-        run: >-
-          echo "Build mcTVM with USE_MACA=ON"
+          conda build --output-folder=conda/pkg conda/recipe &&
+          conda install tvm -c ./conda/pkg
+        env:
+          maca: True
       - name: Test
         shell: bash -l {0}
         run: >-
