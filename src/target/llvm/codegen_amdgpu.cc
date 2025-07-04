@@ -23,6 +23,7 @@
  */
 #ifdef TVM_LLVM_VERSION
 
+#include <cstdint>
 #include <llvm/ADT/SmallString.h>
 #include <llvm/IR/Attributes.h>
 #include <llvm/IR/CallingConv.h>
