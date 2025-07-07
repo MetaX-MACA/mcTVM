@@ -89,7 +89,7 @@ void TVMGraphExecutor_SetInput(TVMGraphExecutor* executor, const char* name, DLT
  * \brief get number of output tensors allocated.
  * \return integer number of output tensors allocated.
  */
-int TVMGraphExecutor_GetNumOutputs();
+int TVMGraphExecutor_GetNumOutputs(TVMGraphExecutor* executor);
 
 /*!
  * \brief Return NDArray for given output index.

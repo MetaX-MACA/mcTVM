@@ -24,6 +24,7 @@
 
 #include "codegen_blob.h"
 
+#include <cstdint>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringRef.h>
 #if LLVM_VERSION_MAJOR >= 17
