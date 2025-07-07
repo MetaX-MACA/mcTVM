@@ -84,7 +84,7 @@ jobs:
       - name: Test
         shell: bash -l {0}
         run: >-
-          echo "Test cases for MetaXGPU"
+          python -m pytest -v tests/python/all-platform-minimal-test
 
   Windows:
     if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
