@@ -126,7 +126,7 @@ int32_t TVMGraphExecutorModule_GetNumInputs(TVMValue* args, int* tcodes, int nar
     return kTvmErrorFunctionCallNumArguments;
   }
 
-  ret_values[0].v_int64 = TVMGraphExecutor_GetNumInputs();
+  ret_values[0].v_int64 = TVMGraphExecutor_GetNumInputs(graph_executor.executor);
   ret_tcodes[0] = kTVMArgInt;
   return 0;
 }
