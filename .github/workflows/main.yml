@@ -77,10 +77,8 @@ jobs:
       - name: Conda Build
         shell: bash -l {0}
         run: >-
-          conda build --output-folder=conda/pkg conda/recipe &&
+          conda build --output-folder=conda/pkg --variants "{maca: True}" conda/recipe &&
           conda install tvm -c ./conda/pkg
-        env:
-          maca: "True"
       - name: Test
         shell: bash -l {0}
         run: >-
