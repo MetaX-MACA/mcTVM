@@ -65,6 +65,25 @@ jobs:
           python -m pytest -v -s 'tests/python/codegen/test_target_codegen_gpu_common.py'
           python -m pytest -v -s 'tests/python/codegen/test_gpu_codegen_allreduce.py::test_allreduce_sum[dims0-metal]'
 
+  MetaXGPU:
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: Build
+        run: |
+          rm -rf build
+          mkdir -p build
+          cp cmake/config.cmake build
+          cmake -B build
+          make -j -C build
+      - name: Test
+        shell: bash -l {0}
+        run: >-
+          PYTHONPATH=python python3 -m pytest -v tests/python/all-platform-minimal-test
+
   Windows:
     if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
     runs-on: windows-latest
