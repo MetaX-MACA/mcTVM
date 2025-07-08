@@ -77,8 +77,11 @@ jobs:
       - name: Conda Build
         shell: bash -l {0}
         run: >-
-          conda build --output-folder=conda/pkg --variants "{maca: True}" conda/recipe &&
-          conda install tvm -c ./conda/pkg
+          rm -rf build || true
+          mkdir -p build
+          cp cmake/config.cmake build
+          cmake -B build
+          make -j -C build
       - name: Test
         shell: bash -l {0}
         run: >-
