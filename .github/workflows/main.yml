@@ -74,10 +74,9 @@ jobs:
           submodules: 'recursive'
       - name: Set up environment
         uses: ./.github/actions/setup
-      - name: Conda Build
-        shell: bash -l {0}
-        run: >-
-          rm -rf build || true
+      - name: Build
+        run: |
+          rm -rf build
           mkdir -p build
           cp cmake/config.cmake build
           cmake -B build
