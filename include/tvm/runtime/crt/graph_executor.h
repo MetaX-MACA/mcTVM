@@ -75,7 +75,7 @@ int TVMGraphExecutor_GetInputIndex(TVMGraphExecutor* executor, const char* name)
  * \brief get number of input tensors allocated.
  * \return integer number of tensors available to use.
  */
-int TVMGraphExecutor_GetNumInputs(TVMGraphExecutor* executor);
+int TVMGraphExecutor_GetNumInputs();
 
 /*!
  * \brief set input to the graph based on name.
@@ -89,7 +89,7 @@ void TVMGraphExecutor_SetInput(TVMGraphExecutor* executor, const char* name, DLT
  * \brief get number of output tensors allocated.
  * \return integer number of output tensors allocated.
  */
-int TVMGraphExecutor_GetNumOutputs(TVMGraphExecutor* executor);
+int TVMGraphExecutor_GetNumOutputs();
 
 /*!
  * \brief Return NDArray for given output index.

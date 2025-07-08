@@ -39,11 +39,6 @@ if [ "$cuda" == "True" ]; then
     TOOLCHAIN_OPT=""
 fi
 
-# enable compile with USE_MACA=ON
-maca=${maca:-False}
-
-[ "${maca}" == "True" ] && GPU_OPT="-DUSE_MACA=ON"
-
 # remove touched cmake config
 rm -f config.cmake
 rm -rf build || true
