@@ -42,7 +42,7 @@ fi
 # enable compile with USE_MACA=ON
 maca=${maca:-False}
 
-[ "${cuda}" == "True" ] && GPU_OPT="-DUSE_MACA"
+[ "${maca}" == "True" ] && GPU_OPT="-DUSE_MACA=ON"
 
 # remove touched cmake config
 rm -f config.cmake

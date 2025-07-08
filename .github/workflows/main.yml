@@ -80,7 +80,7 @@ jobs:
           conda build --output-folder=conda/pkg conda/recipe &&
           conda install tvm -c ./conda/pkg
         env:
-          maca: True
+          maca: "True"
       - name: Test
         shell: bash -l {0}
         run: >-
