@@ -144,3 +144,22 @@ jobs:
  #       with:
  #         name: android_rpc-debug.apk
  #         path: ./apps/android_rpc/app/build/outputs/apk/debug/app-debug.apk
+
+  MetaXGPU:
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: Build
+        run: |
+          rm -rf build
+          mkdir -p build
+          cp cmake/config.cmake build
+          cmake -B build
+          make -j -C build
+      - name: Test
+        shell: bash -l {0}
+        run: >-
+          TVM_TEST_TARGETS="llvm" PYTHONPATH=python python3 -m pytest -v tests/python/all-platform-minimal-test
