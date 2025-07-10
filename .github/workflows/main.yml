@@ -77,12 +77,13 @@ jobs:
           rm -rf build
           mkdir -p build
           cp cmake/config.cmake build
+          echo "set(USE_MACA ON)" >> build/config.cmake
           cmake -B build
           make -j -C build
       - name: Test
         shell: bash -l {0}
         run: >-
-          PYTHONPATH=python python3 -m pytest -v tests/python/all-platform-minimal-test
+          TVM_TEST_TARGETS="llvm" PYTHONPATH=python python3 -m pytest -v tests/python/all-platform-minimal-test
 
   Windows:
     if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
