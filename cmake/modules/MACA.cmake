@@ -15,6 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
+# update 3rdparty/dlpack/include/dlpack/dlpack.h for adding kDLMACA/kDLMACAHost
+set(dlpack_header "${CMAKE_SOURCE_DIR}/3rdparty/dlpack/include/dlpack/dlpack.h")
+file(READ "${dlpack_header}" FILE_CONTENTS)
+if(NOT FILE_CONTENTS MATCHES ".*kDLMACA.*")
+  string(REPLACE "} DLDeviceType;" "  kDLMACA,\n  kDLMACAHost,\n} DLDeviceType;" NEW_CONTENTS "${FILE_CONTENTS}")
+  file(WRITE "${dlpack_header}" "${NEW_CONTENTS}")
+endif()
+
 # MACA Module
 find_maca(${USE_MACA})
 

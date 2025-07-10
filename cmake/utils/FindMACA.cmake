@@ -59,23 +59,3 @@ macro(find_maca use_maca)
     message(STATUS "Found MACA_FLASHATTN_LIBRARY=" ${MACA_FLASHATTN_LIBRARY})
   endif(MACA_FOUND)
 endmacro(find_maca)
-
-function(add_maca_defination_of_dlpack)
-  # update 3rdparty/dlpack/include/dlpack/dlpack.h
-  set(dlpack_header "${CMAKE_SOURCE_DIR}/3rdparty/dlpack/include/dlpack/dlpack.h")
-  file(READ "${dlpack_header}" FILE_CONTENTS)
-
-  # if exists then return
-  if(FILE_CONTENTS MATCHES ".*kDLMACA.*")
-      message(STATUS "MACA defination already exists in ${dlpack_header}, skipping insertion.")
-      return()
-  endif()
-
-  # add maca
-  string(REPLACE "} DLDeviceType;" "  kDLMACA,\n  kDLMACAHost,\n} DLDeviceType;" NEW_CONTENTS "${FILE_CONTENTS}")
-  if(NOT NEW_CONTENTS MATCHES ".*kDLMACA.*")
-      message(FATAL_ERROR "inserting MACA defination failed, \"} DLDeviceType;\" may not found")
-      return()
-  endif()
-  file(WRITE "${dlpack_header}" "${NEW_CONTENTS}")
-endfunction()
