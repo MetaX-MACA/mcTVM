@@ -36,3 +36,16 @@ dependencies:
   - make
   - scipy
   - pillow
+  - gtest
+  - gmock
+  - decorator
+  - attrs
+  - typing-extensions
+  - psutil
+  - scipy
+  - tornado
+  - xgboost
+  - junitparser
+  - pytest-xdist
+  - cloudpickle
+
