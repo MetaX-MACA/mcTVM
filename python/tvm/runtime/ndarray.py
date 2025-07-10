@@ -45,6 +45,7 @@ from ..ffi import (
     ext_dev,
     hexagon,
     webgpu,
+    maca,
 )
 
 

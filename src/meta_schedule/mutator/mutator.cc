@@ -76,6 +76,15 @@ Map<Mutator, FloatImm> Mutator::DefaultHexagon() {
       {Mutator::MutateParallel(/*max_jobs_per_core=*/16), FloatImm(DataType::Float(64), 0.02)}};
 }
 
+Map<Mutator, FloatImm> Mutator::DefaultMACA() {
+  return Map<Mutator, FloatImm>{
+      {Mutator::MutateTileSize(), FloatImm(DataType::Float(64), 0.9)},
+      {Mutator::MutateUnroll(), FloatImm(DataType::Float(64), 0.08)},
+      {Mutator::MutateThreadBinding(), FloatImm(DataType::Float(64), 0.02)}};
+}
+
+Map<Mutator, FloatImm> Mutator::DefaultMACAWMMA() { return Mutator::DefaultMACA(); }
+
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     .set_dispatch<PyMutatorNode>([](const ObjectRef& n, ReprPrinter* p) {
       const auto* self = n.as<PyMutatorNode>();
@@ -108,6 +117,9 @@ TVM_FFI_REGISTER_GLOBAL("meta_schedule.MutatorDefaultCUDATensorCore")
     .set_body_typed(Mutator::DefaultCUDATensorCore);
 TVM_FFI_REGISTER_GLOBAL("meta_schedule.MutatorDefaultHexagon")
     .set_body_typed(Mutator::DefaultHexagon);
+TVM_FFI_REGISTER_GLOBAL("meta_schedule.MutatorDefaultMACA").set_body_typed(Mutator::DefaultMACA);
+TVM_FFI_REGISTER_GLOBAL("meta_schedule.MutatorDefaultMACAWMMA")
+    .set_body_typed(Mutator::DefaultMACAWMMA);
 
 }  // namespace meta_schedule
 }  // namespace tvm

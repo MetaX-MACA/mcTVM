@@ -238,6 +238,20 @@ def webgpu(dev_id=0):
     return device(Device.kDLWebGPU, dev_id)
 
 
+def maca(dev_id=0):
+    """Construct a MACA device
+    Parameters
+    ----------
+    dev_id : int, optional
+        The integer device id
+    Returns
+    -------
+    dev : Device
+        The created device
+    """
+    return Device(Device.kDLMACA, dev_id)
+
+
 __all__ = [
     "from_dlpack",
     "NDArray",
@@ -252,4 +266,5 @@ __all__ = [
     "ext_dev",
     "hexagon",
     "webgpu",
+    "maca",
 ]

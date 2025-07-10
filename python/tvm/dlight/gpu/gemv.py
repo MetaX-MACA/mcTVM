@@ -315,7 +315,7 @@ class GEMV(GPUScheduleRule):
         TAG_S, TAG_R = "threadIdx.y", "threadIdx.x"
         SUPPORT_WARP_SHUFFLE = False
         VEC_LOAD = 1
-        if target.kind.name == "cuda":
+        if target.kind.name == "cuda" or target.kind.name == "maca":
             VEC_C = 4
             LOAD_V_SHARED = True
             LOAD_V_VEC = 8

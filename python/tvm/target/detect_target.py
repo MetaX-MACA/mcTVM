@@ -107,6 +107,20 @@ def _detect_cpu(dev: Device) -> Target:  # pylint: disable=unused-argument
     )
 
 
+def _detect_maca(dev: Device) -> Target:
+    return Target(
+        {
+            "kind": "maca",
+            "max_num_threads": 1024,
+            "max_shared_memory_per_block": dev.max_shared_memory_per_block,
+            "max_threads_per_block": dev.max_threads_per_block,
+            "mcpu": "xcore1000",
+            "mtriple": "mxc-metax-macahca",
+            "thread_warp_size": dev.warp_size,
+        }
+    )
+
+
 def detect_target_from_device(dev: Union[str, Device]) -> Target:
     """Detects Target associated with the given device. If the device does not exist,
     there will be an Error.
@@ -145,4 +159,5 @@ SUPPORT_DEVICE = {
     "vulkan": _detect_vulkan,
     "rocm": _detect_rocm,
     "opencl": _detect_opencl,
+    "maca": _detect_maca,
 }

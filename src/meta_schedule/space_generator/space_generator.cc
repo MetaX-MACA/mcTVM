@@ -69,6 +69,15 @@ String GetRuleKindFromTarget(const Target& target) {
     }
     return "cuda";
   }
+  if (target->kind->name == "maca") {
+    if (const auto* f_have_wmma = tvm::runtime::Registry::Get("tvm_callback_maca_have_wmma")) {
+      bool have_wmma = (*f_have_wmma)();
+      if (have_wmma) {
+        return "maca-wmma";
+      }
+    }
+    return "maca";
+  }
 
   if (IsGPUTarget(target->kind->name)) {
     return "cuda";
@@ -123,6 +132,14 @@ void SpaceGeneratorNode::InitializeWithTuneContext(const TuneContext& context) {
       default_sch_rules = ScheduleRule::DefaultARM("dotprod");
       default_postprocs = Postproc::DefaultCPUTensorization();
       default_mutator_probs = Mutator::DefaultLLVM();
+    } else if (kind == "maca") {
+      default_sch_rules = ScheduleRule::DefaultMACA();
+      default_postprocs = Postproc::DefaultMACA();
+      default_mutator_probs = Mutator::DefaultMACA();
+    } else if (kind == "maca-wmma") {
+      default_sch_rules = ScheduleRule::DefaultMACAWMMA();
+      default_postprocs = Postproc::DefaultMACAWMMA();
+      default_mutator_probs = Mutator::DefaultMACAWMMA();
     } else {
       LOG(FATAL) << "Unsupported kind: " << kind;
       throw;

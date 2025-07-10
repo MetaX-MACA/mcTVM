@@ -100,6 +100,31 @@ Array<Postproc> Postproc::DefaultHexagon() {
   };
 }
 
+Array<Postproc> Postproc::DefaultMACA() {
+  return Array<Postproc>{
+      Postproc::DisallowDynamicLoop(),
+      Postproc::RewriteCooperativeFetch(),
+      Postproc::RewriteUnboundBlock(/*max_threadblocks=*/256),
+      Postproc::RewriteParallelVectorizeUnroll(),
+      Postproc::RewriteReductionBlock(),
+      Postproc::VerifyGPUCode(),
+  };
+}
+
+Array<Postproc> Postproc::DefaultMACAWMMA() {
+  return Array<Postproc>{
+      Postproc::DisallowDynamicLoop(),
+      Postproc::RewriteCooperativeFetch(),
+      Postproc::RewriteUnboundBlock(/*max_threadblocks=*/256),
+      Postproc::RewriteParallelVectorizeUnroll(),
+      Postproc::RewriteReductionBlock(),
+      Postproc::VerifyGPUCode(),
+      // RewriteTensorize is relatively expensive and it doesn't affect the validity of a sample, so
+      // run it only on samples that have passed VerifyGPUCode.
+      Postproc::RewriteTensorize(/*vectorize_init_loop=*/false),
+  };
+}
+
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     .set_dispatch<PyPostprocNode>([](const ObjectRef& n, ReprPrinter* p) {
       const auto* self = n.as<PyPostprocNode>();
@@ -128,6 +153,9 @@ TVM_FFI_REGISTER_GLOBAL("meta_schedule.PostprocDefaultCUDATensorCore")
     .set_body_typed(Postproc::DefaultCUDATensorCore);
 TVM_FFI_REGISTER_GLOBAL("meta_schedule.PostprocDefaultHexagon")
     .set_body_typed(Postproc::DefaultHexagon);
+TVM_FFI_REGISTER_GLOBAL("meta_schedule.PostprocDefaultMACA").set_body_typed(Postproc::DefaultMACA);
+TVM_FFI_REGISTER_GLOBAL("meta_schedule.PostprocDefaultMACAWMMA")
+    .set_body_typed(Postproc::DefaultMACAWMMA);
 
 }  // namespace meta_schedule
 }  // namespace tvm

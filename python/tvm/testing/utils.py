@@ -460,6 +460,7 @@ DEFAULT_TEST_TARGETS = [
     "metal",
     "rocm",
     "hexagon",
+    "maca",
 ]
 
 
@@ -826,6 +827,7 @@ def _any_gpu_exists():
         or tvm.opencl().exist
         or tvm.metal().exist
         or tvm.vulkan().exist
+        or tvm.maca().exist
     )
 
 
@@ -1006,6 +1008,16 @@ requires_hexagon = Feature(
     compile_time_check=hexagon._compile_time_check,
     run_time_check=hexagon._run_time_check,
     parent_features="llvm",
+)
+
+# Mark a test as requiring the maca runtime
+requires_maca = Feature(
+    "maca",
+    "MACA",
+    cmake_flag="USE_MACA",
+    target_kind_enabled="maca",
+    target_kind_hardware="maca",
+    parent_features="gpu",
 )
 
 

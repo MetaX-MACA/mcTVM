@@ -84,3 +84,9 @@ repos:
             language: system
             always_run: true
             pass_filenames: false
+        -   id: update notice
+            name: Updating NOTICE ...
+            entry: python3 tests/scripts/notice.py c6969d7238c8010615e4cf07151821c0c5118cda
+            language: system
+            always_run: true
+            pass_filenames: false

@@ -228,8 +228,8 @@ class WarpIndexFinder : private StmtVisitor {
 // Mutator to change the read pattern
 class WarpAccessRewriter : protected StmtExprMutator {
  public:
-  explicit WarpAccessRewriter(int warp_size, arith::Analyzer* analyzer)
-      : warp_size_(warp_size), analyzer_(analyzer) {}
+  explicit WarpAccessRewriter(int warp_size, arith::Analyzer* analyzer, const TargetNode* target)
+      : warp_size_(warp_size), analyzer_(analyzer), target_(target) {}
   // Rewrite the allocate statement which transforms
   // warp memory to local memory.
   Stmt Rewrite(const AllocateNode* op) {
@@ -328,7 +328,8 @@ class WarpAccessRewriter : protected StmtExprMutator {
       return load;
     }
 
-    PrimExpr mask = Call(DataType::UInt(32), builtin::tvm_warp_activemask(), {});
+    DataType mask_dtype = target_->kind->name == "maca" ? DataType::UInt(64) : DataType::UInt(32);
+    PrimExpr mask = Call(mask_dtype, builtin::tvm_warp_activemask(), {});
     return Call(load.dtype(), builtin::tvm_warp_shuffle(), {mask, load, group, width_, warp_size_});
   }
 
@@ -377,6 +378,8 @@ class WarpAccessRewriter : protected StmtExprMutator {
   int warp_group_{0};
   // Internal analyzer
   arith::Analyzer* analyzer_;
+  // The target.
+  const TargetNode* target_ = nullptr;
 };
 
 // Bind bound information of variables to make analyzer more effective
@@ -415,7 +418,8 @@ class BindVarBoundInfo : public StmtVisitor {
 // Mutator to change the read pattern
 class WarpMemoryRewriter : private StmtMutator {
  public:
-  explicit WarpMemoryRewriter(int warp_size) : warp_size_(warp_size) {}
+  explicit WarpMemoryRewriter(int warp_size, const TargetNode* target)
+      : warp_size_(warp_size), target_(target) {}
 
   Stmt Rewrite(Stmt stmt) {
     if (warp_size_ == 1) return stmt;
@@ -433,7 +437,7 @@ class WarpMemoryRewriter : private StmtMutator {
     op = ret.as<AllocateNode>();
     if (GetPtrStorageScope(op->buffer_var) == "warp") {
       new_storage_scopes_[op->buffer_var.get()] = "local";
-      WarpAccessRewriter rewriter(warp_size_, &analyzer_);
+      WarpAccessRewriter rewriter(warp_size_, &analyzer_, target_);
       ret = rewriter.Rewrite(op);
     }
     return ret;
@@ -443,6 +447,8 @@ class WarpMemoryRewriter : private StmtMutator {
   arith::Analyzer analyzer_;
   // variable domain
   std::unordered_map<const VarNode*, Range> var_dom_;
+  // The target
+  const TargetNode* target_ = nullptr;
 };
 
 namespace transform {

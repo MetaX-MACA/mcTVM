@@ -140,6 +140,10 @@ class Mutator : public runtime::ObjectRef {
   TVM_DLL static Map<Mutator, FloatImm, void> DefaultCUDATensorCore();
   /*! \brief Create default mutators for Hexagon */
   TVM_DLL static Map<Mutator, FloatImm, void> DefaultHexagon();
+  /*! \brief Create default mutators for MACA */
+  TVM_DLL static Map<Mutator, FloatImm, void> DefaultMACA();
+  /*! \brief Create default mutators for MACA with WMMA */
+  TVM_DLL static Map<Mutator, FloatImm, void> DefaultMACAWMMA();
 
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(Mutator, ObjectRef, MutatorNode);
 };

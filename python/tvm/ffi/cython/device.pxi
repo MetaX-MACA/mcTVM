@@ -58,6 +58,8 @@ cdef class Device:
     kDLOneAPI = 14
     kDLWebGPU = 15
     kDLHexagon = 16
+    kDLMACA = 17
+    kDLMACAHost = 18
 
     DEVICE_TYPE_TO_NAME = {
       kDLCPU: "cpu",
@@ -74,6 +76,8 @@ cdef class Device:
       kDLOneAPI: "oneapi",
       kDLWebGPU: "webgpu",
       kDLHexagon: "hexagon",
+      kDLMACA: "maca",
+      kDLMACAHost: "maca_host",
     }
 
     DEVICE_NAME_TO_TYPE = {
@@ -95,6 +99,7 @@ cdef class Device:
         "ext_dev": kDLExtDev,
         "hexagon": kDLHexagon,
         "webgpu": kDLWebGPU,
+        "maca": kDLMACA,
     }
 
     def __init__(self, device_type_or_name, device_id = None):
