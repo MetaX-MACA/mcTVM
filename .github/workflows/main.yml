@@ -36,7 +36,7 @@ concurrency:
 
 jobs:
   MacOS:
-    if: ${{ github.repository == 'apache/tvm' }}
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
     runs-on: macOS-latest
     steps:
       - uses: actions/checkout@v2
@@ -90,7 +90,7 @@ jobs:
 #          python -m pytest -v tests/python/contrib/test_rpc_server_device.py
 
   Windows:
-    if: ${{ github.repository == 'apache/tvm' }}
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v2
