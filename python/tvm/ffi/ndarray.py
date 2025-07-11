@@ -249,7 +249,7 @@ def maca(dev_id=0):
     dev : Device
         The created device
     """
-    return Device(Device.kDLMACA, dev_id)
+    return device(Device.kDLMACA, dev_id)
 
 
 __all__ = [

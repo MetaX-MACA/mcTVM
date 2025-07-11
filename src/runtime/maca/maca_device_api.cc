@@ -236,15 +236,16 @@ MACAThreadEntry::MACAThreadEntry() : pool(kDLMACA, MACADeviceAPI::Global()) {}
 
 MACAThreadEntry* MACAThreadEntry::ThreadLocal() { return MACAThreadStore::Get(); }
 
-TVM_REGISTER_GLOBAL("device_api.maca").set_body_packed([](ffi::PackedArgs args, ffi::Any* rv) {
+TVM_FFI_REGISTER_GLOBAL("device_api.maca").set_body_packed([](ffi::PackedArgs args, ffi::Any* rv) {
   DeviceAPI* ptr = MACADeviceAPI::Global();
   *rv = static_cast<void*>(ptr);
 });
 
-TVM_REGISTER_GLOBAL("device_api.maca_host").set_body_packed([](ffi::PackedArgs args, ffi::Any* rv) {
-  DeviceAPI* ptr = MACADeviceAPI::Global();
-  *rv = static_cast<void*>(ptr);
-});
+TVM_FFI_REGISTER_GLOBAL("device_api.maca_host")
+    .set_body_packed([](ffi::PackedArgs args, ffi::Any* rv) {
+      DeviceAPI* ptr = MACADeviceAPI::Global();
+      *rv = static_cast<void*>(ptr);
+    });
 
 class MACATimerNode : public TimerNode {
  public:
@@ -275,7 +276,7 @@ class MACATimerNode : public TimerNode {
 
 TVM_REGISTER_OBJECT_TYPE(MACATimerNode);
 
-TVM_REGISTER_GLOBAL("profiling.timer.maca").set_body_typed([](Device dev) {
+TVM_FFI_REGISTER_GLOBAL("profiling.timer.maca").set_body_typed([](Device dev) {
   return Timer(make_object<MACATimerNode>());
 });
 
