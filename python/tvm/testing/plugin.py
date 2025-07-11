@@ -303,6 +303,8 @@ def _target_to_requirement(target):
         return utils.requires_llvm.marks()
     if target.kind.name == "hexagon":
         return utils.requires_hexagon.marks()
+    if target.kind.name == "maca":
+        return utils.requires_maca.marks()
 
     return []
 

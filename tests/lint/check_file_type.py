@@ -125,6 +125,7 @@ ALLOW_SPECIFIC_FILE = {
     "DISCLAIMER",
     "Jenkinsfile",
     "mypy.ini",
+    "imgs/logo.png",
     # cargo config
     "rust/runtime/tests/test_wasm32/.cargo/config",
     "rust/tvm-graph-rt/tests/test_wasm32/.cargo/config",

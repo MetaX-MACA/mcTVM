@@ -290,7 +290,7 @@ class ThreadAllreduceBuilder final : public StmtExprMutator {
     PrimExpr zero_index = make_const(reduce_index->dtype, 0);
     if (IsWarpReduction(types, group_extent, reduce_extent, contiguous_reduce_extent)) {
       std::vector<PrimExpr> reduce_results;
-      DataType mask_dtype = DataType::UInt(32);
+      DataType mask_dtype = target_->kind->name == "maca" ? DataType::UInt(64) : DataType::UInt(32);
       PrimExpr mask = Call(mask_dtype, builtin::tvm_warp_activemask(), {});
 
       if (reduce_extent <= warp_size_) {
@@ -716,7 +716,7 @@ class ThreadAllreduceBuilder final : public StmtExprMutator {
   bool IsWarpReduction(const std::vector<DataType>& types, int group_extent, int reduce_extent,
                        int contiguous_reduce_extent) {
     if ((target_->kind->name != "cuda") && (target_->kind->name != "rocm") &&
-        (target_->kind->name != "metal")) {
+        (target_->kind->name != "metal") && (target_->kind->name != "maca")) {
       return false;
     }
 

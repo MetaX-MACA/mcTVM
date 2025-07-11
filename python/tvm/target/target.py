@@ -159,7 +159,7 @@ class Target(Object):
         ----------
         dev : Union[str, Device]
             The device to detect the target for.
-            Supported device types: ["cuda", "metal", "rocm", "vulkan", "opencl", "cpu"]
+            Supported device types: ["cuda", "metal", "rocm", "vulkan", "opencl", "cpu", "maca"]
 
         Returns
         -------
@@ -845,6 +845,19 @@ def adreno(model="unknown", options=None, clml=False):
         opts = ["-device=adreno", "--keys=adreno,opencl,gpu", "-model=%s" % model]
     opts = _merge_opts(opts, options)
     return Target(" ".join(["opencl"] + opts))
+
+
+def maca(model="unknown", options=None):
+    """Returns a MACA target.
+    Parameters
+    ----------
+    model: str
+        The model of this device
+    options : str or list of str
+        Additional options
+    """
+    opts = _merge_opts(["-model=%s" % model], options)
+    return Target(" ".join(["maca"] + opts))
 
 
 def create(target):

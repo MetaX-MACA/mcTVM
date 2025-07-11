@@ -410,3 +410,11 @@ SET(CMAKE_VS_PLATFORM_TOOLSET_HOST_ARCHITECTURE "x64")
 
 # Enable Qualcomm OpenCL extension support
 set(USE_OPENCL_EXTN_QCOM OFF)
+
+# Whether enable MACA during compile,
+#
+# Possible values:
+# - ON: enable MACA with cmake's auto search
+# - OFF: disable MACA
+# - /path/to/maca: use specific path to maca toolkit
+set(USE_MACA ON)

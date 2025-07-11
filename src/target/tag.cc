@@ -463,4 +463,19 @@ TVM_REGISTER_METAL_GPU_TAG("apple/m2-gpu", 1024, 32768, 32);
 
 #undef TVM_REGISTER_METAL_TAG
 
+#define TVM_REGISTER_MACA_TAG(Name, CPU, TRIPLE, SharedMem) \
+  TVM_REGISTER_TARGET_TAG(Name).set_config({                \
+      {"kind", String("maca")},                             \
+      {"keys", Array<String>{"maca", "gpu"}},               \
+      {"mcpu", String(CPU)},                                \
+      {"mtriple", String(TRIPLE)},                          \
+      {"max_shared_memory_per_block", SharedMem},           \
+      {"max_threads_per_block", 1024},                      \
+      {"thread_warp_size", 64},                             \
+  })
+
+TVM_REGISTER_MACA_TAG("metax/mxc-c500", "xcore1000", "mxc-metax-macahca", 65536);
+
+#undef TVM_REGISTER_MACA_TAG
+
 }  // namespace tvm

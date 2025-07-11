@@ -98,6 +98,7 @@ enum DeviceAttrKind : int {
   kTotalGlobalMemory = 14,
   kAvailableGlobalMemory = 15,
   kImagePitchAlignment = 16,
+  kMxcArch = 17,
 };
 
 #ifdef TVM_KALLOC_ALIGNMENT
@@ -344,6 +345,10 @@ inline const char* DLDeviceType2Str(int type) {
       return "webgpu";
     case kDLHexagon:
       return "hexagon";
+    case kDLMACA:
+      return "maca";
+    case kDLMACAHost:
+      return "maca_host";
     default:
       LOG(FATAL) << "unknown type = " << type;
   }

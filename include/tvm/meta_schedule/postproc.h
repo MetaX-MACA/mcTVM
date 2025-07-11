@@ -173,6 +173,10 @@ class Postproc : public runtime::ObjectRef {
   TVM_DLL static Array<Postproc, void> DefaultCUDATensorCore();
   /*! \brief Create default postprocessors for Hexagon */
   TVM_DLL static Array<Postproc, void> DefaultHexagon();
+  /*! \brief Create default postprocessors for MACA */
+  TVM_DLL static Array<Postproc, void> DefaultMACA();
+  /*! \brief Create default postprocessors for MACA with WMMA */
+  TVM_DLL static Array<Postproc, void> DefaultMACAWMMA();
 
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(Postproc, ObjectRef, PostprocNode);
 };

@@ -71,6 +71,7 @@ from .target import (
     hexagon,
     stm32,
     adreno,
+    maca,
 )
 from .virtual_device import VirtualDevice
 from .compilation_config import make_compilation_config

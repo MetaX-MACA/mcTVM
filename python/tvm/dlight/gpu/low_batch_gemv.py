@@ -507,7 +507,7 @@ class LowBatchGEMV(GPUScheduleRule):
         len_s, len_r = get_extent(sch, s), get_extent(sch, r)
 
         TAG_S, TAG_R = "threadIdx.y", "threadIdx.x"
-        if target.kind.name == "cuda":
+        if target.kind.name == "cuda" or target.kind.name == "maca":
             VEC_C = 4
             LOAD_V_SHARED = True
             LOAD_V_VEC = 8

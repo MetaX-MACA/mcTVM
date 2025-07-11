@@ -159,6 +159,8 @@ bool RuntimeEnabled(const String& target_str) {
     const auto pf = tvm::ffi::Function::GetGlobal("codegen.llvm_target_enabled");
     if (!pf.has_value()) return false;
     return (*pf)(target).cast<bool>();
+  } else if (target.length() >= 4 && target.substr(0, 4) == "maca") {
+    f_name = "device_api.maca";
   } else {
     LOG(FATAL) << "Unknown optional runtime " << target;
   }

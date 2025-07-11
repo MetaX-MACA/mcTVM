@@ -69,6 +69,9 @@ String GetRuleKindFromTarget(const Target& target) {
     }
     return "cuda";
   }
+  if (target->kind->name == "maca") {
+    return "maca-wmma";
+  }
 
   if (IsGPUTarget(target->kind->name)) {
     return "cuda";
@@ -123,6 +126,14 @@ void SpaceGeneratorNode::InitializeWithTuneContext(const TuneContext& context) {
       default_sch_rules = ScheduleRule::DefaultARM("dotprod");
       default_postprocs = Postproc::DefaultCPUTensorization();
       default_mutator_probs = Mutator::DefaultLLVM();
+    } else if (kind == "maca") {
+      default_sch_rules = ScheduleRule::DefaultMACA();
+      default_postprocs = Postproc::DefaultMACA();
+      default_mutator_probs = Mutator::DefaultMACA();
+    } else if (kind == "maca-wmma") {
+      default_sch_rules = ScheduleRule::DefaultMACAWMMA();
+      default_postprocs = Postproc::DefaultMACAWMMA();
+      default_mutator_probs = Mutator::DefaultMACAWMMA();
     } else {
       LOG(FATAL) << "Unsupported kind: " << kind;
       throw;

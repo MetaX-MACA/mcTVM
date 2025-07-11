@@ -36,7 +36,7 @@ concurrency:
 
 jobs:
   MacOS:
-    if: ${{ github.repository == 'apache/tvm' }}
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
     runs-on: macOS-latest
     steps:
       - uses: actions/checkout@v2
@@ -90,7 +90,7 @@ jobs:
 #          python -m pytest -v tests/python/contrib/test_rpc_server_device.py
 
   Windows:
-    if: ${{ github.repository == 'apache/tvm' }}
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v2
@@ -144,3 +144,23 @@ jobs:
  #       with:
  #         name: android_rpc-debug.apk
  #         path: ./apps/android_rpc/app/build/outputs/apk/debug/app-debug.apk
+
+  MetaXGPU:
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: Build
+        run: |
+          rm -rf build
+          mkdir -p build
+          cp cmake/config.cmake build
+          echo "set(USE_LLVM ON)" >> build/config.cmake
+          cmake -B build
+          make -j $(nproc) -C build
+      - name: Test
+        shell: bash -l {0}
+        run: >-
+          TVM_TEST_TARGETS="llvm" PYTHONPATH=python python3 -m pytest -v tests/python/all-platform-minimal-test
