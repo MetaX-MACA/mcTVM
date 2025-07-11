@@ -20,11 +20,11 @@ import subprocess
 import os
 from os.path import join, exists
 
-import tvm._ffi
-from tvm._ffi.base import py_str
+import tvm.ffi
 import tvm.runtime
 import tvm.target
 
+from ..base import py_str
 from . import utils
 
 
@@ -140,9 +140,9 @@ def parse_compute_version(compute_version):
         raise RuntimeError("Compute version parsing error: " + str(err))
 
 
-@tvm._ffi.register_func("tvm_callback_maca_have_matrixcore")
-def have_matrixcore(compute_version=None):
-    """Either MatrixCore support is provided in the compute capability or not
+@tvm.ffi.register_func("tvm_callback_maca_have_wmma")
+def have_wmma(compute_version=None):
+    """Either wmma support is provided in the compute capability or not
 
     Parameters
     ----------
@@ -151,8 +151,8 @@ def have_matrixcore(compute_version=None):
 
     Returns
     -------
-    have_matrixcore : bool
-        True if MatrixCore support is provided, False otherwise
+    have_wmma : bool
+        True if wmma support is provided, False otherwise
     """
     if compute_version is None:
         if tvm.maca(0).exist:
@@ -182,7 +182,7 @@ def have_fp16(compute_version):
     return False
 
 
-@tvm._ffi.register_func("tvm_callback_maca_get_arch")
+@tvm.ffi.register_func("tvm_callback_maca_get_arch")
 def get_maca_arch(maca_path="/opt/maca"):
     """Utility function to get the MetaX GPU architecture
 
@@ -241,14 +241,14 @@ def find_maca_path():
     raise RuntimeError("Cannot find MACA path")
 
 
-@tvm._ffi.register_func
+@tvm.ffi.register_func
 def tvm_callback_maca_compile(code, target):  # pylint: disable=unused-argument
     """use mxcc to generate fatbin code for better optimization"""
     dev_obj = compile_maca(code, target_format="mcbin")
     return dev_obj
 
 
-@tvm._ffi.register_func("tvm.contrib.mxcc.get_compute_version")
+@tvm.ffi.register_func("tvm.contrib.mxcc.get_compute_version")
 def get_target_compute_version(target=None):
     """Utility function to get compute capability of compilation target.
 
@@ -286,7 +286,7 @@ def get_target_compute_version(target=None):
     )
 
 
-@tvm._ffi.register_func("tvm.contrib.mxcc.supports_fp8")
+@tvm.ffi.register_func("tvm.contrib.mxcc.supports_fp8")
 def have_fp8(compute_version):
     """Whether fp8 support is provided in the specified compute capability or not
 
@@ -295,4 +295,4 @@ def have_fp8(compute_version):
     compute_version : str
         GPU capability
     """
-    return True
+    return False

@@ -44,12 +44,7 @@ class VisitPipelineCommitQueueScope : public StmtExprVisitor {
   std::queue<size_t> total_cp_async_nums;
   std::queue<size_t> last_cp_async_size;
 
-  void VisitExpr_(const CallNode* op) final {
-    if (op->op.same_as(builtin::mxc_cp_async())) {
-      mxc_cp_async_calls.push_back(op);
-    }
-    StmtExprVisitor::VisitExpr_(op);
-  }
+  void VisitExpr_(const CallNode* op) final { StmtExprVisitor::VisitExpr_(op); }
   void VisitStmt_(const AttrStmtNode* op) final {
     mxc_cp_async_calls.clear();
     if (op->attr_key == tir::attr::async_commit_queue_scope) {

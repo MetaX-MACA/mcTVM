@@ -153,7 +153,6 @@ std::string MCRTCCompile(const std::string& code, bool include_path = false) {
 }
 
 runtime::Module BuildMACA(IRModule mod, Target target) {
-  using tvm::runtime::Registry;
   bool output_ssa = false;
   CodeGenMACA cg;
   cg.Init(output_ssa);
@@ -177,27 +176,27 @@ runtime::Module BuildMACA(IRModule mod, Target target) {
 
   std::string code = cg.Finish();
 
-  if (const auto* f = Registry::Get("tvm_callback_maca_postproc")) {
-    code = (*f)(code, target).operator std::string();
+  if (auto f = ffi::Function::GetGlobal("tvm_callback_maca_postproc")) {
+    code = (*f)(code, target).cast<std::string>();
   }
   std::string fmt = "mcir";
   std::string mcir;
-  const auto* f_enter = Registry::Get("target.TargetEnterScope");
+  auto f_enter = ffi::Function::GetGlobal("target.TargetEnterScope");
   (*f_enter)(target);
-  if (const auto* f = Registry::Get("tvm_callback_maca_compile")) {
-    mcir = (*f)(code, target).operator std::string();
+  if (auto f = ffi::Function::GetGlobal("tvm_callback_maca_compile")) {
+    mcir = (*f)(code, target).cast<std::string>();
     // Dirty matching to check mcir vs mcbin.
     // TODO(tqchen) more reliable checks
     if (mcir[0] != '/') fmt = "mcbin";
   } else {
     mcir = MCRTCCompile(code, cg.need_include_path());
   }
-  const auto* f_exit = Registry::Get("target.TargetExitScope");
+  auto f_exit = ffi::Function::GetGlobal("target.TargetExitScope");
   (*f_exit)(target);
   return MACAModuleCreate(mcir, fmt, ExtractFuncInfo(mod), code);
 }
 
-TVM_REGISTER_GLOBAL("target.build.maca").set_body_typed(BuildMACA);
+TVM_FFI_REGISTER_GLOBAL("target.build.maca").set_body_typed(BuildMACA);
 TVM_REGISTER_PASS_CONFIG_OPTION("maca.kernels_output_dir", String);
 }  // namespace codegen
 }  // namespace tvm

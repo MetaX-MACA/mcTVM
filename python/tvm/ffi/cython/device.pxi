@@ -58,8 +58,8 @@ cdef class Device:
     kDLOneAPI = 14
     kDLWebGPU = 15
     kDLHexagon = 16
-    kDLMACA = 17
-    kDLMACAHost = 18
+    kDLMACA = 18
+    kDLMACAHost = 19
 
     DEVICE_TYPE_TO_NAME = {
       kDLCPU: "cpu",

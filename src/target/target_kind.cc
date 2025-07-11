@@ -254,6 +254,30 @@ TargetJSON UpdateROCmAttrs(TargetJSON target) {
 }
 
 /*!
+ * \brief Update the attributes in the LLVM MACA target.
+ * \param target The Target to update
+ * \return The updated attributes
+ */
+TargetJSON UpdateMACAAttrs(TargetJSON target) {
+  CheckOrSetAttr(&target, "mtriple", "mxc-metax-macahca");
+  // Update -mcpu=xcore1000
+  std::string arch = "xcore1000";
+  if (target.count("mcpu")) {
+    String mcpu = Downcast<String>(target.at("mcpu"));
+    arch = ExtractStringWithPrefix(mcpu, "xcore");
+    ICHECK(!arch.empty()) << "ValueError: MACA target gets an invalid XCORE version: -mcpu="
+                          << mcpu;
+  } else {
+    if (auto f_get_maca_arch = tvm::ffi::Function::GetGlobal("tvm_callback_maca_get_arch")) {
+      arch = (*f_get_maca_arch)().cast<std::string>();
+    }
+    target.Set("mcpu", String(arch));
+  }
+
+  return target;
+}
+
+/*!
  * \brief Test Target Parser
  * \param target The Target to update
  * \return The updated attributes
@@ -435,6 +459,18 @@ TVM_REGISTER_TARGET_KIND("hexagon", kDLHexagon)
     .add_attr_option<int64_t>("num-cores")
     .add_attr_option<int64_t>("vtcm-capacity")
     .set_default_keys({"hexagon", "cpu"});
+
+TVM_REGISTER_TARGET_KIND("maca", kDLMACA)
+    .add_attr_option<String>("mcpu")
+    .add_attr_option<String>("mtriple")
+    .add_attr_option<Array<String>>("mattr")
+    .add_attr_option<int64_t>("max_num_threads", 1024)
+    .add_attr_option<int64_t>("max_threads_per_block", 1024)
+    .add_attr_option<int64_t>("max_shared_memory_per_block", 65536)
+    .add_attr_option<int64_t>("thread_warp_size", 64)
+    .add_attr_option<int64_t>("max_local_memory_per_block", 4095)
+    .set_default_keys({"maca", "gpu"})
+    .set_target_parser(UpdateMACAAttrs);
 
 TVM_REGISTER_TARGET_KIND("ext_dev", kDLExtDev);
 

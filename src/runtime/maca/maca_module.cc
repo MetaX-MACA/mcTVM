@@ -23,7 +23,7 @@
 #include "maca_module.h"
 
 #include <mcr/mc_runtime_api.h>
-#include <tvm/runtime/registry.h>
+#include <tvm/ffi/function.h>
 
 #include <array>
 #include <mutex>
@@ -66,7 +66,7 @@ class MACAModuleNode : public runtime::ModuleNode {
   int GetPropertyMask() const final {
     return ModulePropertyMask::kBinarySerializable | ModulePropertyMask::kRunnable;
   }
-  PackedFunc GetFunction(const String& name, const ObjectPtr<Object>& sptr_to_self) final;
+  ffi::Function GetFunction(const String& name, const ObjectPtr<Object>& sptr_to_self) final;
 
   void SaveToFile(const String& file_name, const String& format) final {
     std::string fmt = GetFileFormat(file_name, format);
@@ -157,7 +157,8 @@ class MACAWrappedFunc {
     launch_param_config_.Init(num_void_args, launch_param_tags);
   }
   // invoke the function with void arguments
-  void operator()(TVMArgs args, TVMRetValue* rv, void* packed_args, size_t packed_nbytes) const {
+  void operator()(ffi::PackedArgs args, ffi::Any* rv, void* packed_args,
+                  size_t packed_nbytes) const {
     int device_id;
     MACA_CALL(mcGetDevice(&device_id));
     if (fcache_[device_id] == nullptr) {
@@ -190,11 +191,12 @@ class MACAWrappedFunc {
   LaunchParamConfig launch_param_config_;
 };
 
-PackedFunc MACAModuleNode::GetFunction(const String& name, const ObjectPtr<Object>& sptr_to_self) {
+ffi::Function MACAModuleNode::GetFunction(const String& name,
+                                          const ObjectPtr<Object>& sptr_to_self) {
   ICHECK_EQ(sptr_to_self.get(), this);
   ICHECK_NE(name, symbol::tvm_module_main) << "Device function do not have main";
   auto it = fmap_.find(name);
-  if (it == fmap_.end()) return PackedFunc();
+  if (it == fmap_.end()) return ffi::Function();
   const FunctionInfo& info = it->second;
   MACAWrappedFunc f;
   f.Init(this, sptr_to_self, name, info.arg_types.size(), info.launch_param_tags);
@@ -229,13 +231,13 @@ Module MACAModuleLoadBinary(void* strm) {
   return MACAModuleCreate(data, fmt, fmap, std::string());
 }
 
-TVM_REGISTER_GLOBAL("runtime.module.loadbinary_mcir").set_body_typed(MACAModuleLoadBinary);
+TVM_FFI_REGISTER_GLOBAL("runtime.module.loadbinary_mcir").set_body_typed(MACAModuleLoadBinary);
 
-TVM_REGISTER_GLOBAL("runtime.module.loadbinary_maca").set_body_typed(MACAModuleLoadBinary);
-TVM_REGISTER_GLOBAL("runtime.module.loadbinary_mc").set_body_typed(MACAModuleLoadBinary);
+TVM_FFI_REGISTER_GLOBAL("runtime.module.loadbinary_maca").set_body_typed(MACAModuleLoadBinary);
+TVM_FFI_REGISTER_GLOBAL("runtime.module.loadbinary_mc").set_body_typed(MACAModuleLoadBinary);
 
-TVM_REGISTER_GLOBAL("runtime.module.loadfile_mcir").set_body_typed(MACAModuleLoadFile);
-TVM_REGISTER_GLOBAL("runtime.module.loadfile_maca").set_body_typed(MACAModuleLoadFile);
-TVM_REGISTER_GLOBAL("runtime.module.loadfile_mcbin").set_body_typed(MACAModuleLoadFile);
+TVM_FFI_REGISTER_GLOBAL("runtime.module.loadfile_mcir").set_body_typed(MACAModuleLoadFile);
+TVM_FFI_REGISTER_GLOBAL("runtime.module.loadfile_maca").set_body_typed(MACAModuleLoadFile);
+TVM_FFI_REGISTER_GLOBAL("runtime.module.loadfile_mcbin").set_body_typed(MACAModuleLoadFile);
 }  // namespace runtime
 }  // namespace tvm

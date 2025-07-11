@@ -70,13 +70,7 @@ String GetRuleKindFromTarget(const Target& target) {
     return "cuda";
   }
   if (target->kind->name == "maca") {
-    if (const auto* f_have_wmma = tvm::runtime::Registry::Get("tvm_callback_maca_have_wmma")) {
-      bool have_wmma = (*f_have_wmma)();
-      if (have_wmma) {
-        return "maca-wmma";
-      }
-    }
-    return "maca";
+    return "maca-wmma";
   }
 
   if (IsGPUTarget(target->kind->name)) {

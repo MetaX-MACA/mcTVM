@@ -157,8 +157,10 @@ jobs:
           rm -rf build
           mkdir -p build
           cp cmake/config.cmake build
+          echo "set(USE_MACA ON)" >> build/config.cmake
+          echo "set(USE_LLVM ON)" >> build/config.cmake
           cmake -B build
-          make -j -C build
+          make -j $(nproc) -C build
       - name: Test
         shell: bash -l {0}
         run: >-

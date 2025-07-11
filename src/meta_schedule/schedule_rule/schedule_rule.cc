@@ -399,13 +399,13 @@ Array<ScheduleRule> ScheduleRule::DefaultMACA() {
           /*max_innermost_factor=*/Integer(64),
           /*vector_load_lens=*/Array<Integer>{1, 2, 3, 4, 8, 16},
           /*reuse_read=*/
-          Map<String, ObjectRef>{{"req", String("must")},
-                                 {"levels", Array<Integer>{4}},  //
-                                 {"scope", String("shared")}},
+          Map<String, ffi::Any>{{"req", String("must")},
+                                {"levels", Array<Integer>{4}},  //
+                                {"scope", String("shared")}},
           /*reuse_write=*/
-          Map<String, ObjectRef>{{"req", String("must")},
-                                 {"levels", Array<Integer>{3}},  //
-                                 {"scope", String("local")}}),
+          Map<String, ffi::Any>{{"req", String("must")},
+                                {"levels", Array<Integer>{3}},  //
+                                {"scope", String("local")}}),
       ScheduleRule::InlineConstantScalars(),
       ScheduleRule::AutoInline(
           /*into_producer=*/true,
@@ -416,11 +416,11 @@ Array<ScheduleRule> ScheduleRule::DefaultMACA() {
           /*require_ordered=*/false,
           /*disallow_op=*/Array<String>{}),
       ScheduleRule::CrossThreadReduction(
-          /*thread_extents=*/Array<runtime::Int>{4, 8, 16, 32, 64, 128, 256, 512}),
+          /*thread_extents=*/Array<Integer>{4, 8, 16, 32, 64, 128, 256, 512}),
       ScheduleRule::ParallelizeVectorizeUnroll(
           /*max_jobs_per_core=*/-1,
           /*max_vectorize_extent=*/-1,
-          /*unroll_max_steps=*/Array<runtime::Int>{0, 16, 64, 512, 1024},
+          /*unroll_max_steps=*/Array<Integer>{0, 16, 64, 512, 1024},
           /*unroll_explicit=*/true),
       ScheduleRule::AutoBind(
           /*max_threadblocks=*/512,
@@ -501,13 +501,13 @@ Array<ScheduleRule> ScheduleRule::DefaultMACAWMMA() {
           /*max_innermost_factor=*/Integer(4),
           /*vector_load_lens=*/Array<Integer>{1, 2, 3, 4, 8, 16},
           /*reuse_read=*/
-          Map<String, ObjectRef>{{"req", String("must")},
-                                 {"levels", Array<Integer>{4}},  //
-                                 {"scope", String("shared.dyn")}},
+          Map<String, ffi::Any>{{"req", String("must")},
+                                {"levels", Array<Integer>{4}},  //
+                                {"scope", String("shared.dyn")}},
           /*reuse_write=*/
-          Map<String, ObjectRef>{{"req", String("must")},
-                                 {"levels", Array<Integer>{2}},  //
-                                 {"scope", String("shared.dyn")}},
+          Map<String, ffi::Any>{{"req", String("must")},
+                                {"levels", Array<Integer>{2}},  //
+                                {"scope", String("shared.dyn")}},
           /*use_software_pipeline=*/false),  //
   };
   Array<ScheduleRule> append = ScheduleRule::DefaultMACA();

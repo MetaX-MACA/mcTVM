@@ -24,7 +24,7 @@
 #include "codegen_maca.h"
 
 #include <tvm/arith/analyzer.h>
-#include <tvm/runtime/registry.h>
+#include <tvm/ffi/function.h>
 #include <tvm/tir/index_map.h>
 #include <tvm/tir/stmt_functor.h>
 
@@ -1115,38 +1115,6 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
       this->PrintExpr(op->args[i * 2 + 1], os);
       os << "]" << ((i < 3) ? ", " : ")");
     }
-  } else if (op->op.same_as(builtin::mxc_cp_async())) {
-    std::string dst = this->PrintExpr(op->args[0]);
-    std::string dst_offset = this->PrintExpr(op->args[1]);
-    std::string src = this->PrintExpr(op->args[2]);
-    std::string src_offset = this->PrintExpr(op->args[3]);
-    std::string size = this->PrintExpr(op->args[4]);
-    std::string ret_var = "";
-    int size_ = maca::stoi(size);
-    std::string bit = std::to_string(size_ * 8);
-    if (this->cp_async_remain_nums.front() == 1) {
-      this->cp_async_remain_nums.pop();
-      ret_var = "mcDummyRetB" + bit + "[read_idx_" + bit + "]";
-      this->cp_async_var_names.pop();
-      this->cp_async_var_names.push(ret_var);
-    } else {
-      this->cp_async_remain_nums.front() -= 1;
-    }
-    this->PrintIndent();
-    // need_cast_smem_ptr_to_int_ = true;
-    // use size of argument list to indicate whether or not to use predicated cp.async
-    if (op->args.size() == 5) {
-      this->stream << PrintMemcpyAsyncAssembly(ret_var, dst, dst_offset, src, src_offset, size);
-    } else {
-      this->stream << PrintPredicatedMemcpyAsyncAssembly(ret_var, dst, dst_offset, src, src_offset,
-                                                         size, this->PrintExpr(op->args[5]));
-    }
-    if (!ret_var.empty()) {
-      std::string read_idx_name = "read_idx_" + bit;
-      this->PrintIndent();
-      this->stream << read_idx_name << " = (" << read_idx_name + " + 1) & "
-                   << std::to_string(this->mcDummyRetNum[size_] - 1) << ";\n";
-    }
   } else if (op->op.same_as(builtin::create_barriers())) {
     CHECK_EQ(barrier_count_, -1);
     int barrier_count = Downcast<IntImm>(op->args[0])->value;
@@ -1161,21 +1129,6 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
                  << barrier_name_ << "[" << barrier_count << "];\n";
     this->stream << "for (int i = 0; i < " << barrier_count << "; ++i) { " << barrier_name_
                  << "[i] = 0; }\n";
-  } else if (op->op.same_as(builtin::mxc_ldg_predicator())) {
-    std::string shd_var = this->PrintExpr(op->args[0]);
-    std::string shd_addr = this->PrintExpr(op->args[1]);
-    std::string global_var = this->PrintExpr(op->args[2]);
-    std::string global_addr = this->PrintExpr(op->args[3]);
-    std::string guard = this->PrintExpr(op->args[4]);
-    std::string pred_exp = this->PrintExpr(op->args[5]);
-    std::string bits = this->PrintExpr(op->args[6]);
-    this->PrintIndent();
-    this->stream << "*(b" + bits + "vectype*)((";
-    this->PrintType(op->dtype, this->stream);
-    this->stream << "*)(" + shd_var + ") + " + shd_addr + ") = __builtin_mxc_ldg_b" + bits +
-                        "_predicator(" + global_var + " + " + global_addr +
-                        ", 0, true, false, false, false, (" + guard + "), " + pred_exp +
-                        ", MACA_ICMP_EQ);\n";
   } else {
     CodeGenC::VisitExpr_(op, os);
   }
@@ -1239,8 +1192,7 @@ void CodeGenMACA::VisitStmt_(const AllocateNode* op) {
       ICHECK(op->dtype == DataType::Float(16) || op->dtype == DataType::Int(8) ||
              op->dtype == DataType::UInt(8) || op->dtype == DataType::Int(4) ||
              op->dtype == DataType::UInt(4) || op->dtype == DataType::Int(1) ||
-             op->dtype == DataType::BFloat(16) || op->dtype == DataType::Float(32) ||
-             op->dtype == DataType::NVFloat8E4M3())
+             op->dtype == DataType::BFloat(16) || op->dtype == DataType::Float(32))
           << "Matrix_a and matrix_b only support half or char or unsigned char "
           << "or uint4 or int4 or int1 type for now";
     } else {

@@ -24,10 +24,10 @@
 #include <dmlc/thread_local.h>
 #include <mcr/mc_runtime_api.h>
 #include <mxc/mxc.h>
+#include <tvm/ffi/function.h>
 #include <tvm/runtime/device_api.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/runtime/profiling.h>
-#include <tvm/runtime/registry.h>
 
 #include "maca_common.h"
 
@@ -37,7 +37,7 @@ namespace runtime {
 class MACADeviceAPI final : public DeviceAPI {
  public:
   void SetDevice(Device dev) final { MACA_CALL(mcSetDevice(dev.device_id)); }
-  void GetAttr(Device device, DeviceAttrKind kind, TVMRetValue* rv) final {
+  void GetAttr(Device device, DeviceAttrKind kind, ffi::Any* rv) final {
     int value = 0;
     switch (kind) {
       case kExist: {
@@ -236,12 +236,12 @@ MACAThreadEntry::MACAThreadEntry() : pool(kDLMACA, MACADeviceAPI::Global()) {}
 
 MACAThreadEntry* MACAThreadEntry::ThreadLocal() { return MACAThreadStore::Get(); }
 
-TVM_REGISTER_GLOBAL("device_api.maca").set_body([](TVMArgs args, TVMRetValue* rv) {
+TVM_REGISTER_GLOBAL("device_api.maca").set_body_packed([](ffi::PackedArgs args, ffi::Any* rv) {
   DeviceAPI* ptr = MACADeviceAPI::Global();
   *rv = static_cast<void*>(ptr);
 });
 
-TVM_REGISTER_GLOBAL("device_api.maca_host").set_body([](TVMArgs args, TVMRetValue* rv) {
+TVM_REGISTER_GLOBAL("device_api.maca_host").set_body_packed([](ffi::PackedArgs args, ffi::Any* rv) {
   DeviceAPI* ptr = MACADeviceAPI::Global();
   *rv = static_cast<void*>(ptr);
 });

@@ -742,10 +742,10 @@ bool CheckDataTypeSupport(const Target& target, const std::string& support_func_
   } else if (target->kind->name == "maca") {
     version_func_name = "tvm.contrib.mxcc.get_compute_version";
   }
-  if (const PackedFunc* get_cv = tvm::runtime::Registry::Get(version_func_name)) {
-    std::string compute_version = (*get_cv)(target);
-    if (const PackedFunc* check_support = tvm::runtime::Registry::Get(support_func_name)) {
-      has_native_support = (*check_support)(compute_version);
+  if (auto get_cv = tvm::ffi::Function::GetGlobal(version_func_name)) {
+    std::string compute_version = (*get_cv)(target).cast<std::string>();
+    if (auto check_support = tvm::ffi::Function::GetGlobal(support_func_name)) {
+      has_native_support = (*check_support)(compute_version).cast<bool>();
     }
   }
   return has_native_support;
