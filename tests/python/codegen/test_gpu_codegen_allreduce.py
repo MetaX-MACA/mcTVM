@@ -59,7 +59,7 @@ def generate_param_sets():
 dims = tvm.testing.parameter(*generate_param_sets())
 
 
-@tvm.testing.parametrize_targets("cuda", "metal")
+@tvm.testing.parametrize_targets("cuda", "metal", "maca")
 def test_allreduce_sum(dims, target, dev):
     d1, d2, d3 = dims
     _, _, _d1, _d2, _d3 = reduce.params
@@ -126,7 +126,7 @@ def test_allreduce_sum_compile(optional_metal_compile_callback):
     tvm.compile(sch.mod["main"], target=target)
 
 
-@tvm.testing.parametrize_targets("cuda", "metal")
+@tvm.testing.parametrize_targets("cuda", "metal", "maca")
 def test_allreduce_max(dims, target, dev):
     d1, d2, d3 = dims
     _, _, _d1, _d2, _d3 = reduce_max.params

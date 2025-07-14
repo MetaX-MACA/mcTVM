@@ -20,6 +20,7 @@ The following files may have been Modified by MetaX Integrated Circuits (Shangha
     modified: python/tvm/dlight/gpu/low_batch_gemv.py
     modified: python/tvm/dlight/gpu/rmsnorm.py
     modified: python/tvm/dlight/gpu/transpose.py
+    modified: python/tvm/ffi/__init__.py
     modified: python/tvm/ffi/cython/device.pxi
     modified: python/tvm/ffi/ndarray.py
     modified: python/tvm/meta_schedule/schedule_rule/schedule_rule.py
@@ -42,12 +43,19 @@ The following files may have been Modified by MetaX Integrated Circuits (Shangha
     modified: src/runtime/ndarray.cc
     modified: src/support/libinfo.cc
     modified: src/target/tag.cc
+    modified: src/target/target_kind.cc
     modified: src/tir/analysis/verify_memory.cc
     modified: src/tir/transforms/default_gpu_schedule.cc
     modified: src/tir/transforms/lower_thread_allreduce.cc
     modified: src/tir/transforms/lower_warp_memory.cc
     modified: src/tir/transforms/unsupported_dtype_legalize.cc
     modified: tests/lint/check_file_type.py
+    modified: tests/python/all-platform-minimal-test/test_runtime_ndarray.py
+    modified: tests/python/codegen/test_gpu_codegen_allreduce.py
+    modified: tests/python/codegen/test_target_codegen.py
+    modified: tests/python/codegen/test_target_codegen_cuda.py
+    modified: tests/python/codegen/test_target_codegen_gpu_common.py
+    modified: tests/python/testing/test_tvm_testing_features.py
 Modification copyright 2025 MetaX Integrated Circuits (Shanghai) Co., Ltd.
 
 The following files are newly added by MetaX Integrated Circuits (Shanghai) Co., Ltd. in 2025. All rights reserved.

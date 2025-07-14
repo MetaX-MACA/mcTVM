@@ -48,7 +48,8 @@ def test_memory_usage(target, dev, dtype):
     if available_memory_before is None:
         pytest.skip(reason=f"Target '{target}' does not support queries of available memory")
 
-    arr = tvm.nd.empty([1024, 1024], dtype=dtype, device=dev)
+    shape = [8192, 8192] if target == "maca" else [1024, 1024]
+    arr = tvm.nd.empty(shape, dtype=dtype, device=dev)
     available_memory_after = dev.available_global_memory
 
     num_elements = math.prod(arr.shape)

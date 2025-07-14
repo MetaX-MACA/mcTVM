@@ -41,14 +41,9 @@ class MACADeviceAPI final : public DeviceAPI {
     int value = 0;
     switch (kind) {
       case kExist: {
-        if (mxc_init() == MXC_STATUS_SUCCESS) {
-          int dev;
-          MACA_CALL(mcGetDeviceCount(&dev));
-          value = dev > device.device_id ? 1 : 0;
-          mxc_shut_down();
-        } else {
-          value = 0;
-        }
+        int count;
+        auto err = mcGetDeviceCount(&count);
+        value = (err == mcSuccess && static_cast<int>(count > device.device_id));
         break;
       }
       case kMaxThreadsPerBlock: {

@@ -160,7 +160,17 @@ jobs:
           echo "set(USE_LLVM ON)" >> build/config.cmake
           cmake -B build
           make -j $(nproc) -C build
-      - name: Test
+      - name: Clean up old workspace
+        run: |
+          pushd build
+          rm -rf pytest-results
+          popd
+      - name: Run Python MetaXGPU unit tests
         shell: bash -l {0}
         run: >-
-          TVM_TEST_TARGETS="llvm" PYTHONPATH=python python3 -m pytest -v tests/python/all-platform-minimal-test
+          ./tests/scripts/task_python_unittest.sh
+        env:
+          PYTEST_ADDOPTS: "-m gpu"
+          TVM_TEST_TARGETS: maca
+          TVM_UNITTEST_TESTSUITE_NAME: python-unittest-gpu
+          PLATFORM: gpu
