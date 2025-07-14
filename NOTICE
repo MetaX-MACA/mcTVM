@@ -51,6 +51,11 @@ The following files may have been Modified by MetaX Integrated Circuits (Shangha
     modified: src/tir/transforms/unsupported_dtype_legalize.cc
     modified: tests/lint/check_file_type.py
     modified: tests/python/all-platform-minimal-test/test_runtime_ndarray.py
+    modified: tests/python/codegen/test_gpu_codegen_allreduce.py
+    modified: tests/python/codegen/test_target_codegen.py
+    modified: tests/python/codegen/test_target_codegen_cuda.py
+    modified: tests/python/codegen/test_target_codegen_gpu_common.py
+    modified: tests/python/testing/test_tvm_testing_features.py
 Modification copyright 2025 MetaX Integrated Circuits (Shanghai) Co., Ltd.
 
 The following files are newly added by MetaX Integrated Circuits (Shanghai) Co., Ltd. in 2025. All rights reserved.

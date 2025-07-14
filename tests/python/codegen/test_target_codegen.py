@@ -34,7 +34,7 @@ def test_buffer_store_predicate_not_supported(target):
             tvm.compile(func)
 
 
-@tvm.testing.parametrize_targets("cuda", "opencl", "metal", "rocm", "vulkan -from_device=0")
+@tvm.testing.parametrize_targets("cuda", "opencl", "metal", "rocm", "vulkan -from_device=0", "maca")
 def test_buffer_store_predicate_not_supported_gpu(target):
     @T.prim_func
     def func(a: T.handle, b: T.handle):

@@ -242,7 +242,7 @@ def test_cuda_inf_nan():
     check_inf_nan(dev, 1, float("nan"), "float64")
 
 
-@tvm.testing.parametrize_targets("cuda", "rocm")
+@tvm.testing.parametrize_targets("cuda", "rocm", "maca")
 def test_crossthread_reduction1(target, dev):
     n = te.var("n")
     m = te.var("m")
@@ -256,7 +256,7 @@ def test_crossthread_reduction1(target, dev):
         ko, _ = sch.split(k, factors=[nthd, None])
         sch.bind(ko, "threadIdx.x")
         sch.bind(x, "blockIdx.x")
-        fun = tvm.compile(sch.mod, target="cuda")
+        fun = tvm.compile(sch.mod, target=target)
         return fun
 
     def verify(nthd):
@@ -276,7 +276,7 @@ def test_crossthread_reduction1(target, dev):
     verify(64)
 
 
-@tvm.testing.parametrize_targets("cuda", "rocm")
+@tvm.testing.parametrize_targets("cuda", "rocm", "maca")
 def test_crossthread_reduction2(target, dev):
     n = te.var("n")
     k0 = te.var("k0")
@@ -294,7 +294,7 @@ def test_crossthread_reduction2(target, dev):
         sch.bind(k0o, "threadIdx.x")
         sch.bind(k1o, "threadIdx.y")
         sch.bind(x, "blockIdx.x")
-        func = tvm.compile(sch.mod, target="cuda")
+        func = tvm.compile(sch.mod, target=target)
         return func
 
     def verify(nthdx, nthdy):

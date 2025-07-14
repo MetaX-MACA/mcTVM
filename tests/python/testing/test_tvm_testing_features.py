@@ -233,15 +233,17 @@ class TestAutomaticMarks:
     def test_bare_parametrize(self, request, target):
         self.check_marks(request, target)
 
-    @tvm.testing.parametrize_targets("llvm", "cuda", "vulkan")
+    @tvm.testing.parametrize_targets("llvm", "cuda", "vulkan", "maca")
     def test_explicit_parametrize(self, request, target):
         self.check_marks(request, target)
 
-    @pytest.mark.parametrize("target", ["llvm", "cuda", "vulkan"])
+    @pytest.mark.parametrize("target", ["llvm", "cuda", "vulkan", "cuda"])
     def test_pytest_mark(self, request, target):
         self.check_marks(request, target)
 
-    @pytest.mark.parametrize("target,other_param", [("llvm", 0), ("cuda", 1), ("vulkan", 2)])
+    @pytest.mark.parametrize(
+        "target,other_param", [("llvm", 0), ("cuda", 1), ("vulkan", 2), ("maca", 3)]
+    )
     def test_pytest_mark_covariant(self, request, target, other_param):
         self.check_marks(request, target)
 
