@@ -168,7 +168,7 @@ def test_llvm_ir_debug_accuracy():
 def test_building_without_llvm_equivalent():
     """A TIR PrimFunc may contain non-LLVM types
 
-    Types used in optimized kernels (e.g. "e4m3_float8") may not have
+    Types used in optimized kernels (e.g. "float8_e4m3fn") may not have
     an equivalent in DWARF, or the mapping from TIR type to DWARF type
     may not be defined.  If this occurs, the function should still be
     able to be built.
@@ -177,9 +177,9 @@ def test_building_without_llvm_equivalent():
     @I.ir_module
     class Module:
         @T.prim_func(private=True)
-        def main(A_data: T.handle("e4m3_float8"), B_data: T.handle("e4m3_float8")):
-            A = T.decl_buffer(128, "e4m3_float8", data=A_data)
-            B = T.decl_buffer(128, "e4m3_float8", data=B_data)
+        def main(A_data: T.handle("float8_e4m3fn"), B_data: T.handle("float8_e4m3fn")):
+            A = T.decl_buffer(128, "float8_e4m3fn", data=A_data)
+            B = T.decl_buffer(128, "float8_e4m3fn", data=B_data)
             for i in range(128):
                 B[i] = A[i]
 

@@ -106,6 +106,8 @@ jobs:
   Linux-CPU-Test:
     if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
     runs-on: ubuntu-22.04
+    env:
+      PLATFORM: "cpu"
     steps:
       - uses: jlumbroso/free-disk-space@main
         with:
@@ -139,7 +141,7 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo &&
-          cmake --build ./build -j $(nproc)
+          cmake --build ./build -j $(nproc) -v
       - name: Build CPP tests
         shell: bash -l {0}
         run: >-
