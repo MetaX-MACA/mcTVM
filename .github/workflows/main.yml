@@ -174,3 +174,39 @@ jobs:
           TVM_TEST_TARGETS: maca
           TVM_UNITTEST_TESTSUITE_NAME: python-unittest-gpu
           PLATFORM: gpu
+  Linux_CPU_Test:
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
+    runs-on: ubuntu-latest
+    env:
+      PLATFORM: cpu
+      DOCKER_RUN: docker/bash.sh --env PLATFORM --env SKIP_SLOW_TESTS --env TEST_STEP_NAME 
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: Pull Image
+        shell: bash -l {0}
+        run: >-
+          python ./ci/scripts/jenkins/determine_docker_images.py ci_cpu &&
+          image=$(cat .docker-image-names/ci_cpu) &&
+          docker pull $image &&
+          echo "IMAGE=$image" >> $GITHUB_ENV
+      - name: Build
+        shell: bash -l {0}
+        run: >-
+          $DOCKER_RUN $IMAGE ./tests/scripts/task_config_build_cpu.sh build &&
+          $DOCKER_RUN $IMAGE tests/scripts/task_build.py  --build-dir build && 
+          $DOCKER_RUN $IMAGE ./tests/scripts/task_build.py  --build-dir build --cmake-target cpptest
+      - name: Run CPP unit test
+        shell: bash -l {0}
+        run: >-
+          $DOCKER_RUN $IMAGE ./tests/scripts/task_cpp_unittest.sh
+        env:
+          TEST_STEP_NAME: "CPU unittest: cpptest"
+      - name: Run Python unit test
+        shell: bash -l {0}
+        run: >-
+          $DOCKER_RUN $IMAGE ./tests/scripts/task_python_unittest.sh
+        env:
+          TEST_STEP_NAME: "CPU unittest: python"
+
