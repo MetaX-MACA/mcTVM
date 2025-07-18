@@ -179,27 +179,19 @@ TargetJSON UpdateCUDAAttrs(TargetJSON target) {
   if (!target.count("max_threads_per_block")) {
     int max_threads_per_block;
     TVMRetValue value;
-    if (!DetectDeviceFlag({kDLCUDA, 0}, runtime::kMaxThreadsPerBlock, &value)) {
-      LOG(WARNING) << "Unable to detect CUDA max_threads_per_block, default to "
-                      "\"-max_threds_per_blocks=1024\" instead";
-      max_threads_per_block = 1024;
-    } else {
+    if (DetectDeviceFlag({kDLCUDA, 0}, runtime::kMaxThreadsPerBlock, &value)) {
       max_threads_per_block = value.operator int();
+      target.Set("max_threads_per_block", runtime::Int(max_threads_per_block));
     }
-    target.Set("max_threads_per_block", runtime::Int(max_threads_per_block));
   }
   // max_shared_memory_per_block
   if (!target.count("max_shared_memory_per_block")) {
     int max_shared_memory_per_block;
     TVMRetValue value;
-    if (!DetectDeviceFlag({kDLCUDA, 0}, runtime::kMaxSharedMemoryPerBlock, &value)) {
-      LOG(WARNING) << "Unable to detect CUDA max_shared_memory_per_block, default to "
-                      "\"-max_shared_memory_per_block=49152\" instead";
-      max_shared_memory_per_block = 49152;
-    } else {
+    if (DetectDeviceFlag({kDLCUDA, 0}, runtime::kMaxSharedMemoryPerBlock, &value)) {
       max_shared_memory_per_block = value.operator int();
+      target.Set("max_shared_memory_per_block", runtime::Int(max_shared_memory_per_block));
     }
-    target.Set("max_shared_memory_per_block", runtime::Int(max_shared_memory_per_block));
   }
   return target;
 }

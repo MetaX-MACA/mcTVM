@@ -29,10 +29,23 @@ dependencies:
   - git
   - llvmdev <=17
   - numpy
-  - pytest
+  - pytest==8.3.4
   - cython
   - cmake
   - bzip2
   - make
   - scipy
   - pillow
+  - gtest
+  - gmock
+  - decorator
+  - attrs
+  - typing-extensions
+  - psutil
+  - scipy
+  - tornado
+  - xgboost
+  - junitparser
+  - pytest-xdist
+  - cloudpickle
+

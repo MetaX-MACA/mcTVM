@@ -103,3 +103,55 @@ jobs:
         shell: cmd /C call {0}
         run: >-
           python -m pytest -v tests/python/all-platform-minimal-test
+
+  Linux-CPU-Test:
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
+    runs-on: ubuntu-22.04
+    env:
+      PLATFORM: "cpu"
+    steps:
+      - uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: false
+          swap-storage: false
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - uses: hendrikmuhs/ccache-action@v1.2
+      - name: Set up environment
+        uses: ./.github/actions/setup
+      - name: Fetch tophub
+        shell: bash -l {0}
+        run: >-
+          git clone https://github.com/tlc-pack/tophub.git ${HOME}/.tvm
+      - name: Build TVM
+        shell: bash -l {0}
+        run: >-
+          cmake -B build -G Ninja -S ./ \
+            -DUSE_SORT=ON \
+            -DUSE_LLVM=llvm-config \
+            -DUSE_UMA=ON \
+            -DSUMMARIZE=ON \
+            -DUSE_MSC=ON \
+            -DUSE_LIBBACKTRACE=COMPILE \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo &&
+          cmake --build ./build -j $(nproc) -v
+      - name: Build CPP tests
+        shell: bash -l {0}
+        run: >-
+          cmake --build ./build --target cpptest -j $(nproc)
+      - name: Run CPP Unit Test 
+        shell: bash -l {0}
+        run: >-
+          bash ./tests/scripts/task_cpp_unittest.sh
+      - name: Run Python Unit Test 
+        shell: bash -l {0}
+        run: >-
+          bash ./tests/scripts/task_python_unittest.sh
