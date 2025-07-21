@@ -38,7 +38,7 @@ function shard1 {
   python3 tests/lint/check_cmake_options.py
 
   echo "black check..."
-  tests/lint/git-black.sh
+  tests/lint/git-black.sh --rev c6969d7238c8010615e4cf07151821c0c5118cda
 
   echo "Linting the Python code with flake8..."
   tests/lint/flake8.sh

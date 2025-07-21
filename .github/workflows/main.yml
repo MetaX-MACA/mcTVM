@@ -174,3 +174,26 @@ jobs:
           TVM_TEST_TARGETS: maca
           TVM_UNITTEST_TESTSUITE_NAME: python-unittest-gpu
           PLATFORM: gpu
+  Ci_Lint:
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
+    runs-on: ubuntu-latest
+    env:
+      PLATFORM: cpu
+      DOCKER_RUN: docker/bash.sh --env CI --env PLATFORM --env TVM_SHARD_INDEX --env TVM_NUM_SHARDS --env RUN_DISPLAY_URL --env PLATFORM --env SKIP_SLOW_TESTS --env TEST_STEP_NAME 
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: Pull Image
+        shell: bash -l {0}
+        run: >-
+          python ./ci/scripts/jenkins/determine_docker_images.py ci_lint &&
+          image=$(cat .docker-image-names/ci_lint) &&
+          docker pull $image &&
+          echo "IMAGE=$image" >> $GITHUB_ENV
+      - name: Run Lint
+        shell: bash -l {0}
+        run: >-
+          $DOCKER_RUN $IMAGE ./tests/scripts/task_lint.sh
+        env:
+          TEST_STEP_NAME: "Lint"

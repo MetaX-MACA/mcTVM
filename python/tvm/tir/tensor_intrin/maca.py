@@ -16,10 +16,8 @@
 # under the License.
 # pylint: disable=invalid-name,missing-function-docstring,unused-variable
 """Intrinsics for tensorization on MetaX GPU."""
-from typing import Dict, Literal, Optional, Tuple
+from typing import Dict, Literal, Tuple
 
-from tvm.ffi import register_func
-from tvm.runtime import convert
 from tvm.script import tir as T
 from tvm.tir import Cast, IntImm, TensorIntrin
 from tvm.tir.function import PrimFunc

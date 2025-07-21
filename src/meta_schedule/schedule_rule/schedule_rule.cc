@@ -429,7 +429,7 @@ Array<ScheduleRule> ScheduleRule::DefaultMACA() {
 }
 
 Array<ScheduleRule> ScheduleRule::DefaultMACAWMMA() {
-  // TODO: ENABLE MMA OF MACA
+  // TODO(metax): ENABLE MMA OF MACA
   Array<Map<String, String>> wmma_intrin_groups = {
       // Tensor Cores f32 += f32 * f32
       {

@@ -18,7 +18,6 @@
 import re
 import subprocess
 import os
-from os.path import join, exists
 
 import tvm.ffi
 import tvm.runtime
@@ -28,7 +27,7 @@ from ..base import py_str
 from . import utils
 
 
-def compile_maca(code, target_format="mcbin", arch=None, options=None, path_target=None):
+def compile_maca(code, target_format="mcbin", _arch=None, options=None, path_target=None):
     """Compile maca code with MXCC from env.
 
     Parameters
@@ -39,7 +38,7 @@ def compile_maca(code, target_format="mcbin", arch=None, options=None, path_targ
     target_format : str
         The target format of mxcc compiler.
 
-    arch : str
+    _arch : str
         The maca architecture.
 
     options : str or list of str
@@ -175,7 +174,7 @@ def have_fp16(compute_version):
     compute_version: str
         compute capability of a GPU (e.g. "6.0")
     """
-    major, minor = parse_compute_version(compute_version)
+    major, _minor = parse_compute_version(compute_version)
     if major >= 10:
         return True
 
@@ -287,7 +286,7 @@ def get_target_compute_version(target=None):
 
 
 @tvm.ffi.register_func("tvm.contrib.mxcc.supports_fp8")
-def have_fp8(compute_version):
+def have_fp8(_compute_version):
     """Whether fp8 support is provided in the specified compute capability or not
 
     Parameters
