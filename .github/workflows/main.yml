@@ -195,6 +195,7 @@ jobs:
         shell: bash -l {0}
         run: >-
           $DOCKER_RUN $IMAGE ./tests/scripts/task_config_build_cpu.sh build &&
+          echo "set(USE_MACA OFF)" >> build/config.cmake &&
           $DOCKER_RUN $IMAGE tests/scripts/task_build.py  --build-dir build && 
           $DOCKER_RUN $IMAGE ./tests/scripts/task_build.py  --build-dir build --cmake-target cpptest
       - name: Run CPP unit test
