@@ -28,6 +28,7 @@
 #include <tvm/tir/index_map.h>
 #include <tvm/tir/stmt_functor.h>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <utility>
@@ -1152,9 +1153,9 @@ void CodeGenMACA::VisitStmt_(const AttrStmtNode* op) {
     auto wait_attrs = GetAsyncWaitAttributes(op);
     auto queue_id = wait_attrs.first.as<IntImmNode>();
     ICHECK(queue_id && queue_id->value == 0) << "For MACA, the index of an async queue must be 0.";
-    // TODO: Because the data type of the operation written into this block cannot be obtained
-    // temporarily, for a barrier_arrive_and_wait function that only involves one type of data,
-    // assume that if there is a method to obtain it in the future, replace the bit here.
+    // TODO(metax): Because the data type of the operation written into this block cannot be
+    // obtained temporarily, for a barrier_arrive_and_wait function that only involves one type
+    // of data,assume that if there is a method to obtain it in the future, replace the bit here.
     std::string bit = "";
     std::string mask_ = "";
     for (const auto& pair : mcDummyRetNum) {

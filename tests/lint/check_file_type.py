@@ -94,6 +94,7 @@ ALLOW_EXTENSION = {
     "groovy",
     # Python-parseable config files
     "ini",
+    "png",
 }
 
 # List of file names allowed

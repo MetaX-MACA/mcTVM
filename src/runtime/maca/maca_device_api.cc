@@ -109,7 +109,7 @@ class MACADeviceAPI final : public DeviceAPI {
         return;
       }
       case kApiVersion: {
-        //*rv = MACA_VERSION;
+        // *rv = MACA_VERSION;
         return;
       }
       case kDriverVersion:

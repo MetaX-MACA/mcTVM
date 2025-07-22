@@ -31,56 +31,53 @@
 #        - $ pre-commit run
 #
 
-default_language_version:
-    python: python3.6
 fail_fast: True
-default_stages: [push]
+default_stages: [pre-push]
 repos:
     - repo: https://github.com/pre-commit/pre-commit-hooks
-      rev: v2.3.0
+      rev: v5.0.0
       hooks:
         - id: check-added-large-files
         - id: check-merge-conflict
         - id: check-yaml
         - id: end-of-file-fixer
-          stages: [push]
         - id: trailing-whitespace
-          stages: [push]
+
     - repo: local
       hooks:
         -   id: run-black
             name: Running Black...
-            entry: docker/lint.sh python_format
+            entry: script -q -c "bash docker/lint.sh -i python_format" /dev/null
             language: system
             always_run: true
             pass_filenames: false
         -   id: run-file-checks
             name: Checking File Types....
-            entry: docker/lint.sh file_type
+            entry: script -q -c "bash docker/lint.sh file_type" /dev/null
             language: system
             always_run: true
             pass_filenames: false
         -   id: run-headers-check
             name: Checking ASF License Headers ...
-            entry: docker/lint.sh asf
+            entry: script -q -c "bash docker/lint.sh asf" /dev/null
             language: system
             always_run: true
             pass_filenames: false
         -   id: run-headers-check
             name: Linting the C++ code ...
-            entry: docker/lint.sh cpplint
+            entry: script -q -c "bash docker/lint.sh cpplint" /dev/null
             language: system
             always_run: true
             pass_filenames: false
         -   id: run-clang-format
             name: Checking Clang format ...
-            entry: docker/lint.sh clang_format
+            entry: script -q -c "bash docker/lint.sh clang_format" /dev/null
             language: system
             always_run: true
             pass_filenames: false
         -   id: run-mypy
             name: Type Checking with MyPY ...
-            entry: docker/lint.sh mypy
+            entry: script -q -c "bash docker/lint.sh mypy" /dev/null
             language: system
             always_run: true
             pass_filenames: false
@@ -90,3 +87,4 @@ repos:
             language: system
             always_run: true
             pass_filenames: false
+            stages: [commit]
