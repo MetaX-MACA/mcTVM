@@ -124,9 +124,7 @@ disable=
     use-list-literal,
     arguments-renamed,
     super-init-not-called,
-    c-extension-no-member,
-    unused-variable,
-    unused-argument
+    c-extension-no-member
 
 [REPORTS]
 

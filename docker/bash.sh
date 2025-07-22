@@ -500,7 +500,7 @@ DOCKER_CMD=(${DOCKER_BINARY} run
             "${DOCKER_IMAGE_NAME}"
             ${COMMAND[@]+"${COMMAND[@]}"}
            )
-echo "完整 docker 命令：${DOCKER_CMD[*]}"
+
 if ${DRY_RUN}; then
     echo ${DOCKER_CMD[@]+"${DOCKER_CMD[@]}"}
 else

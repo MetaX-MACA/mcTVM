@@ -39,6 +39,7 @@ function shard1 {
 
   echo "black check..."
   tests/lint/git-black.sh
+
   echo "Linting the Python code with flake8..."
   tests/lint/flake8.sh
 
