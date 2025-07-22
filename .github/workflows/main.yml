@@ -179,7 +179,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PLATFORM: cpu
-      DOCKER_RUN: docker/bash.sh --env CI --env PLATFORM --env TVM_SHARD_INDEX --env TVM_NUM_SHARDS --env RUN_DISPLAY_URL --env PLATFORM --env SKIP_SLOW_TESTS --env TEST_STEP_NAME 
+      DOCKER_RUN: docker/bash.sh --env CI --env PLATFORM --env TVM_SHARD_INDEX --env TVM_NUM_SHARDS --env RUN_DISPLAY_URL --env PLATFORM --env SKIP_SLOW_TESTS --env TEST_STEP_NAME
     steps:
       - uses: actions/checkout@v2
         with:
