@@ -27,7 +27,9 @@ from ..base import py_str
 from . import utils
 
 
-def compile_maca(code, target_format="mcbin", arch=None, options=None, path_target=None): # pylint: disable=unused-argument
+def compile_maca(
+    code, target_format="mcbin", arch=None, options=None, path_target=None
+):  # pylint: disable=unused-argument
     """Compile maca code with MXCC from env.
 
     Parameters
@@ -174,7 +176,7 @@ def have_fp16(compute_version):
     compute_version: str
         compute capability of a GPU (e.g. "6.0")
     """
-    major, minor = parse_compute_version(compute_version) # pylint: disable=unused-variable
+    major, minor = parse_compute_version(compute_version)  # pylint: disable=unused-variable
     if major >= 10:
         return True
 
@@ -286,7 +288,7 @@ def get_target_compute_version(target=None):
 
 
 @tvm.ffi.register_func("tvm.contrib.mxcc.supports_fp8")
-def have_fp8(compute_version): # pylint: disable=unused-argument
+def have_fp8(compute_version):  # pylint: disable=unused-argument
     """Whether fp8 support is provided in the specified compute capability or not
 
     Parameters
