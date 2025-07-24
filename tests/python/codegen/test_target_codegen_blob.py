@@ -93,6 +93,7 @@ def test_cuda_multi_lib():
     worker.send(popen_check)
     worker.recv()
 
+
 @tvm.testing.uses_gpu
 def test_maca_multi_lib():
     # test combining two system lib together
