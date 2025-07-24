@@ -725,5 +725,6 @@ def test_invalid_reinterpret():
     with pytest.raises(tvm.error.TVMError):
         tvm.compile(func, target="maca")
 
+
 if __name__ == "__main__":
     tvm.testing.main()
