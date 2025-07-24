@@ -56,6 +56,7 @@ def test_large_uint_imm():
 
     check_target("cuda")
     check_target("vulkan -from_device=0")
+    check_target("maca")
 
 
 @tvm.testing.requires_gpu
@@ -108,6 +109,7 @@ def test_add_pipeline():
     check_target("nvptx", host="llvm")
     check_target("vulkan", host="llvm")
     check_target("rocm", host="llvm")
+    check_target("maca", host="llvm")
 
 
 if __name__ == "__main__":
