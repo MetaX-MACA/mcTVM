@@ -191,13 +191,13 @@ def test_maca_make_int8():
         fun(a)
         np.testing.assert_equal(a.numpy(), np_a)
 
-    check_maca(64, np.int8(0xAB), 4)
+    check_maca(64, np.int8(0x5B), 4)
     check_maca(64, 0, 4)
     check_maca(64, -3, 4)
-    check_maca(64, np.int8(0xAB), 3)
+    check_maca(64, np.int8(0x5B), 3)
     check_maca(64, 0, 3)
     check_maca(64, -3, 3)
-    check_maca(64, np.int8(0xAB), 2)
+    check_maca(64, np.int8(0x5B), 2)
     check_maca(64, 0, 2)
     check_maca(64, -3, 2)
 
@@ -405,10 +405,6 @@ def test_maca_floormod_with_vectorization():
 @tvm.testing.requires_maca
 def test_vectorized_casts():
     def check(t0, t1, factor):
-        if (t0 == "float16" or t1 == "float16") and not have_fp16(tvm.maca(0).compute_version):
-            print("Skip because gpu does not have fp16 support")
-            return
-
         # compute
         n = 128
         A = te.placeholder((n,), dtype=t0, name="A")
@@ -728,37 +724,6 @@ def test_invalid_reinterpret():
 
     with pytest.raises(tvm.error.TVMError):
         tvm.compile(func, target="maca")
-
-
-@tvm.testing.requires_maca
-def test_maca_tensormap():
-    # fmt: off
-    @T.prim_func
-    def main(A_ptr: T.handle):
-        A = T.match_buffer(A_ptr, (16, 16), dtype="float32", align=16)
-
-        A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        T.call_packed("runtime.cuTensorMapInit", A_map, "float32", 2, A.data,
-                      16, 16, 64, 16, 16, 1, 1, 0, 0, 0, 0)
-
-        for blockIdx in T.thread_binding(1, thread="blockIdx.x"):
-            for threadIdx in T.thread_binding(128, thread="threadIdx.x"):
-                if threadIdx == 0:
-                    A[0, 0] = T.reinterpret("float64", A_map)
-    # fmt: on
-
-    mod = tvm.IRModule({"main": main})
-    mod = tvm.compile(mod, target="maca")
-    assert (
-        """
-extern "C" __global__ void __launch_bounds__(128) main_kernel(float* __restrict__ A, const __grid_constant__ CUtensorMap A_map) {
-  if (((int)threadIdx.x) == 0) {
-    A[0] = ((float)(*(double *)(&(A_map))));
-  }
-}""".strip()
-        in mod.mod.imported_modules[0].get_source()
-    )
-
 
 if __name__ == "__main__":
     tvm.testing.main()

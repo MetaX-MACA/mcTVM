@@ -488,10 +488,7 @@ __host__ __device__ half4 make_half4(__half x, __half y, __half z, __half w) {
     stream << R"(
 using maca_bfloat164 = half4_bfloat164<maca_bfloat16, maca_bfloat162>;
 __host__ __device__ maca_bfloat164 make_maca_bfloat164(maca_bfloat16 x, maca_bfloat16 y, maca_bfloat16 z, maca_bfloat16 w) {
-    return maca_bfloat164(x, y, z, w);
-}
-__host__ __device__ maca_bfloat162 make_maca_bfloat162(maca_bfloat16 x, maca_bfloat16 y) {
-    return maca_bfloat162(x, y);
+    return maca_bfloat164{x, y, z, w};
 }
 )";
     if (enable_fp8) {
