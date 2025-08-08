@@ -4,6 +4,7 @@
 [submodule "dlpack"]
 	path = 3rdparty/dlpack
 	url = https://github.com/dmlc/dlpack.git
+	branch = 5c210da409e7f1e51ddf445134a4376fdbd70d7d
 [submodule "3rdparty/rang"]
 	path = 3rdparty/rang
 	url = https://github.com/agauniyal/rang.git
@@ -31,3 +32,4 @@
 [submodule "ffi/3rdparty/dlpack"]
 	path = ffi/3rdparty/dlpack
 	url = https://github.com/dmlc/dlpack.git
+	branch = 5c210da409e7f1e51ddf445134a4376fdbd70d7d
