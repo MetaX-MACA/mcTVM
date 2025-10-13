@@ -65,7 +65,7 @@ from . import hls
 from . import random
 from . import hexagon
 from . import adreno
-
+from . import maca
 # error reporting
 from .utils import InvalidShapeError
 

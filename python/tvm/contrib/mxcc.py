@@ -160,12 +160,11 @@ def have_matrixcore(compute_version=None):
         else:
             raise RuntimeError("No MACA runtime found")
     major, _ = parse_compute_version(compute_version)
-    # matrix core first introduced in 8.0
-    if major >= 8:
+    # matrix core first introduced in 10.0
+    if major >= 10:
         return True
 
     return False
-
 
 def have_fp16(compute_version):
     """Either fp16 support is provided in the compute capability or not
@@ -173,14 +172,13 @@ def have_fp16(compute_version):
     Parameters
     ----------
     compute_version: str
-        compute capability of a GPU (e.g. "6.0")
+        compute capability of a GPU (e.g. "10.0")
     """
     major, minor = parse_compute_version(compute_version)
     if major >= 10:
         return True
 
     return False
-
 
 @tvm._ffi.register_func("tvm_callback_maca_get_arch")
 def get_maca_arch(maca_path="/opt/maca"):

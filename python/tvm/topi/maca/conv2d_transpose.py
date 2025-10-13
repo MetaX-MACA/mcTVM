@@ -14,20 +14,31 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# pylint: disable=invalid-name
+"""Conv2d transpose template for cuda backend"""
 
-# pylint: disable=wildcard-import
-"""Relay op strategies."""
-from __future__ import absolute_import as _abs
+import tvm
+from tvm import te
+from tvm.contrib import mcdnn
+from tvm import autotvm
+from tvm.autotvm.task.space import SplitEntity, OtherOptionEntity
+from .. import nn
+from ..utils import get_const_tuple, traverse_inline
 
-from .generic import *
-from . import x86
-from . import arm_cpu
-from . import cuda
-from . import hls
-from . import mali
-from . import bifrost
-from . import rocm
-from . import intel_graphics
-from . import hexagon
-from . import adreno
-from . import maca
+def conv2d_transpose_mcdnn(
+    x, w, stride, padding, out_dtype, output_padding=(0, 0), layout="NCHW", groups=1
+):
+    """Compute conv2d_tranpose using mcdnn dgrad kernel"""
+    tensor_format = 0 if layout == "NCHW" else 1
+    return mcdnn.conv_backward_data(
+        x,
+        w,
+        padding,
+        stride,
+        (1, 1),
+        1,
+        tensor_format,
+        out_dtype,
+        groups=groups,
+        output_padding=output_padding,
+    )
