@@ -500,6 +500,7 @@ def conv2d_transpose_strategy_maca(attrs, inputs, out_type, target):
 @conv3d_strategy.register(["maca"])
 def conv3d_strategy_maca(attrs, inputs, out_type, target):
     """conv3d maca strategy"""
+    strategy = _op.OpStrategy()
     if target.kind.name == "maca" and "mcdnn" in target.libs:
         strategy.add_implementation(
             wrap_compute_conv3d(topi.maca.conv3d_mcdnn, True),
