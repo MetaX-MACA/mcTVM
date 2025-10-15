@@ -15,19 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# pylint: disable=wildcard-import
-"""Relay op strategies."""
-from __future__ import absolute_import as _abs
-
-from .generic import *
-from . import x86
-from . import arm_cpu
-from . import cuda
-from . import hls
-from . import mali
-from . import bifrost
-from . import rocm
-from . import intel_graphics
-from . import hexagon
-from . import adreno
-from . import maca
+# pylint: disable=redefined-builtin, wildcard-import
+"""MACA specific declaration and schedules."""
+from .conv2d_nhwc_tensorcore import *
+from .conv2d_hwnc_tensorcore import *
+from .conv2d import *

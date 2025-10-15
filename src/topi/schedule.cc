@@ -44,6 +44,7 @@
 #include <tvm/topi/x86/bnn.h>
 #include <tvm/topi/x86/default.h>
 #include <tvm/topi/x86/injective.h>
+#include <tvm/topi/maca/dense.h>
 
 namespace tvm {
 namespace topi {
@@ -314,6 +315,15 @@ TVM_REGISTER_GENERIC_FUNC(dense)
     }))
     .register_func({"cuda", "gpu"}, WrapDenseOp(topi::cuda::dense_cuda))
     .register_func({"rocm"}, WrapDenseOp(topi::rocm::dense_rocm));
+
+/* MACA schedules */
+TVM_REGISTER_GLOBAL("topi.maca.dense_maca").set_body([](TVMArgs args, TVMRetValue* rv) {
+  *rv = maca::dense_maca(args[0], args[1], args[2], args[3], args[4]);
+});
+
+TVM_REGISTER_GLOBAL("topi.maca.schedule_dense").set_body([](TVMArgs args, TVMRetValue* rv) {
+  *rv = topi::maca::schedule_dense(args[0], args[1]);
+});
 
 }  // namespace topi
 }  // namespace tvm

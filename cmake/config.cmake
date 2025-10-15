@@ -494,5 +494,6 @@ SET(CMAKE_VS_PLATFORM_TOOLSET_HOST_ARCHITECTURE "x64")
 
 # Enable using flash-attn as a BYOC backend
 # Need to have USE_MACA=ON
-set(USE_FLASHATTN ON)
+set(USE_FLASHATTN OFF)
 set(USE_MCDNN ON)
+set(USE_MCBLAS ON)

@@ -953,6 +953,12 @@ requires_maca = Feature(
     parent_features="gpu",
 )
 
+# Mark a test as requiring the mcBLAS library.
+requires_mcblas = Feature("mcblas", "mcBLAS", cmake_flag="USE_MCBLAS", parent_features="maca")
+
+# Mark a test as requiring the mcDNN library.
+requires_mcdnn = Feature("mcdnn", "mcDNN", cmake_flag="USE_MCDNN", parent_features="maca")
+
 # Mark a test as requiring a matrixcore to run
 requires_matrixcore = Feature(
     "matrixcore",

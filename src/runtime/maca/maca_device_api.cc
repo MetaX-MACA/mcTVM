@@ -279,5 +279,9 @@ TVM_REGISTER_GLOBAL("profiling.timer.maca").set_body_typed([](Device dev) {
   return Timer(make_object<MACATimerNode>());
 });
 
+TVM_REGISTER_GLOBAL("runtime.get_maca_stream").set_body_typed([]() {
+  return static_cast<void*>(MACAThreadEntry::ThreadLocal()->stream);
+});
+
 }  // namespace runtime
 }  // namespace tvm

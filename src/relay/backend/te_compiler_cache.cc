@@ -320,11 +320,11 @@ class LowerToTECompute : public backend::MemoizedExprTranslator<Array<te::Tensor
     ICHECK_NE(op, device_copy_op_) << "device_copy cannot be lowered";
 
     Array<te::Tensor> outputs;
-
     if (pattern_matcher_.find(op)) {
       if (pattern_matcher_.IsLeafOp(op)) {
         // Lower anchor op when pattern leaf op was reached
         auto anchor_op = pattern_matcher_.GetAnchorOp();
+        
         LoweredOutput lowered_out =
             (*flower_call)(GetRef<Call>(anchor_op), inputs, target_, call_node->checked_type());
         outputs = lowered_out->outputs;

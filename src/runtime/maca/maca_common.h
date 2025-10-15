@@ -61,6 +61,8 @@ class MACAThreadEntry {
   // get the threadlocal workspace
   static MACAThreadEntry* ThreadLocal();
 };
+
+inline mcStream_t GetMACAStream() { return MACAThreadEntry::ThreadLocal()->stream; }
 }  // namespace runtime
 }  // namespace tvm
 #endif  // TVM_RUNTIME_MACA_MACA_COMMON_H_

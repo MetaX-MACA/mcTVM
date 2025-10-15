@@ -83,6 +83,14 @@
 #define TVM_INFO_USE_MACA "NOT-FOUND"
 #endif
 
+#ifndef TVM_INFO_USE_MCBLAS
+#define TVM_INFO_USE_MCBLAS "NOT-FOUND"
+#endif
+
+#ifndef TVM_INFO_USE_MCDNN
+#define TVM_INFO_USE_MCDNN "NOT-FOUND"
+#endif
+
 #ifndef TVM_INFO_ROCM_PATH
 #define TVM_INFO_ROCM_PATH "NOT-FOUND"
 #endif
@@ -379,6 +387,8 @@ TVM_DLL Map<String, String> GetLibInfo() {
       {"USE_HIPBLAS", TVM_INFO_USE_HIPBLAS},
       {"USE_ROCM", TVM_INFO_USE_ROCM},
       {"USE_MACA", TVM_INFO_USE_MACA},
+      {"USE_MCBLAS", TVM_INFO_USE_MCBLAS},
+      {"USE_MCDNN", TVM_INFO_USE_MCDNN},
       {"USE_RCCL", TVM_INFO_USE_RCCL},
       {"USE_RPC", TVM_INFO_USE_RPC},
       {"USE_RTTI", TVM_INFO_USE_RTTI},
