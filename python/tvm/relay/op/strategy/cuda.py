@@ -29,21 +29,21 @@ from .. import op as _op
 from .generic import *
 
 
-@schedule_injective.register(["cuda", "gpu"])
+@schedule_injective.register(["cuda", "gpu", "maca"])
 def schedule_injective_cuda(attrs, outs, target):
     """schedule injective ops for cuda"""
     with target:
         return topi.cuda.schedule_injective(outs)
 
 
-@schedule_reduce.register(["cuda", "gpu"])
+@schedule_reduce.register(["cuda", "gpu", "maca"])
 def schedule_reduce_cuda(attrs, outs, target):
     """schedule reduction ops for cuda"""
     with target:
         return topi.cuda.schedule_reduce(outs)
 
 
-@concatenate_strategy.register(["cuda", "gpu"])
+@concatenate_strategy.register(["cuda", "gpu", "maca"])
 def concatenate_strategy_cuda(attrs, inputs, out_type, target):
     strategy = _op.OpStrategy()
     strategy.add_implementation(
@@ -54,14 +54,14 @@ def concatenate_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@schedule_pool.register(["cuda", "gpu"])
+@schedule_pool.register(["cuda", "gpu", "maca"])
 def schedule_pool_cuda(attrs, outs, target):
     """schedule pooling ops for cuda"""
     with target:
         return topi.cuda.schedule_pool(outs, attrs.layout)
 
 
-@schedule_pool_grad.register(["cuda", "gpu"])
+@schedule_pool_grad.register(["cuda", "gpu", "maca"])
 def schedule_pool_grad_cuda(attrs, outs, target):
     """schedule pooling gradient ops for cuda"""
     with target:
@@ -94,7 +94,7 @@ def softmax_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@fast_softmax_strategy.register(["cuda", "gpu"])
+@fast_softmax_strategy.register(["cuda", "gpu", "maca"])
 def fast_softmax_strategy_cuda(attrs, inputs, out_type, target):
     """fast_softmax cuda strategy"""
     strategy = _op.OpStrategy()
@@ -125,7 +125,7 @@ def log_softmax_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@schedule_lrn.register(["cuda", "gpu"])
+@schedule_lrn.register(["cuda", "gpu", "maca"])
 def schedule_lrn_cuda(attrs, outs, target):
     """schedule LRN for cuda"""
     with target:
@@ -516,7 +516,7 @@ def judge_winograd(
     return judge_winograd_tensorcore, judge_winograd_autotvm, judge_winograd_auto_scheduler
 
 
-@conv2d_winograd_without_weight_transform_strategy.register(["cuda", "gpu"])
+@conv2d_winograd_without_weight_transform_strategy.register(["cuda", "gpu", "maca"])
 def conv2d_winograd_without_weight_transform_strategy_cuda(attrs, inputs, out_type, target):
     """conv2d_winograd_without_weight_transform cuda strategy"""
     dilation = attrs.get_int_tuple("dilation")
@@ -607,7 +607,7 @@ def conv2d_winograd_without_weight_transform_strategy_cuda(attrs, inputs, out_ty
     return strategy
 
 
-@deformable_conv2d_strategy.register(["cuda", "gpu"])
+@deformable_conv2d_strategy.register(["cuda", "gpu", "maca"])
 def deformable_conv2d_strategy_cuda(attrs, inputs, out_type, target):
     """deformable_conv2d cuda strategy"""
     layout = attrs.data_layout
@@ -693,7 +693,7 @@ def conv2d_transpose_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@conv3d_transpose_strategy.register(["cuda", "gpu"])
+@conv3d_transpose_strategy.register(["cuda", "gpu", "maca"])
 def conv3d_transpose_strategy_cuda(attrs, inputs, out_type, target):
     """conv3d_transpose cuda strategy"""
     layout = attrs.data_layout
@@ -777,7 +777,7 @@ def conv3d_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@conv3d_winograd_without_weight_transform_strategy.register(["cuda", "gpu"])
+@conv3d_winograd_without_weight_transform_strategy.register(["cuda", "gpu", "maca"])
 def conv3d_winograd_without_weight_transform_strategy_cuda(attrs, inputs, out_type, target):
     """conv3d_winograd_without_weight_transform cuda strategy"""
     dilation = attrs.get_int_tuple("dilation")
@@ -797,7 +797,7 @@ def conv3d_winograd_without_weight_transform_strategy_cuda(attrs, inputs, out_ty
     return strategy
 
 
-@conv1d_strategy.register(["cuda", "gpu"])
+@conv1d_strategy.register(["cuda", "gpu", "maca"])
 def conv1d_strategy_cuda(attrs, inputs, out_type, target):
     """conv1d cuda strategy"""
     layout = attrs.data_layout
@@ -838,7 +838,7 @@ def conv1d_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@conv1d_transpose_strategy.register(["cuda", "gpu"])
+@conv1d_transpose_strategy.register(["cuda", "gpu", "maca"])
 def conv1d_transpose_strategy_cuda(attrs, inputs, out_type, target):
     """conv1d_transpose cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1016,7 +1016,7 @@ def batch_matmul_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@sparse_dense_strategy.register(["cuda", "gpu"])
+@sparse_dense_strategy.register(["cuda", "gpu", "maca"])
 def sparse_dense_strategy_cuda(attrs, inputs, out_type, target):
     """sparse dense cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1029,7 +1029,7 @@ def sparse_dense_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@sparse_reshape_strategy.register(["cuda", "gpu"])
+@sparse_reshape_strategy.register(["cuda", "gpu", "maca"])
 def sparse_reshape_strategy_cuda(attrs, inputs, out_type, target):
     strategy = _op.OpStrategy()
     strategy.add_implementation(
@@ -1040,7 +1040,7 @@ def sparse_reshape_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@sparse_dense_padded_strategy.register(["cuda", "gpu", "rocm"])
+@sparse_dense_padded_strategy.register(["cuda", "gpu", "rocm", "maca"])
 def sparse_dense_padded_strategy_cuda(attrs, inputs, out_type, target):
     """sparse dense cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1053,7 +1053,7 @@ def sparse_dense_padded_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@scatter_elements_strategy.register(["cuda", "gpu"])
+@scatter_elements_strategy.register(["cuda", "gpu", "maca"])
 def scatter_elements_cuda(attrs, inputs, out_type, target):
     """scatter elements cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1077,7 +1077,7 @@ def scatter_elements_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@scatter_nd_strategy.register(["cuda", "gpu"])
+@scatter_nd_strategy.register(["cuda", "gpu", "maca"])
 def scatter_nd_cuda(attrs, inputs, out_type, target):
     """scatter_nd cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1090,7 +1090,7 @@ def scatter_nd_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@sort_strategy.register(["cuda", "gpu"])
+@sort_strategy.register(["cuda", "gpu", "maca"])
 def sort_strategy_cuda(attrs, inputs, out_type, target):
     """sort cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1109,7 +1109,7 @@ def sort_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@argsort_strategy.register(["cuda", "gpu"])
+@argsort_strategy.register(["cuda", "gpu", "maca"])
 def argsort_strategy_cuda(attrs, inputs, out_type, target):
     """argsort cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1128,7 +1128,7 @@ def argsort_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@topk_strategy.register(["cuda", "gpu"])
+@topk_strategy.register(["cuda", "gpu", "maca"])
 def topk_strategy_cuda(attrs, inputs, out_type, target):
     """topk cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1147,7 +1147,7 @@ def topk_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@searchsorted_strategy.register(["cuda", "gpu"])
+@searchsorted_strategy.register(["cuda", "gpu", "maca"])
 def searchsorted_strategy_cuda(attrs, inputs, out_type, target):
     """searchsorted cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1159,7 +1159,7 @@ def searchsorted_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@multibox_prior_strategy.register(["cuda", "gpu"])
+@multibox_prior_strategy.register(["cuda", "gpu", "maca"])
 def multibox_prior_strategy_cuda(attrs, inputs, out_type, target):
     """multibox_prior cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1171,7 +1171,7 @@ def multibox_prior_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@multibox_transform_loc_strategy.register(["cuda", "gpu"])
+@multibox_transform_loc_strategy.register(["cuda", "gpu", "maca"])
 def multibox_transform_loc_strategy_cuda(attrs, inputs, out_type, target):
     """multibox_transform_loc cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1183,7 +1183,7 @@ def multibox_transform_loc_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@get_valid_counts_strategy.register(["cuda", "gpu"])
+@get_valid_counts_strategy.register(["cuda", "gpu", "maca"])
 def get_valid_counts_strategy_cuda(attrs, inputs, out_type, target):
     """get_valid_counts cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1195,7 +1195,7 @@ def get_valid_counts_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@nms_strategy.register(["cuda", "gpu"])
+@nms_strategy.register(["cuda", "gpu", "maca"])
 def nms_strategy_cuda(attrs, inputs, out_type, target):
     """nms cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1207,7 +1207,7 @@ def nms_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@all_class_nms_strategy.register(["cuda", "gpu"])
+@all_class_nms_strategy.register(["cuda", "gpu", "maca"])
 def all_class_nms_strategy_cuda(attrs, inputs, out_type, target):
     """all class nms cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1219,7 +1219,7 @@ def all_class_nms_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@roi_align_strategy.register(["cuda", "gpu"])
+@roi_align_strategy.register(["cuda", "gpu", "maca"])
 def roi_align_strategy_cuda(attrs, inputs, out_type, target):
     """roi_align cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1241,14 +1241,14 @@ def roi_align_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@schedule_roi_pool.register(["cuda", "gpu"])
+@schedule_roi_pool.register(["cuda", "gpu", "maca"])
 def schedule_roi_pool_cuda(attrs, outs, target):
     """schedule roi_pool for cuda"""
     with target:
         return topi.cuda.schedule_roi_pool(outs)
 
 
-@proposal_strategy.register(["cuda", "gpu"])
+@proposal_strategy.register(["cuda", "gpu", "maca"])
 def proposal_strategy_cuda(attrs, inputs, out_type, target):
     """proposal cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1260,7 +1260,7 @@ def proposal_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@correlation_strategy.register(["cuda", "gpu"])
+@correlation_strategy.register(["cuda", "gpu", "maca"])
 def correlation_strategy_cuda(attrs, inputs, out_type, target):
     """correlation cuda strategy"""
     layout = attrs.layout
@@ -1274,7 +1274,7 @@ def correlation_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@argwhere_strategy.register(["cuda", "gpu"])
+@argwhere_strategy.register(["cuda", "gpu", "maca"])
 def argwhere_strategy_cuda(attrs, inputs, out_type, target):
     """argwhere cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1286,7 +1286,7 @@ def argwhere_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@cumsum_strategy.register(["cuda", "gpu"])
+@cumsum_strategy.register(["cuda", "gpu", "maca"])
 def cumsum_strategy_cuda(attrs, inputs, out_type, target):
     """cumsum cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1298,7 +1298,7 @@ def cumsum_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@cumprod_strategy.register(["cuda", "gpu"])
+@cumprod_strategy.register(["cuda", "gpu", "maca"])
 def cumprod_strategy_cuda(attrs, inputs, out_type, target):
     """cumprod cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1310,7 +1310,7 @@ def cumprod_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@unique_strategy.register(["cuda", "gpu"])
+@unique_strategy.register(["cuda", "gpu", "maca"])
 def unique_strategy_cuda(attrs, inputs, out_type, target):
     """unique cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1322,7 +1322,7 @@ def unique_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@schedule_transpose.register(["cuda", "gpu", "rocm"])
+@schedule_transpose.register(["cuda", "gpu", "rocm", "maca"])
 def schedule_transpose_cuda(attrs, outs, target):
     """
     Transpose cuda strategy
@@ -1342,7 +1342,7 @@ def schedule_transpose_cuda(attrs, outs, target):
     return schedule_injective(attrs, outs, target)
 
 
-@invert_permutation_strategy.register(["cuda", "gpu"])
+@invert_permutation_strategy.register(["cuda", "gpu", "maca"])
 def invert_permutation_strategy_cuda(attrs, inputs, out_type, target):
     """invert_permutation cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1354,7 +1354,7 @@ def invert_permutation_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@einsum_strategy.register(["cuda", "gpu"])
+@einsum_strategy.register(["cuda", "gpu", "maca"])
 def einsum_strategy_cuda(attrs, inputs, out_type, target):
     """einsum cuda strategy"""
     strategy = _op.OpStrategy()
@@ -1367,7 +1367,7 @@ def einsum_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@stft_strategy.register(["cuda", "gpu"])
+@stft_strategy.register(["cuda", "gpu", "maca"])
 def stft_strategy_cuda(attrs, inputs, out_type, target):
     strategy = _op.OpStrategy()
     strategy.add_implementation(
@@ -1378,7 +1378,7 @@ def stft_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@dft_strategy.register(["cuda", "gpu"])
+@dft_strategy.register(["cuda", "gpu", "maca"])
 def dft_strategy_cuda(attrs, inputs, out_type, target):
     strategy = _op.OpStrategy()
     strategy.add_implementation(
@@ -1389,7 +1389,7 @@ def dft_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
-@layout_transform_strategy.register(["cuda", "gpu"])
+@layout_transform_strategy.register(["cuda", "gpu", "maca"])
 def layout_transform_strategy_cuda(attrs, inputs, out_type, target):
     strategy = _op.OpStrategy()
     strategy.add_implementation(
