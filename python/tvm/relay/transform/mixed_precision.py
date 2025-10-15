@@ -98,7 +98,6 @@ DEFAULT_FOLLOW_LIST = [
     "nn.prelu",
     "nn.dropout",
     # Complicated activations which saturate in a narrow range
-    "sigmoid",
     "tanh",
     "fast_tanh",  # Some coefficients outside of representable range, but probably ok
     "fast_exp",
@@ -118,14 +117,16 @@ DEFAULT_FOLLOW_LIST = [
     "nn.adaptive_max_pool2d",
     "nn.adaptive_max_pool3d",
     "image.resize2d",
+    "nn.softmax",
+    "sum",
 ]
 DEFAULT_NEVER_LIST = [
     # In general if |f(x)| >> |x| for expected inputs then put the op here.
+    "sigmoid",
     "exp",
     "power",
     "nn.cross_entropy",
     "nn.cross_entropy_with_logits",
-    "nn.softmax",
     "nn.l2_normalize",
     # Error function doesn't seem to be able to be lowered into fp16 version in llvm.
     # Move to follow list when it does.
@@ -138,7 +139,6 @@ DEFAULT_NEVER_LIST = [
     "nn.adaptive_avg_pool1d",
     "nn.adaptive_avg_pool2d",
     "nn.adaptive_avg_pool3d",
-    "sum",
     "mean",
     "variance",
     "nn.layer_norm",

@@ -137,7 +137,7 @@ def get_valid_implementations(op, attrs, inputs, out_type, target):
     return ret
 
 
-def select_implementation(op, attrs, inputs, out_type, target, use_autotvm=True):
+def select_implementation(op, attrs, inputs, out_type, target, use_autotvm=False):
     """Select the best implementation from the op strategy.
 
     If use_autotvm is True, it'll first try to find the best implementation
