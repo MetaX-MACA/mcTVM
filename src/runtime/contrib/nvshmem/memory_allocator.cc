@@ -19,6 +19,7 @@
 #include <nvshmem.h>
 #include <nvshmemx.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/runtime/memory/memory_manager.h>
 
 #include <thread>
@@ -56,7 +57,7 @@ class NVSHMEMAllocator final : public PooledAllocator {
     return allocator;
   }
 
-  NDArray Empty(ffi::Shape shape, DataType dtype, Device device) {
+  Tensor Empty(ffi::Shape shape, DataType dtype, Device device) {
     class NVSHMEMAlloc {
      public:
       explicit NVSHMEMAlloc(Buffer buffer) : buffer_(buffer) {}
@@ -67,8 +68,8 @@ class NVSHMEMAllocator final : public PooledAllocator {
       Buffer buffer_;
     };
 
-    Buffer buffer = PooledAllocator::Alloc(device, shape, dtype, String("nvshmem"));
-    return NDArray::FromNDAlloc(NVSHMEMAlloc(buffer), shape, dtype, device);
+    Buffer buffer = PooledAllocator::Alloc(device, shape, dtype, ffi::String("nvshmem"));
+    return Tensor::FromNDAlloc(NVSHMEMAlloc(buffer), shape, dtype, device);
   }
 
  private:
@@ -85,18 +86,24 @@ class NVSHMEMAllocator final : public PooledAllocator {
   void DeviceFreeDataSpace(Device dev, void* ptr) final { nvshmem_free(ptr); }
 };
 
-NDArray NVSHMEMEmpty(ffi::Shape shape, DataType dtype, Device device) {
+Tensor NVSHMEMEmpty(ffi::Shape shape, DataType dtype, Device device) {
   return NVSHMEMAllocator::Global()->Empty(shape, dtype, UseDefaultDeviceIfNone(device));
 }
 
-TVM_FFI_REGISTER_GLOBAL("runtime.disco.nvshmem.empty").set_body_typed(NVSHMEMEmpty);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("runtime.disco.nvshmem.empty", NVSHMEMEmpty);
+}
 
 void NVSHMEMFinalize() {
   NVSHMEMAllocator::Global()->Clear();
   nvshmem_finalize();
 }
 
-TVM_FFI_REGISTER_GLOBAL("runtime.disco.nvshmem.finalize_nvshmem").set_body_typed(NVSHMEMFinalize);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("runtime.disco.nvshmem.finalize_nvshmem", NVSHMEMFinalize);
+}
 
 }  // namespace runtime
 }  // namespace tvm

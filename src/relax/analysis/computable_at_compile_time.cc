@@ -23,6 +23,7 @@
  * \brief Utilities for identifying potentially compile-time variables
  */
 
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/analysis.h>
 #include <tvm/relax/expr_functor.h>
 
@@ -34,10 +35,10 @@ namespace relax {
 namespace {
 class CompileTimeCollector : ExprVisitor {
  public:
-  static Array<Var> Collect(const Function& func) {
+  static ffi::Array<Var> Collect(const Function& func) {
     CompileTimeCollector visitor;
     visitor(func);
-    return Array<Var>(visitor.known_relax_vars_.begin(), visitor.known_relax_vars_.end());
+    return ffi::Array<Var>(visitor.known_relax_vars_.begin(), visitor.known_relax_vars_.end());
   }
 
  private:
@@ -88,12 +89,14 @@ class CompileTimeCollector : ExprVisitor {
 };
 }  // namespace
 
-Array<Var> ComputableAtCompileTime(const Function& func) {
+ffi::Array<Var> ComputableAtCompileTime(const Function& func) {
   return CompileTimeCollector::Collect(func);
 }
 
-TVM_FFI_REGISTER_GLOBAL("relax.analysis.computable_at_compile_time")
-    .set_body_typed(ComputableAtCompileTime);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("relax.analysis.computable_at_compile_time", ComputableAtCompileTime);
+}
 
 }  // namespace relax
 }  // namespace tvm

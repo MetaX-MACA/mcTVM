@@ -21,6 +21,7 @@
  * \brief Attach layout_free_buffers for layout-free buffers.
  */
 
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/expr_functor.h>
 #include <tvm/relax/transform.h>
 #include <tvm/tir/stmt_functor.h>
@@ -69,9 +70,9 @@ class AttrAttacher : public ExprMutator {
       return call;
     }
     GlobalVar gv = Downcast<GlobalVar>(call->args[0]);
-    Array<Expr> call_tir_args = Downcast<Tuple>(call->args[1])->fields;
+    ffi::Array<Expr> call_tir_args = Downcast<Tuple>(call->args[1])->fields;
     // Compute the layout free buffers
-    Array<int64_t> layout_free_buffers;
+    ffi::Array<int64_t> layout_free_buffers;
     for (size_t i = 0; i < call_tir_args.size(); i++) {
       if (layout_free_exprs_.count(call_tir_args[i].get())) {
         layout_free_buffers.push_back(i);
@@ -87,7 +88,7 @@ class AttrAttacher : public ExprMutator {
     // So we don't need to worry about the duplicate insertion
     GlobalVar new_gv = builder_->AddFunction(func, gv->name_hint);
     // Create a new call node with the updated tir::PrimFunc
-    auto n = make_object<CallNode>(*op);
+    auto n = ffi::make_object<CallNode>(*op);
     n->args = {new_gv, Tuple(call_tir_args)};
     return Call(n);
   }
@@ -105,8 +106,10 @@ Pass AttachAttrLayoutFreeBuffers() {
   return tvm::transform::Sequential({pass, DeadCodeElimination()}, "AttachAttrLayoutFreeBuffers");
 }
 
-TVM_FFI_REGISTER_GLOBAL("relax.transform.AttachAttrLayoutFreeBuffers")
-    .set_body_typed(AttachAttrLayoutFreeBuffers);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("relax.transform.AttachAttrLayoutFreeBuffers", AttachAttrLayoutFreeBuffers);
+}
 }  // namespace transform
 }  // namespace relax
 }  // namespace tvm

@@ -15,8 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """FFI APIs for tvm.runtime"""
-import tvm.ffi
+import tvm_ffi
 
-# Exports functions registered via TVM_FFI_REGISTER_GLOBAL with the "runtime" prefix.
-# e.g. TVM_FFI_REGISTER_GLOBAL("runtime.ModuleLoadFromFile")
-tvm.ffi._init_api("runtime", __name__)
+# Exports functions registered in runtime namespace.
+tvm_ffi.init_ffi_api("runtime", __name__)

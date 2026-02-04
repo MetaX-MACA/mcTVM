@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+#include <tvm/ffi/reflection/registry.h>
+
 #include <algorithm>
 #include <chrono>
 
@@ -26,22 +28,22 @@ namespace meta_schedule {
 
 /**************** Profiler ****************/
 
-Map<String, FloatImm> ProfilerNode::Get() const {
-  Map<String, FloatImm> ret;
+ffi::Map<ffi::String, FloatImm> ProfilerNode::Get() const {
+  ffi::Map<ffi::String, FloatImm> ret;
   for (const auto& kv : stats_sec) {
     ret.Set(kv.first, FloatImm(DataType::Float(64), kv.second));
   }
   return ret;
 }
 
-String ProfilerNode::Table() const {
+ffi::String ProfilerNode::Table() const {
   CHECK(!stats_sec.empty()) << "ValueError: The stats are empty. Please run the profiler first.";
   CHECK(stats_sec.count("Total"))
       << "ValueError: The total time is not recorded. This method should be called only after "
          "exiting the profiler's with scope.";
   double total = stats_sec.at("Total");
   struct Entry {
-    String name;
+    ffi::String name;
     double minutes;
     double percentage;
     bool operator<(const Entry& other) const { return percentage > other.percentage; }
@@ -69,14 +71,14 @@ String ProfilerNode::Table() const {
 }
 
 Profiler::Profiler() {
-  ObjectPtr<ProfilerNode> n = make_object<ProfilerNode>();
+  ObjectPtr<ProfilerNode> n = ffi::make_object<ProfilerNode>();
   n->stats_sec.clear();
   n->total_timer = nullptr;
   data_ = n;
 }
 
-ffi::Function ProfilerTimedScope(String name) {
-  if (Optional<Profiler> opt_profiler = Profiler::Current()) {
+ffi::Function ProfilerTimedScope(ffi::String name) {
+  if (ffi::Optional<Profiler> opt_profiler = Profiler::Current()) {
     return ffi::TypedFunction<void()>([profiler = opt_profiler.value(),                  //
                                        tik = std::chrono::high_resolution_clock::now(),  //
                                        name = std::move(name)]() {
@@ -89,7 +91,7 @@ ffi::Function ProfilerTimedScope(String name) {
   return nullptr;
 }
 
-ScopedTimer Profiler::TimedScope(String name) { return ScopedTimer(ProfilerTimedScope(name)); }
+ScopedTimer Profiler::TimedScope(ffi::String name) { return ScopedTimer(ProfilerTimedScope(name)); }
 
 /**************** Context Manager ****************/
 
@@ -111,7 +113,7 @@ void Profiler::ExitWithScope() {
   }
 }
 
-Optional<Profiler> Profiler::Current() {
+ffi::Optional<Profiler> Profiler::Current() {
   std::vector<Profiler>* profilers = ThreadLocalProfilers();
   if (profilers->empty()) {
     return std::nullopt;
@@ -120,20 +122,19 @@ Optional<Profiler> Profiler::Current() {
   }
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({ ProfilerNode::RegisterReflection(); });
+TVM_FFI_STATIC_INIT_BLOCK() { ProfilerNode::RegisterReflection(); }
 
-TVM_REGISTER_NODE_TYPE(ProfilerNode);
-TVM_FFI_REGISTER_GLOBAL("meta_schedule.Profiler").set_body_typed([]() -> Profiler {
-  return Profiler();
-});
-TVM_FFI_REGISTER_GLOBAL("meta_schedule.ProfilerEnterWithScope")
-    .set_body_method(&Profiler::EnterWithScope);
-TVM_FFI_REGISTER_GLOBAL("meta_schedule.ProfilerExitWithScope")
-    .set_body_method(&Profiler::ExitWithScope);
-TVM_FFI_REGISTER_GLOBAL("meta_schedule.ProfilerCurrent").set_body_typed(Profiler::Current);
-TVM_FFI_REGISTER_GLOBAL("meta_schedule.ProfilerGet").set_body_method(&ProfilerNode::Get);
-TVM_FFI_REGISTER_GLOBAL("meta_schedule.ProfilerTable").set_body_method(&ProfilerNode::Table);
-TVM_FFI_REGISTER_GLOBAL("meta_schedule.ProfilerTimedScope").set_body_typed(ProfilerTimedScope);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef()
+      .def("meta_schedule.Profiler", []() -> Profiler { return Profiler(); })
+      .def_method("meta_schedule.ProfilerEnterWithScope", &Profiler::EnterWithScope)
+      .def_method("meta_schedule.ProfilerExitWithScope", &Profiler::ExitWithScope)
+      .def("meta_schedule.ProfilerCurrent", Profiler::Current)
+      .def_method("meta_schedule.ProfilerGet", &ProfilerNode::Get)
+      .def_method("meta_schedule.ProfilerTable", &ProfilerNode::Table)
+      .def("meta_schedule.ProfilerTimedScope", ProfilerTimedScope);
+}
 
 }  // namespace meta_schedule
 }  // namespace tvm

@@ -18,7 +18,7 @@
 
 import contextlib
 from functools import partial
-from typing import Any
+from typing import Any, Dict, Optional
 
 import tvm
 from tvm.ir import GlobalVar, PrimType
@@ -166,6 +166,28 @@ def find_decorator_annotation(node: doc.FunctionDef, annotation: str, default: b
             if keyword.arg == annotation:
                 return keyword.value.value
     return default
+
+
+def range_sugar(
+    start: PrimExpr,
+    stop: PrimExpr = None,
+    step: Optional[PrimExpr] = None,
+    *,
+    annotations: Dict[str, Any] = None,
+) -> T.frame.ForFrame:
+    """The sugar for python range builtin."""
+
+    # Since `tir.For` do not support reversed iteration semantic,
+    # the step must be checked to be positive integer when use range sugar
+    if step is not None:
+        try:
+            step = int(step)
+            if step <= 0:
+                raise ValueError(f"Only support positive step in range(), get {step}")
+        except TypeError:  # pylint: disable=broad-except
+            raise ValueError(f"Only support literal step in range(), get {step}")
+
+    return T.serial(start, stop, annotations=annotations, step=step)
 
 
 @dispatch.register(token="tir", type_name="For")
@@ -353,7 +375,8 @@ def visit_with(self: Parser, node: doc.With) -> None:
             frame = self.eval_expr(item.context_expr)
             if not isinstance(frame, Frame):
                 self.report_error(
-                    item.context_expr, "Invalid context expression in the with-statement."
+                    item.context_expr,
+                    "Invalid context expression in the with-statement.",
                 )
             rhs = stack.enter_context(frame)
             if item.optional_vars is not None:
@@ -378,7 +401,8 @@ def visit_function_def(self: Parser, node: doc.FunctionDef) -> None:
     privacy = find_decorator_annotation(node, "private", default=False)
     self.function_annotations = None
     with self.var_table.with_frame():
-        self.var_table.add("range", T.serial)
+
+        self.var_table.add("range", range_sugar)
         with T.prim_func(is_private=privacy):
             T.func_name(node.name)
             if node.returns is not None:
@@ -498,7 +522,8 @@ def visit_if(self: Parser, node: doc.If) -> None:
                     self.visit_body(node.orelse)
         else:
             self.report_error(
-                node.test, f"If condition must be a boolean expression, but got {predicate}"
+                node.test,
+                f"If condition must be a boolean expression, but got {predicate}",
             )
 
 
@@ -537,6 +562,36 @@ def visit_return(self: Parser, node: doc.Return) -> None:
     if value is None:
         self.report_error(node, "Expression to be returned must be a PrimExpr")
     T.evaluate(tvm.tir.ret(value))
+
+
+@dispatch.register(token="tir", type_name="Continue")
+def visit_continue(self: Parser, node: doc.Continue) -> None:  # pylint:disable=unused-argument
+    """The continue visiting method for tir.
+
+    Parameters
+    ----------
+    self : Parser
+        The visiting parser.
+
+    node : doc.Continue
+        The doc AST continue node.
+    """
+    T.evaluate(tvm.tir.continue_loop())
+
+
+@dispatch.register(token="tir", type_name="Break")
+def visit_break(self: Parser, node: doc.Break) -> None:  # pylint:disable=unused-argument
+    """The continue visiting method for tir.
+
+    Parameters
+    ----------
+    self : Parser
+        The visiting parser.
+
+    node : doc.Break
+        The doc AST break node.
+    """
+    T.evaluate(tvm.tir.break_loop())
 
 
 @dispatch.register(token="tir", type_name="tvm_declare_function")

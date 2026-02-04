@@ -17,6 +17,7 @@
  * under the License.
  */
 
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/expr_functor.h>
 #include <tvm/relax/transform.h>
 
@@ -31,8 +32,8 @@ namespace {
 template <typename T, typename U>
 using PMap = std::unordered_map<T, U, ObjectPtrHash, ObjectPtrEqual>;
 
-Optional<Function> ExpandParams(Function func) {
-  bool is_exposed = func->attrs.GetAttr<String>(tvm::attr::kGlobalSymbol).defined();
+ffi::Optional<Function> ExpandParams(Function func) {
+  bool is_exposed = func->attrs.GetAttr<ffi::String>(tvm::attr::kGlobalSymbol).has_value();
   if (is_exposed) return std::nullopt;
 
   bool has_tuple_param = std::any_of(
@@ -41,12 +42,12 @@ Optional<Function> ExpandParams(Function func) {
 
   if (!has_tuple_param) return std::nullopt;
 
-  Array<Var> params;
-  Array<Binding> bindings;
+  ffi::Array<Var> params;
+  ffi::Array<Binding> bindings;
 
   std::function<void(const Var&)> expand_param = [&](const Var& param) {
     if (auto sinfo = param->struct_info_.as<TupleStructInfoNode>()) {
-      Array<Expr> internal_tuple;
+      ffi::Array<Expr> internal_tuple;
       for (size_t i = 0; i < sinfo->fields.size(); i++) {
         auto name = static_cast<const std::stringstream&>(std::stringstream()
                                                           << param->name_hint() << "_" << i)
@@ -88,7 +89,7 @@ class TupleExpander : public ExprMutator {
 
     if (auto gvar = node->op.as<GlobalVar>()) {
       if (auto it = replacements_.find(gvar.value()); it != replacements_.end()) {
-        Array<Expr> new_args;
+        ffi::Array<Expr> new_args;
 
         std::function<void(const Expr&)> expand_arg = [&](const Expr& arg) {
           if (auto sinfo = arg->struct_info_.as<TupleStructInfoNode>()) {
@@ -178,8 +179,10 @@ Pass ExpandTupleArguments() {
       "ExpandTupleArguments");
 }
 
-TVM_FFI_REGISTER_GLOBAL("relax.transform.ExpandTupleArguments")
-    .set_body_typed(ExpandTupleArguments);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("relax.transform.ExpandTupleArguments", ExpandTupleArguments);
+}
 
 }  // namespace transform
 

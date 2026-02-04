@@ -22,6 +22,7 @@
  * \brief Pass for legalizing redistribute op to ccl op.
  */
 
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/attrs/ccl.h>
 #include <tvm/relax/attrs/distributed.h>
 #include <tvm/relax/distributed/axis_group_graph.h>
@@ -54,7 +55,7 @@ class RedistributeLegalizer : public ExprMutator {
         continue;
       }
       Expr new_func_body = VisitExpr(func_->body);
-      auto new_func = make_object<FunctionNode>(*func_);
+      auto new_func = ffi::make_object<FunctionNode>(*func_);
       new_func->body = new_func_body;
       builder_->UpdateFunction(gv, Function(new_func));
     }
@@ -115,8 +116,10 @@ Pass LegalizeRedistribute() {
   };
   return CreateModulePass(pass_func, 1, "LegalizeRedistribute", {});
 }
-TVM_FFI_REGISTER_GLOBAL("relax.distributed.transform.LegalizeRedistribute")
-    .set_body_typed(LegalizeRedistribute);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("relax.distributed.transform.LegalizeRedistribute", LegalizeRedistribute);
+}
 }  // namespace transform
 
 }  // namespace distributed

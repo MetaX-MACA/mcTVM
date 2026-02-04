@@ -23,7 +23,7 @@
  */
 #include <tvm/ffi/container/variant.h>
 #include <tvm/ffi/function.h>
-#include <tvm/ffi/reflection/reflection.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/attrs.h>
 #include <tvm/ir/env_func.h>
 #include <tvm/runtime/module.h>
@@ -37,8 +37,8 @@ namespace tvm {
 // Attrs used to python API
 struct TestAttrs : public AttrsNodeReflAdapter<TestAttrs> {
   int axis;
-  String name;
-  Array<PrimExpr> padding;
+  ffi::String name;
+  ffi::Array<PrimExpr> padding;
   TypedEnvFunc<int(int)> func;
 
   static void RegisterReflection() {
@@ -47,70 +47,64 @@ struct TestAttrs : public AttrsNodeReflAdapter<TestAttrs> {
         .def_ro("axis", &TestAttrs::axis, "axis field", refl::DefaultValue(10))
         .def_ro("name", &TestAttrs::name, "name")
         .def_ro("padding", &TestAttrs::padding, "padding of input",
-                refl::DefaultValue(Array<PrimExpr>({0, 0})))
+                refl::DefaultValue(ffi::Array<PrimExpr>({0, 0})))
         .def_ro("func", &TestAttrs::func, "some random env function",
                 refl::DefaultValue(TypedEnvFunc<int(int)>(nullptr)));
   }
-
-  static constexpr const char* _type_key = "attrs.TestAttrs";
-  TVM_FFI_DECLARE_FINAL_OBJECT_INFO(TestAttrs, BaseAttrsNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("attrs.TestAttrs", TestAttrs, BaseAttrsNode);
 };
 
-TVM_FFI_STATIC_INIT_BLOCK({ TestAttrs::RegisterReflection(); });
+TVM_FFI_STATIC_INIT_BLOCK() { TestAttrs::RegisterReflection(); }
 
-TVM_REGISTER_NODE_TYPE(TestAttrs);
-
-TVM_FFI_REGISTER_GLOBAL("testing.GetShapeSize").set_body_typed([](ffi::Shape shape) {
-  return static_cast<int64_t>(shape.size());
-});
-
-TVM_FFI_REGISTER_GLOBAL("testing.GetShapeElem").set_body_typed([](ffi::Shape shape, int idx) {
-  ICHECK_LT(idx, shape.size());
-  return shape[idx];
-});
-
-TVM_FFI_REGISTER_GLOBAL("testing.test_wrap_callback")
-    .set_body_packed([](ffi::PackedArgs args, ffi::Any* ret) {
-      ffi::Function pf = args[0].cast<ffi::Function>();
-      *ret = ffi::TypedFunction<void()>([pf]() { pf(); });
-    });
-
-TVM_FFI_REGISTER_GLOBAL("testing.test_wrap_callback_suppress_err")
-    .set_body_packed([](ffi::PackedArgs args, ffi::Any* ret) {
-      ffi::Function pf = args[0].cast<ffi::Function>();
-      auto result = ffi::TypedFunction<void()>([pf]() {
-        try {
-          pf();
-        } catch (std::exception& err) {
-        }
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef()
+      .def("testing.GetShapeSize",
+           [](ffi::Shape shape) { return static_cast<int64_t>(shape.size()); })
+      .def("testing.GetShapeElem",
+           [](ffi::Shape shape, int idx) {
+             ICHECK_LT(idx, shape.size());
+             return shape[idx];
+           })
+      .def_packed("testing.test_wrap_callback",
+                  [](ffi::PackedArgs args, ffi::Any* ret) {
+                    ffi::Function pf = args[0].cast<ffi::Function>();
+                    *ret = ffi::TypedFunction<void()>([pf]() { pf(); });
+                  })
+      .def_packed("testing.test_wrap_callback_suppress_err",
+                  [](ffi::PackedArgs args, ffi::Any* ret) {
+                    ffi::Function pf = args[0].cast<ffi::Function>();
+                    auto result = ffi::TypedFunction<void()>([pf]() {
+                      try {
+                        pf();
+                      } catch (std::exception& err) {
+                      }
+                    });
+                    *ret = result;
+                  })
+      .def_packed("testing.test_check_eq_callback",
+                  [](ffi::PackedArgs args, ffi::Any* ret) {
+                    auto msg = args[0].cast<std::string>();
+                    *ret = ffi::TypedFunction<void(int x, int y)>(
+                        [msg](int x, int y) { CHECK_EQ(x, y) << msg; });
+                  })
+      .def_packed("testing.device_test",
+                  [](ffi::PackedArgs args, ffi::Any* ret) {
+                    auto dev = args[0].cast<Device>();
+                    int dtype = args[1].cast<int>();
+                    int did = args[2].cast<int>();
+                    CHECK_EQ(static_cast<int>(dev.device_type), dtype);
+                    CHECK_EQ(static_cast<int>(dev.device_id), did);
+                    *ret = dev;
+                  })
+      .def_packed("testing.identity_cpp", [](ffi::PackedArgs args, ffi::Any* ret) {
+        const auto identity_func = tvm::ffi::Function::GetGlobal("testing.identity_py");
+        ICHECK(identity_func.has_value())
+            << "AttributeError: \"testing.identity_py\" is not registered. Please check "
+               "if the python module is properly loaded";
+        *ret = (*identity_func)(args[0]);
       });
-      *ret = result;
-    });
-
-TVM_FFI_REGISTER_GLOBAL("testing.test_check_eq_callback")
-    .set_body_packed([](ffi::PackedArgs args, ffi::Any* ret) {
-      auto msg = args[0].cast<std::string>();
-      *ret = ffi::TypedFunction<void(int x, int y)>([msg](int x, int y) { CHECK_EQ(x, y) << msg; });
-    });
-
-TVM_FFI_REGISTER_GLOBAL("testing.device_test")
-    .set_body_packed([](ffi::PackedArgs args, ffi::Any* ret) {
-      auto dev = args[0].cast<Device>();
-      int dtype = args[1].cast<int>();
-      int did = args[2].cast<int>();
-      CHECK_EQ(static_cast<int>(dev.device_type), dtype);
-      CHECK_EQ(static_cast<int>(dev.device_id), did);
-      *ret = dev;
-    });
-
-TVM_FFI_REGISTER_GLOBAL("testing.identity_cpp")
-    .set_body_packed([](ffi::PackedArgs args, ffi::Any* ret) {
-      const auto identity_func = tvm::ffi::Function::GetGlobal("testing.identity_py");
-      ICHECK(identity_func.has_value())
-          << "AttributeError: \"testing.identity_py\" is not registered. Please check "
-             "if the python module is properly loaded";
-      *ret = (*identity_func)(args[0]);
-    });
+}
 
 // in src/api_test.cc
 void ErrorTest(int x, int y) {
@@ -122,15 +116,18 @@ void ErrorTest(int x, int y) {
   }
 }
 
-TVM_FFI_REGISTER_GLOBAL("testing.ErrorTest").set_body_typed(ErrorTest);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("testing.ErrorTest", ErrorTest);
+}
 
-class FrontendTestModuleNode : public runtime::ModuleNode {
+class FrontendTestModuleNode : public ffi::ModuleObj {
  public:
-  const char* type_key() const final { return "frontend_test"; }
+  const char* kind() const final { return "frontend_test"; }
 
   static constexpr const char* kAddFunctionName = "__add_function";
 
-  virtual ffi::Function GetFunction(const String& name, const ObjectPtr<Object>& sptr_to_self);
+  virtual ffi::Optional<ffi::Function> GetFunction(const ffi::String& name);
 
  private:
   std::unordered_map<std::string, ffi::Function> functions_;
@@ -138,11 +135,11 @@ class FrontendTestModuleNode : public runtime::ModuleNode {
 
 constexpr const char* FrontendTestModuleNode::kAddFunctionName;
 
-ffi::Function FrontendTestModuleNode::GetFunction(const String& name,
-                                                  const ObjectPtr<Object>& sptr_to_self) {
+ffi::Optional<ffi::Function> FrontendTestModuleNode::GetFunction(const ffi::String& name) {
+  ffi::Module self_strong_ref = ffi::GetRef<ffi::Module>(this);
   if (name == kAddFunctionName) {
-    return ffi::TypedFunction<void(std::string, ffi::Function)>(
-        [this, sptr_to_self](std::string func_name, ffi::Function pf) {
+    return ffi::Function::FromTyped(
+        [this, self_strong_ref](std::string func_name, ffi::Function pf) {
           CHECK_NE(func_name, kAddFunctionName)
               << "func_name: cannot be special function " << kAddFunctionName;
           functions_[func_name] = pf;
@@ -151,87 +148,75 @@ ffi::Function FrontendTestModuleNode::GetFunction(const String& name,
 
   auto it = functions_.find(name);
   if (it == functions_.end()) {
-    return ffi::Function();
+    return std::nullopt;
   }
 
   return it->second;
 }
 
-runtime::Module NewFrontendTestModule() {
-  auto n = make_object<FrontendTestModuleNode>();
-  return runtime::Module(n);
+ffi::Module NewFrontendTestModule() {
+  auto n = ffi::make_object<FrontendTestModuleNode>();
+  return ffi::Module(n);
 }
 
-TVM_FFI_REGISTER_GLOBAL("testing.FrontendTestModule").set_body_typed(NewFrontendTestModule);
-
-TVM_FFI_REGISTER_GLOBAL("testing.sleep_in_ffi").set_body_typed([](double timeout) {
-  std::chrono::duration<int64_t, std::nano> duration(static_cast<int64_t>(timeout * 1e9));
-  std::this_thread::sleep_for(duration);
-});
-
-TVM_FFI_REGISTER_GLOBAL("testing.ReturnsVariant")
-    .set_body_typed([](int x) -> Variant<String, IntImm> {
-      if (x % 2 == 0) {
-        return IntImm(DataType::Int(64), x / 2);
-      } else {
-        return String("argument was odd");
-      }
-    });
-
-TVM_FFI_REGISTER_GLOBAL("testing.AcceptsVariant")
-    .set_body_typed([](Variant<String, Integer> arg) -> String {
-      if (auto opt_str = arg.as<String>()) {
-        return opt_str.value()->GetTypeKey();
-      } else {
-        return arg.get<Integer>()->GetTypeKey();
-      }
-    });
-
-TVM_FFI_REGISTER_GLOBAL("testing.AcceptsBool").set_body_typed([](bool arg) -> bool { return arg; });
-
-TVM_FFI_REGISTER_GLOBAL("testing.AcceptsInt").set_body_typed([](int arg) -> int { return arg; });
-
-TVM_FFI_REGISTER_GLOBAL("testing.AcceptsObjectRefArray").set_body_typed([](Array<Any> arg) -> Any {
-  return arg[0];
-});
-
-TVM_FFI_REGISTER_GLOBAL("testing.AcceptsMapReturnsValue")
-    .set_body_typed([](Map<Any, Any> map, Any key) -> Any { return map[key]; });
-
-TVM_FFI_REGISTER_GLOBAL("testing.AcceptsMapReturnsMap")
-    .set_body_typed([](Map<Any, Any> map) -> ObjectRef { return map; });
-
-TVM_FFI_REGISTER_GLOBAL("testing.AcceptsPrimExpr").set_body_typed([](PrimExpr expr) -> ObjectRef {
-  return expr;
-});
-
-TVM_FFI_REGISTER_GLOBAL("testing.AcceptsArrayOfPrimExpr")
-    .set_body_typed([](Array<PrimExpr> arr) -> ObjectRef {
-      for (ObjectRef item : arr) {
-        CHECK(item->IsInstance<PrimExprNode>())
-            << "Array contained " << item->GetTypeKey() << " when it should contain PrimExpr";
-      }
-      return arr;
-    });
-
-TVM_FFI_REGISTER_GLOBAL("testing.AcceptsArrayOfVariant")
-    .set_body_typed([](Array<Variant<ffi::Function, PrimExpr>> arr) -> ObjectRef {
-      for (auto item : arr) {
-        CHECK(item.as<PrimExpr>() || item.as<ffi::Function>())
-            << "Array should contain either PrimExpr or ffi::Function";
-      }
-      return arr;
-    });
-
-TVM_FFI_REGISTER_GLOBAL("testing.AcceptsMapOfPrimExpr")
-    .set_body_typed([](Map<ObjectRef, PrimExpr> map) -> ObjectRef {
-      for (const auto& kv : map) {
-        ObjectRef value = kv.second;
-        CHECK(value->IsInstance<PrimExprNode>())
-            << "Map contained " << value->GetTypeKey() << " when it should contain PrimExpr";
-      }
-      return map;
-    });
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef()
+      .def("testing.FrontendTestModule", NewFrontendTestModule)
+      .def(
+          "testing.sleep_in_ffi",
+          [](double timeout) {
+            std::chrono::duration<int64_t, std::nano> duration(static_cast<int64_t>(timeout * 1e9));
+            std::this_thread::sleep_for(duration);
+          })
+      .def("testing.ReturnsVariant",
+           [](int x) -> ffi::Variant<ffi::String, IntImm> {
+             if (x % 2 == 0) {
+               return IntImm(DataType::Int(64), x / 2);
+             } else {
+               return ffi::String("argument was odd");
+             }
+           })
+      .def("testing.AcceptsVariant",
+           [](ffi::Variant<ffi::String, Integer> arg) -> ffi::String {
+             if (auto opt_str = arg.as<ffi::String>()) {
+               return ffi::StaticTypeKey::kTVMFFIStr;
+             } else {
+               return arg.get<Integer>().GetTypeKey();
+             }
+           })
+      .def("testing.AcceptsBool", [](bool arg) -> bool { return arg; })
+      .def("testing.AcceptsInt", [](int arg) -> int { return arg; })
+      .def("testing.AcceptsObjectRefArray", [](ffi::Array<Any> arg) -> Any { return arg[0]; })
+      .def("testing.AcceptsMapReturnsValue",
+           [](ffi::Map<Any, Any> map, Any key) -> Any { return map[key]; })
+      .def("testing.AcceptsMapReturnsMap", [](ffi::Map<Any, Any> map) -> ObjectRef { return map; })
+      .def("testing.AcceptsPrimExpr", [](PrimExpr expr) -> ObjectRef { return expr; })
+      .def("testing.AcceptsArrayOfPrimExpr",
+           [](ffi::Array<PrimExpr> arr) -> ObjectRef {
+             for (ObjectRef item : arr) {
+               CHECK(item->IsInstance<PrimExprNode>()) << "Array contained " << item->GetTypeKey()
+                                                       << " when it should contain PrimExpr";
+             }
+             return arr;
+           })
+      .def("testing.AcceptsArrayOfVariant",
+           [](ffi::Array<ffi::Variant<ffi::Function, PrimExpr>> arr) -> ObjectRef {
+             for (auto item : arr) {
+               CHECK(item.as<PrimExpr>() || item.as<ffi::Function>())
+                   << "Array should contain either PrimExpr or ffi::Function";
+             }
+             return arr;
+           })
+      .def("testing.AcceptsMapOfPrimExpr", [](ffi::Map<Any, PrimExpr> map) -> ObjectRef {
+        for (const auto& kv : map) {
+          ObjectRef value = kv.second;
+          CHECK(value->IsInstance<PrimExprNode>())
+              << "Map contained " << value->GetTypeKey() << " when it should contain PrimExpr";
+        }
+        return map;
+      });
+}
 
 /**
  * Simple event logger that can be used for testing purposes
@@ -239,7 +224,7 @@ TVM_FFI_REGISTER_GLOBAL("testing.AcceptsMapOfPrimExpr")
 class TestingEventLogger {
  public:
   struct Entry {
-    String event;
+    ffi::String event;
     double time_us;
   };
 
@@ -248,7 +233,7 @@ class TestingEventLogger {
     start_ = std::chrono::high_resolution_clock::now();
   }
 
-  void Record(String event) {
+  void Record(ffi::String event) {
     auto tend = std::chrono::high_resolution_clock::now();
     double time_us = static_cast<double>((tend - start_).count()) / 1e3;
     entries_.emplace_back(Entry{event, time_us});
@@ -272,21 +257,20 @@ class TestingEventLogger {
   std::vector<Entry> entries_;
 };
 
-TVM_FFI_REGISTER_GLOBAL("testing.record_event")
-    .set_body_packed([](ffi::PackedArgs args, ffi::Any* rv) {
-      if (args.size() != 0 && args[0].try_cast<String>()) {
-        TestingEventLogger::ThreadLocal()->Record(args[0].cast<String>());
-      } else {
-        TestingEventLogger::ThreadLocal()->Record("X");
-      }
-    });
-
-TVM_FFI_REGISTER_GLOBAL("testing.reset_events")
-    .set_body_packed([](ffi::PackedArgs args, ffi::Any* rv) {
-      TestingEventLogger::ThreadLocal()->Reset();
-    });
-
-TVM_FFI_REGISTER_GLOBAL("testing.dump_events").set_body_typed([]() {
-  TestingEventLogger::ThreadLocal()->Dump();
-});
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef()
+      .def_packed("testing.record_event",
+                  [](ffi::PackedArgs args, ffi::Any* rv) {
+                    if (args.size() != 0 && args[0].try_cast<ffi::String>()) {
+                      TestingEventLogger::ThreadLocal()->Record(args[0].cast<ffi::String>());
+                    } else {
+                      TestingEventLogger::ThreadLocal()->Record("X");
+                    }
+                  })
+      .def_packed(
+          "testing.reset_events",
+          [](ffi::PackedArgs args, ffi::Any* rv) { TestingEventLogger::ThreadLocal()->Reset(); })
+      .def("testing.dump_events", []() { TestingEventLogger::ThreadLocal()->Dump(); });
+}
 }  // namespace tvm

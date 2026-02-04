@@ -16,9 +16,11 @@
 # under the License.
 """IRBuilder for TIR"""
 
+import contextlib
 import functools
 import inspect
 import sys
+import threading
 from numbers import Integral
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -32,7 +34,7 @@ import numpy as np  # type: ignore
 from tvm import ir, tir
 from tvm.ir import Type
 from tvm.ir.base import deprecated
-from tvm.runtime import String, convert, ndarray
+from tvm.runtime import String, convert, tensor
 from tvm.target import Target
 
 # pylint: disable=unused-import
@@ -85,6 +87,35 @@ from . import _ffi_api, frame
 from .external_kernel import call_kernel
 
 # pylint: enable=unused-import
+
+
+_block_name_suffix = threading.local()
+
+
+def _get_block_name_suffix() -> str:
+    """Get the current block name suffix for macro expansion."""
+    return getattr(_block_name_suffix, "value", "")
+
+
+@contextlib.contextmanager
+def block_name_suffix_context(block_suffix: str):
+    """Context manager to set block name suffix during macro expansion.
+
+    Parameters
+    ----------
+    block_suffix : str
+        The suffix to append to block names (e.g., "_1", "_2").
+
+    Yields
+    ------
+    None
+    """
+    old_suffix = getattr(_block_name_suffix, "value", "")
+    _block_name_suffix.value = block_suffix
+    try:
+        yield
+    finally:
+        _block_name_suffix.value = old_suffix
 
 
 def buffer(
@@ -352,6 +383,9 @@ def block(name: str = "", no_realize: bool = False) -> frame.BlockFrame:
     res : frame.BlockFrame
         The BlockFrame.
     """
+    block_suffix = _get_block_name_suffix()
+    if block_suffix and name:
+        name = name + block_suffix
     return _ffi_api.Block(name, no_realize)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
@@ -677,7 +711,11 @@ class axis:  # pylint: disable=invalid-name
 
 
 def serial(
-    start: PrimExpr, stop: PrimExpr = None, *, annotations: Dict[str, Any] = None
+    start: PrimExpr,
+    stop: PrimExpr = None,
+    *,
+    annotations: Dict[str, Any] = None,
+    step: Optional[PrimExpr] = None,
 ) -> frame.ForFrame:
     """The serial For statement.
 
@@ -692,6 +730,9 @@ def serial(
     annotations : Dict[str, Any]
         The optional annotations of the For statement.
 
+    step : PrimExpr
+        The optional step value of iteration.
+
     Returns
     -------
     res : frame.ForFrame
@@ -703,11 +744,15 @@ def serial(
             start = IntImm(start.dtype, 0)
         else:
             start = 0
-    return _ffi_api.Serial(start, stop, annotations)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Serial(start, stop, annotations, step)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def parallel(
-    start: PrimExpr, stop: PrimExpr = None, *, annotations: Dict[str, Any] = None
+    start: PrimExpr,
+    stop: PrimExpr = None,
+    *,
+    annotations: Dict[str, Any] = None,
+    step: Optional[PrimExpr] = None,
 ) -> frame.ForFrame:
     """The parallel For statement.
 
@@ -722,6 +767,9 @@ def parallel(
     annotations : Dict[str, Any]
         The optional annotations of the For statement.
 
+    step : PrimExpr
+        The optional step value of iteration.
+
     Returns
     -------
     res : frame.ForFrame
@@ -733,11 +781,15 @@ def parallel(
             start = IntImm(start.dtype, 0)
         else:
             start = 0
-    return _ffi_api.Parallel(start, stop, annotations)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Parallel(start, stop, annotations, step)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def vectorized(
-    start: PrimExpr, stop: PrimExpr = None, *, annotations: Dict[str, Any] = None
+    start: PrimExpr,
+    stop: PrimExpr = None,
+    *,
+    annotations: Dict[str, Any] = None,
+    step: Optional[PrimExpr] = None,
 ) -> frame.ForFrame:
     """The vectorized For statement.
 
@@ -752,6 +804,9 @@ def vectorized(
     annotations : Dict[str, Any]
         The optional annotations of the For statement.
 
+    step : PrimExpr
+        The optional step value of iteration.
+
     Returns
     -------
     res : frame.ForFrame
@@ -763,11 +818,15 @@ def vectorized(
             start = IntImm(start.dtype, 0)
         else:
             start = 0
-    return _ffi_api.Vectorized(start, stop, annotations)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Vectorized(start, stop, annotations, step)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def unroll(
-    start: PrimExpr, stop: PrimExpr = None, *, annotations: Dict[str, Any] = None
+    start: PrimExpr,
+    stop: PrimExpr = None,
+    *,
+    annotations: Dict[str, Any] = None,
+    step: Optional[PrimExpr] = None,
 ) -> frame.ForFrame:
     """The unrolled For statement.
 
@@ -782,6 +841,9 @@ def unroll(
     annotations : Dict[str, Any]
         The optional annotations of the For statement.
 
+    step : PrimExpr
+        The optional step value of iteration.
+
     Returns
     -------
     res : frame.ForFrame
@@ -793,7 +855,7 @@ def unroll(
             start = IntImm(start.dtype, 0)
         else:
             start = 0
-    return _ffi_api.Unroll(start, stop, annotations)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Unroll(start, stop, annotations, step)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def thread_binding(
@@ -1054,7 +1116,7 @@ def allocate_const(
         np_data = np_data.reshape(extents)
 
     return _ffi_api.AllocateConst(  # type: ignore[attr-defined] # pylint: disable=no-member
-        ndarray.array(np_data), dtype, extents, annotations
+        tensor(np_data), dtype, extents, annotations
     )
 
 
@@ -1917,6 +1979,8 @@ pow = _op_wrapper(_tir_op.pow)  # pylint: disable=redefined-builtin
 q_multiply_shift = _op_wrapper(_tir_op.q_multiply_shift)
 q_multiply_shift_per_axis = _op_wrapper(_tir_op.q_multiply_shift_per_axis)
 ret = _op_wrapper(_tir_op.ret)
+continue_loop = _op_wrapper(_tir_op.continue_loop)
+break_loop = _op_wrapper(_tir_op.break_loop)
 round = _op_wrapper(_tir_op.round)  # pylint: disable=redefined-builtin
 rsqrt = _op_wrapper(_tir_op.rsqrt)
 shift_left = _op_wrapper(_tir_op.shift_left)
@@ -1927,6 +1991,7 @@ sinh = _op_wrapper(_tir_op.sinh)
 sqrt = _op_wrapper(_tir_op.sqrt)
 tan = _op_wrapper(_tir_op.tan)
 tanh = _op_wrapper(_tir_op.tanh)
+thread_return = _op_wrapper(_tir_op.thread_return)
 trunc = _op_wrapper(_tir_op.trunc)
 truncdiv = _op_wrapper(_tir_op.truncdiv)
 truncmod = _op_wrapper(_tir_op.truncmod)
@@ -2104,6 +2169,7 @@ __all__ = float_types + [
     "func_ret",
     "match_buffer",
     "block",
+    "block_name_suffix_context",
     "init",
     "where",
     "reads",
@@ -2194,6 +2260,8 @@ __all__ = float_types + [
     "q_multiply_shift",
     "q_multiply_shift_per_axis",
     "ret",
+    "continue_loop",
+    "break_loop",
     "reinterpret",
     "round",
     "rsqrt",
@@ -2205,6 +2273,7 @@ __all__ = float_types + [
     "sqrt",
     "tan",
     "tanh",
+    "thread_return",
     "trunc",
     "truncdiv",
     "truncmod",

@@ -24,6 +24,7 @@
 #include <dmlc/thread_local.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/runtime/base.h>
 #include <tvm/runtime/c_backend_api.h>
 #include <tvm/runtime/logging.h>
@@ -140,7 +141,7 @@ class ParallelLauncher {
   // The counter page.
   std::atomic<int32_t>* sync_counter_{nullptr};
   // The error message
-  std::vector<Optional<tvm::ffi::Error>> par_errors_;
+  std::vector<ffi::Optional<tvm::ffi::Error>> par_errors_;
 };
 
 /*! \brief Lock-free single-producer-single-consumer queue for each thread */
@@ -378,25 +379,27 @@ class ThreadPool {
  * \brief args[0] is the AffinityMode, args[1] is the number of threads.
  *  args2 is a list of CPUs which is used to set the CPU affinity.
  */
-TVM_FFI_REGISTER_GLOBAL("runtime.config_threadpool")
-    .set_body_packed([](ffi::PackedArgs args, ffi::Any* rv) {
-      threading::ThreadGroup::AffinityMode mode =
-          static_cast<threading::ThreadGroup::AffinityMode>(args[0].cast<int>());
-      int nthreads = args[1].cast<int>();
-      std::vector<unsigned int> cpus;
-      if (args.size() >= 3) {
-        auto cpu_array = args[2].cast<Array<String>>();
-        for (auto cpu : cpu_array) {
-          ICHECK(IsNumber(cpu)) << "The CPU core information '" << cpu << "' is not a number.";
-          cpus.push_back(std::stoi(cpu));
-        }
-      }
-      threading::Configure(mode, nthreads, cpus);
-    });
-
-TVM_FFI_REGISTER_GLOBAL("runtime.NumThreads").set_body_typed([]() -> int32_t {
-  return threading::NumThreads();
-});
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef()
+      .def_packed("runtime.config_threadpool",
+                  [](ffi::PackedArgs args, ffi::Any* rv) {
+                    threading::ThreadGroup::AffinityMode mode =
+                        static_cast<threading::ThreadGroup::AffinityMode>(args[0].cast<int>());
+                    int nthreads = args[1].cast<int>();
+                    std::vector<unsigned int> cpus;
+                    if (args.size() >= 3) {
+                      auto cpu_array = args[2].cast<ffi::Array<ffi::String>>();
+                      for (auto cpu : cpu_array) {
+                        ICHECK(IsNumber(cpu))
+                            << "The CPU core information '" << cpu << "' is not a number.";
+                        cpus.push_back(std::stoi(cpu));
+                      }
+                    }
+                    threading::Configure(mode, nthreads, cpus);
+                  })
+      .def("runtime.NumThreads", []() -> int32_t { return threading::NumThreads(); });
+}
 
 namespace threading {
 

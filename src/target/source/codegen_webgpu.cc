@@ -22,7 +22,9 @@
  */
 #include "codegen_webgpu.h"
 
+#include <dmlc/memory_io.h>
 #include <tvm/arith/analyzer.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/tir/builtin.h>
 #include <tvm/tir/transform.h>
 
@@ -61,7 +63,7 @@ class WebGPUWorkgroupInfoCollector : public StmtExprVisitor {
  private:
   void VisitExpr_(const VarNode* op) final {
     StmtExprVisitor::VisitExpr_(op);
-    Var buffer_var = GetRef<Var>(op);
+    Var buffer_var = ffi::GetRef<Var>(op);
     if (buffer_var.dtype().is_handle()) {
       info_.write_access_set.insert(buffer_var);
     }
@@ -135,8 +137,8 @@ runtime::FunctionInfo CodeGenWebGPU::AddFunction(const PrimFunc& f, bool skip_re
   ICHECK_EQ(name_supply_->FreshName("gridDim"), "gridDim");
 
   // add to alloc buffer type.
-  auto global_symbol = f->GetAttr<String>(tvm::attr::kGlobalSymbol);
-  ICHECK(global_symbol.defined())
+  auto global_symbol = f->GetAttr<ffi::String>(tvm::attr::kGlobalSymbol);
+  ICHECK(global_symbol.has_value())
       << "CodeGenWebGPU: Expect PrimFunc to have the global_symbol attribute";
 
   header_stream << "//----------------------------------------\n"
@@ -231,7 +233,7 @@ runtime::FunctionInfo CodeGenWebGPU::AddFunction(const PrimFunc& f, bool skip_re
                     << "var<uniform> " << val_pod_args << " : " << type_pod_args << ";\n\n";
 
   // setup thread tags and param access in launch param tags;
-  if (auto opt = f->GetAttr<Array<String>>(tir::attr::kKernelLaunchParams)) {
+  if (auto opt = f->GetAttr<ffi::Array<ffi::String>>(tir::attr::kKernelLaunchParams)) {
     for (const auto& thread_tag : opt.value()) {
       func_info.launch_param_tags.push_back(thread_tag);
     }
@@ -665,13 +667,21 @@ void CodeGenWebGPU::VisitStmt_(const AllocateNode* op) {
 }
 
 void CodeGenWebGPU::VisitStmt_(const ForNode* op) {
-  std::string extent = PrintExpr(op->extent);
+  std::string begin_str = PrintExpr(op->min);
+  PrimExpr end = is_zero(op->min) ? op->extent : arith::Analyzer().Simplify(op->min + op->extent);
+  std::string end_str = PrintExpr(end);
+  std::string step_str = op->step.has_value() ? PrintExpr(*op->step) : "";
   std::string vid = AllocVarID(op->loop_var.get());
-  ICHECK(is_zero(op->min));
   PrintIndent();
   stream << "for (var " << vid << " : ";
   PrintType(op->loop_var.dtype(), stream);
-  stream << " = 0; " << vid << " < " << extent << "; " << vid << "++) {\n";
+  stream << " = " << begin_str << "; " << vid << " < " << end_str << "; " << vid;
+  if (step_str.empty()) {
+    stream << "++";
+  } else {
+    stream << " += " << step_str;
+  }
+  stream << ") {\n";
   int for_scope = BeginScope();
   PrintStmt(op->body);
   this->EndScope(for_scope);
@@ -704,27 +714,30 @@ void CodeGenWebGPU::VisitStmt_(const WhileNode* op) {
 //-------------------------------------------------
 // WebGPUSourceModule to enable export
 //-------------------------------------------------
-class WebGPUSourceModuleNode final : public runtime::ModuleNode {
+class WebGPUSourceModuleNode final : public ffi::ModuleObj {
  public:
   explicit WebGPUSourceModuleNode(std::unordered_map<std::string, std::string> smap,
                                   std::unordered_map<std::string, runtime::FunctionInfo> fmap)
       : smap_(smap), fmap_(fmap) {}
 
-  const char* type_key() const final { return "webgpu"; }
+  const char* kind() const final { return "webgpu"; }
   /*! \brief Get the property of the runtime module .*/
-  int GetPropertyMask() const final { return runtime::ModulePropertyMask::kBinarySerializable; }
+  int GetPropertyMask() const final { return ffi::Module::kBinarySerializable; }
 
-  ffi::Function GetFunction(const String& name, const ObjectPtr<Object>& sptr_to_self) final {
+  ffi::Optional<ffi::Function> GetFunction(const ffi::String& name) final {
     LOG(FATAL) << "WebGPUSourceModule is not directly runnable, export and run through tvmjs";
-    return ffi::Function(nullptr);
   }
 
-  void SaveToBinary(dmlc::Stream* stream) final {
+  ffi::Bytes SaveToBytes() const final {
+    std::string buffer;
+    dmlc::MemoryStringStream ms(&buffer);
+    dmlc::Stream* stream = &ms;
     stream->Write(fmap_);
     stream->Write(smap_);
+    return ffi::Bytes(buffer);
   }
 
-  String GetSource(const String& format) final {
+  ffi::String InspectSource(const ffi::String& format) const final {
     if (format == "func_info") {
       std::ostringstream stream;
       dmlc::JSONWriter(&stream).Write(fmap_);
@@ -748,7 +761,7 @@ class WebGPUSourceModuleNode final : public runtime::ModuleNode {
 //-------------------------------------------------
 // Build logic.
 //-------------------------------------------------
-runtime::Module BuildWebGPU(IRModule mod, Target target) {
+ffi::Module BuildWebGPU(IRModule mod, Target target) {
   mod = tir::transform::PointerValueTypeRewrite()(std::move(mod));
   bool output_ssa = false;
   bool skip_readonly_decl = false;
@@ -765,8 +778,8 @@ runtime::Module BuildWebGPU(IRModule mod, Target target) {
     auto calling_conv = f->GetAttr<Integer>(tvm::attr::kCallingConv);
     ICHECK(calling_conv == CallingConv::kDeviceKernelLaunch)
         << "CodeGenWebGPU: expect calling_conv equals CallingConv::kDeviceKernelLaunch";
-    auto global_symbol = f->GetAttr<String>(tvm::attr::kGlobalSymbol);
-    ICHECK(global_symbol.defined())
+    auto global_symbol = f->GetAttr<ffi::String>(tvm::attr::kGlobalSymbol);
+    ICHECK(global_symbol.has_value())
         << "CodeGenWebGPU: Expect PrimFunc to have the global_symbol attribute";
     std::string f_name = global_symbol.value();
     cg.Init(output_ssa);
@@ -775,13 +788,15 @@ runtime::Module BuildWebGPU(IRModule mod, Target target) {
     smap[f_name] = code;
   }
 
-  auto n = make_object<WebGPUSourceModuleNode>(smap, fmap);
-  return runtime::Module(n);
+  auto n = ffi::make_object<WebGPUSourceModuleNode>(smap, fmap);
+  return ffi::Module(n);
 }
 
-TVM_FFI_REGISTER_GLOBAL("target.build.webgpu").set_body_typed([](IRModule mod, Target target) {
-  return BuildWebGPU(mod, target);
-});
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("target.build.webgpu",
+                        [](IRModule mod, Target target) { return BuildWebGPU(mod, target); });
+}
 
 }  // namespace codegen
 }  // namespace tvm

@@ -22,6 +22,7 @@
  */
 
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/target/target.h>
 #include <tvm/tir/op.h>
 #include <tvm/tir/stmt_functor.h>
@@ -63,7 +64,7 @@ class CustomDatatypesLowerer : public StmtExprMutator {
 
   PrimExpr VisitExpr_(const FloatImmNode* imm) final {
     auto type_code = imm->dtype.code();
-    auto e = GetRef<PrimExpr>(imm);
+    auto e = ffi::GetRef<PrimExpr>(imm);
     if (datatype::Registry::Global()->GetTypeRegistered(type_code)) {
       auto lower = datatype::GetFloatImmLowerFunc(target_, type_code);
       ICHECK(lower) << "FloatImm lowering function for target " << target_ << " type "
@@ -74,7 +75,7 @@ class CustomDatatypesLowerer : public StmtExprMutator {
   }
 
   PrimExpr VisitExpr_(const VarNode* op) final {
-    Var var = GetRef<Var>(op);
+    Var var = ffi::GetRef<Var>(op);
 
     auto itr = var_remap_.find(var);
     if (itr != var_remap_.end()) {
@@ -250,7 +251,10 @@ Pass LowerCustomDatatypes() {
   return CreatePrimFuncPass(pass_func, 0, "tir.LowerCustomDatatypes", {});
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.transform.LowerCustomDatatypes").set_body_typed(LowerCustomDatatypes);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.transform.LowerCustomDatatypes", LowerCustomDatatypes);
+}
 
 }  // namespace transform
 

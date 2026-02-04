@@ -104,6 +104,10 @@ def resize2d(
         roi = (0.0, 0.0, 0.0, 0.0)  # type: ignore
     elif isinstance(roi, float):
         roi = (roi, roi, roi, roi)  # type: ignore
+    elif isinstance(roi, (tuple, list)):
+        roi = tuple(val if isinstance(val, float) else float(val) for val in roi)
+    else:
+        raise NotImplementedError(f"Unsupported roi type {type(roi)}")
 
     if isinstance(size, (int, PrimExpr)):
         size = (size, size)
@@ -125,4 +129,53 @@ def resize2d(
         cubic_exclude,
         extrapolation_value,
         out_dtype,
+    )
+
+
+def grid_sample(
+    data: Expr,
+    grid: Expr,
+    method: str = "bilinear",
+    layout: str = "NCHW",
+    padding_mode: str = "zeros",
+    align_corners: bool = False,
+) -> Expr:
+    """Applies grid sampling to input feature map.
+
+    Given data and grid, the output is computed by sampling from data using
+    the grid coordinates.
+
+    Parameters
+    ----------
+    data : relax.Expr
+        The input data tensor with shape [N, C, H, W] for NCHW layout.
+
+    grid : relax.Expr
+        The grid tensor with shape [N, H_out, W_out, 2]. The values are normalized
+        to [-1, 1], where (-1, -1) is the top-left corner and (1, 1) is the bottom-right.
+
+    method : str
+        Interpolation method. Can be 'nearest', 'bilinear', or 'bicubic'.
+
+    layout : str
+        Layout of the input data. Default is 'NCHW'.
+
+    padding_mode : str
+        Padding mode for outside grid values. Can be 'zeros', 'border', or 'reflection'.
+
+    align_corners : bool
+        If True, the corner pixels of the input and output tensors are aligned.
+
+    Returns
+    -------
+    result : relax.Expr
+        The sampled output tensor with shape [N, C, H_out, W_out].
+    """
+    return _ffi_api.grid_sample(  # type: ignore
+        data,
+        grid,
+        method,
+        layout,
+        padding_mode,
+        align_corners,
     )

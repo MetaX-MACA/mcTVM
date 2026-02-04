@@ -92,6 +92,28 @@ TVM_DLL runtime::DataType GetRuntimeDataType(const Type& type);
 TVM_DLL PrimExpr ret(PrimExpr value, Span span = Span());
 
 /*!
+ * \brief Return from a thread.
+ *
+ * \param span The location of this operation in the source.
+ * \return The return expression.
+ */
+TVM_DLL PrimExpr thread_return(Span span = Span());
+
+/*!
+ * \brief Continue current loop.
+ * \param span The location of this operation in the source.
+ * \return The continue loop expression.
+ */
+TVM_DLL PrimExpr continue_loop(Span span = Span());
+
+/*!
+ * \brief Break current loop.
+ * \param span The location of this operation in the source.
+ * \return The break loop expression.
+ */
+TVM_DLL PrimExpr break_loop(Span span = Span());
+
+/*!
  * Query the maximum possible value of dtype.
  * \param dtype The data type.
  * \param span The location of this operation in the source.
@@ -558,7 +580,7 @@ TVM_DLL PrimExpr isinf(PrimExpr x, Span span = Span());
  * \param span The location of this operation in the source.
  * \return The result.
  */
-TVM_DLL PrimExpr sum(PrimExpr source, Array<tir::IterVar> axis, Array<PrimExpr> init = {},
+TVM_DLL PrimExpr sum(PrimExpr source, ffi::Array<tir::IterVar> axis, ffi::Array<PrimExpr> init = {},
                      Span span = Span());
 
 /*!
@@ -568,7 +590,7 @@ TVM_DLL PrimExpr sum(PrimExpr source, Array<tir::IterVar> axis, Array<PrimExpr> 
  * \param init The value with which to initialize the output.
  * \param span The location of this operation in the source.
  */
-TVM_DLL PrimExpr all(PrimExpr source, Array<tir::IterVar> axis, Array<PrimExpr> init = {},
+TVM_DLL PrimExpr all(PrimExpr source, ffi::Array<tir::IterVar> axis, ffi::Array<PrimExpr> init = {},
                      Span span = Span());
 
 /*!
@@ -579,7 +601,7 @@ TVM_DLL PrimExpr all(PrimExpr source, Array<tir::IterVar> axis, Array<PrimExpr> 
  * \param span The location of this operation in the source.
  * \return The result.
  */
-TVM_DLL PrimExpr any(PrimExpr source, Array<tir::IterVar> axis, Array<PrimExpr> init = {},
+TVM_DLL PrimExpr any(PrimExpr source, ffi::Array<tir::IterVar> axis, ffi::Array<PrimExpr> init = {},
                      Span span = Span());
 
 /*!
@@ -590,7 +612,7 @@ TVM_DLL PrimExpr any(PrimExpr source, Array<tir::IterVar> axis, Array<PrimExpr> 
  * \param span The location of this operation in the source.
  * \return The result.
  */
-TVM_DLL PrimExpr max(PrimExpr source, Array<tir::IterVar> axis, Array<PrimExpr> init = {},
+TVM_DLL PrimExpr max(PrimExpr source, ffi::Array<tir::IterVar> axis, ffi::Array<PrimExpr> init = {},
                      Span span = Span());
 
 /*!
@@ -601,7 +623,7 @@ TVM_DLL PrimExpr max(PrimExpr source, Array<tir::IterVar> axis, Array<PrimExpr> 
  * \param span The location of this operation in the source.
  * \return The result.
  */
-TVM_DLL PrimExpr min(PrimExpr source, Array<tir::IterVar> axis, Array<PrimExpr> init = {},
+TVM_DLL PrimExpr min(PrimExpr source, ffi::Array<tir::IterVar> axis, ffi::Array<PrimExpr> init = {},
                      Span span = Span());
 
 /*!
@@ -612,8 +634,8 @@ TVM_DLL PrimExpr min(PrimExpr source, Array<tir::IterVar> axis, Array<PrimExpr> 
  * \param span The location of this operation in the source.
  * \return The result.
  */
-TVM_DLL PrimExpr prod(PrimExpr source, Array<tir::IterVar> axis, Array<PrimExpr> init = {},
-                      Span span = Span());
+TVM_DLL PrimExpr prod(PrimExpr source, ffi::Array<tir::IterVar> axis,
+                      ffi::Array<PrimExpr> init = {}, Span span = Span());
 
 /*!
  * \brief Calculate floor(x)
@@ -794,7 +816,7 @@ inline PrimExpr make_zero(DataType t, Span span = Span());
  * \return The result expression.
  */
 inline PrimExpr const_true(int lanes = 1, Span span = Span()) {
-  return make_const(DataType::UInt(1, lanes), 1);
+  return make_const(DataType::Bool(lanes), 1);
 }
 /*!
  * \brief Make a constant false expression.
@@ -803,7 +825,7 @@ inline PrimExpr const_true(int lanes = 1, Span span = Span()) {
  * \return The result expression.
  */
 inline PrimExpr const_false(int lanes = 1, Span span = Span()) {
-  return make_const(DataType::UInt(1, lanes), 0);
+  return make_const(DataType::Bool(lanes), 0);
 }
 /*!
  * \brief Get x as constant int expression.
@@ -875,7 +897,7 @@ inline bool is_const_number(const PrimExpr& x);
  * \tparam FReduce The type of the reduction.
  */
 template <typename FReduce>
-inline PrimExpr foldl(FReduce freduce, PrimExpr init_value, const Array<PrimExpr>& values,
+inline PrimExpr foldl(FReduce freduce, PrimExpr init_value, const ffi::Array<PrimExpr>& values,
                       Span span = Span()) {
   for (PrimExpr val : values) {
     init_value = freduce(init_value, val, span);
@@ -935,7 +957,7 @@ inline bool is_no_op(const tir::Stmt& stmt) {
 
 template <typename ValueType>
 inline PrimExpr MakeConstScalar(DataType t, ValueType value, Span span = Span()) {
-  if (t.is_int()) return IntImm(t, static_cast<int64_t>(value), span);
+  if (t.is_int() || t.is_bool()) return IntImm(t, static_cast<int64_t>(value), span);
   if (t.is_uint()) {
     // Use IntImm if it is a small integer
     uint64_t uval = static_cast<uint64_t>(value);

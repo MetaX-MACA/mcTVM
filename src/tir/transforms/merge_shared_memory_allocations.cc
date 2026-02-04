@@ -24,6 +24,7 @@
  * allocation.
  */
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/tir/expr.h>
 #include <tvm/tir/op.h>
 #include <tvm/tir/stmt_functor.h>
@@ -124,7 +125,7 @@ class SharedMemLinearAccessPatternFinder final : public StmtExprVisitor {
     auto it = alloc_info_.find(buf);
     if (it != alloc_info_.end() && it->second.alloc) {
       ICHECK_LT(it->second.level, scope_.size());
-      if (IsAppropriateSharedMemory(GetRef<Var>(buf))) {
+      if (IsAppropriateSharedMemory(ffi::GetRef<Var>(buf))) {
         scope_[it->second.level].touched.push_back(buf);
       }
     }
@@ -155,7 +156,7 @@ class SharedMemLinearAccessPatternFinder final : public StmtExprVisitor {
     auto it = alloc_info_.find(buf);
     if (it != alloc_info_.end() && it->second.alloc) {
       ICHECK_LT(it->second.level, scope_.size()) << "Load memory in places other than store.";
-      if (IsAppropriateSharedMemory(GetRef<Var>(buf))) {
+      if (IsAppropriateSharedMemory(ffi::GetRef<Var>(buf))) {
         scope_[it->second.level].touched.push_back(buf);
       }
     }
@@ -177,7 +178,7 @@ class SharedMemLinearAccessPatternFinder final : public StmtExprVisitor {
     auto it = alloc_info_.find(buf);
     if (it != alloc_info_.end() && it->second.alloc) {
       ICHECK_LT(it->second.level, scope_.size());
-      if (IsAppropriateSharedMemory(GetRef<Var>(buf))) {
+      if (IsAppropriateSharedMemory(ffi::GetRef<Var>(buf))) {
         scope_[it->second.level].touched.push_back(buf);
       }
     }
@@ -351,8 +352,8 @@ class SharedMemoryRewriter : public StmtExprMutator {
           << "MergeSharedMemoryAllocations expects flat memory buffers, "
           << "and is to be run after "
           << "FlattenBuffer";
-      Array<PrimExpr> indices = {node->indices[0] +
-                                 this->GetBufferOffset(node->buffer->data, node->buffer->dtype)};
+      ffi::Array<PrimExpr> indices = {
+          node->indices[0] + this->GetBufferOffset(node->buffer->data, node->buffer->dtype)};
 
       auto writer = node.CopyOnWrite();
       writer->buffer = GetUpdatedBuffer(node->buffer);
@@ -695,8 +696,10 @@ Pass MergeSharedMemoryAllocations() {
   return CreatePrimFuncPass(pass_func, 0, "tir.MergeSharedMemoryAllocations", {});
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.transform.MergeSharedMemoryAllocations")
-    .set_body_typed(MergeSharedMemoryAllocations);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.transform.MergeSharedMemoryAllocations", MergeSharedMemoryAllocations);
+}
 
 }  // namespace transform
 }  // namespace tir

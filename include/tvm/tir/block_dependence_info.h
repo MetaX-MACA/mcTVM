@@ -31,7 +31,7 @@
 #ifndef TVM_TIR_BLOCK_DEPENDENCE_INFO_H_
 #define TVM_TIR_BLOCK_DEPENDENCE_INFO_H_
 
-#include <tvm/ffi/reflection/reflection.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/tir/block_scope.h>
 
 #include <unordered_map>
@@ -65,9 +65,7 @@ class BlockDependenceInfoNode : public Object {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<BlockDependenceInfoNode>();
   }
-
-  static constexpr const char* _type_key = "tir.BlockDependenceInfo";
-  TVM_DECLARE_FINAL_OBJECT_INFO(BlockDependenceInfoNode, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tir.BlockDependenceInfo", BlockDependenceInfoNode, Object);
 
   /*!
    * \brief Get the BlockScope corresponding to the sref of scope root block
@@ -78,7 +76,7 @@ class BlockDependenceInfoNode : public Object {
     auto it = sref2scope.find(scope_root);
     CHECK(it != sref2scope.end())
         << "IndexError: Cannot find the corresponding BlockScope to the block sref:\n"
-        << GetRef<Stmt>(scope_root->stmt);
+        << ffi::GetRef<Stmt>(scope_root->stmt);
     return it->second;
   }
 };
@@ -97,8 +95,8 @@ class BlockDependenceInfo : public ObjectRef {
    */
   TVM_DLL BlockDependenceInfo(IRModule mod);
 
-  TVM_DEFINE_MUTABLE_NOTNULLABLE_OBJECT_REF_METHODS(BlockDependenceInfo, ObjectRef,
-                                                    BlockDependenceInfoNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(BlockDependenceInfo, ObjectRef,
+                                                BlockDependenceInfoNode);
 };
 
 }  // namespace tir

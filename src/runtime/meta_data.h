@@ -28,7 +28,7 @@
 #include <dmlc/json.h>
 #include <tvm/ffi/function.h>
 #include <tvm/runtime/module.h>
-#include <tvm/runtime/ndarray.h>
+#include <tvm/runtime/tensor.h>
 
 #include <string>
 #include <unordered_map>
@@ -38,10 +38,8 @@
 namespace tvm {
 namespace runtime {
 
-inline String get_name_mangled(const String& module_name, const String& name) {
+inline ffi::String get_name_mangled(const ffi::String& module_name, const ffi::String& name) {
   std::stringstream ss;
-  ICHECK(module_name.defined());
-  ICHECK(name.defined());
   ss << module_name << "_" << name;
   return ss.str();
 }
@@ -50,6 +48,10 @@ namespace launch_param {
 
 /*! \brief A tag to specify whether or not dynamic shared memory is used */
 constexpr const char* kUseDynamicSharedMemoryTag = "tir.use_dyn_shared_memory";
+/*! \brief A tag to specify whether or not use programatic dependent launch */
+constexpr const char* kUseProgramaticDependentLaunch = "tir.use_programtic_dependent_launch";
+/*! \brief A tag to specify whether or not use cooperative launch */
+constexpr const char* kUseCooperativeLaunch = "tir.use_cooperative_launch";
 
 }  // namespace launch_param
 

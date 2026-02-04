@@ -17,6 +17,7 @@
  * under the License.
  */
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/module.h>
 #include <tvm/script/ir_builder/base.h>
 
@@ -24,13 +25,13 @@ namespace tvm {
 namespace script {
 namespace ir_builder {
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   IRBuilderFrameNode::RegisterReflection();
   IRBuilderNode::RegisterReflection();
-});
+}
 
 void IRBuilderFrameNode::EnterWithScope() {
-  IRBuilder::Current()->frames.push_back(GetRef<IRBuilderFrame>(this));
+  IRBuilder::Current()->frames.push_back(ffi::GetRef<IRBuilderFrame>(this));
 }
 
 void IRBuilderFrameNode::ExitWithScope() {
@@ -49,7 +50,7 @@ void IRBuilderFrameNode::AddCallback(ffi::TypedFunction<void()> callback) {
 }
 
 IRBuilder::IRBuilder() {
-  ObjectPtr<IRBuilderNode> n = make_object<IRBuilderNode>();
+  ObjectPtr<IRBuilderNode> n = ffi::make_object<IRBuilderNode>();
   n->frames.clear();
   n->result = std::nullopt;
   data_ = n;
@@ -94,7 +95,7 @@ Namer::FType& Namer::vtable() {
   return inst;
 }
 
-void Namer::Name(ObjectRef node, String name) {
+void Namer::Name(ObjectRef node, ffi::String name) {
   static const FType& f = vtable();
   CHECK(node.defined()) << "ValueError: Cannot name nullptr with: " << name;
   CHECK(f.can_dispatch(node)) << "ValueError: Do not know how to name type \""
@@ -104,26 +105,20 @@ void Namer::Name(ObjectRef node, String name) {
 
 }  // namespace details
 
-TVM_REGISTER_NODE_TYPE(IRBuilderFrameNode);
-TVM_REGISTER_NODE_TYPE(IRBuilderNode);
-TVM_FFI_REGISTER_GLOBAL("script.ir_builder.IRBuilderFrameEnter")
-    .set_body_method(&IRBuilderFrameNode::EnterWithScope);
-TVM_FFI_REGISTER_GLOBAL("script.ir_builder.IRBuilderFrameExit")
-    .set_body_method(&IRBuilderFrameNode::ExitWithScope);
-TVM_FFI_REGISTER_GLOBAL("script.ir_builder.IRBuilderFrameAddCallback")
-    .set_body_method(&IRBuilderFrameNode::AddCallback);
-TVM_FFI_REGISTER_GLOBAL("script.ir_builder.IRBuilder").set_body_typed([]() { return IRBuilder(); });
-TVM_FFI_REGISTER_GLOBAL("script.ir_builder.IRBuilderEnter")
-    .set_body_method(&IRBuilder::EnterWithScope);
-TVM_FFI_REGISTER_GLOBAL("script.ir_builder.IRBuilderExit")
-    .set_body_method(&IRBuilder::ExitWithScope);
-TVM_FFI_REGISTER_GLOBAL("script.ir_builder.IRBuilderCurrent").set_body_typed(IRBuilder::Current);
-TVM_FFI_REGISTER_GLOBAL("script.ir_builder.IRBuilderIsInScope")
-    .set_body_typed(IRBuilder::IsInScope);
-TVM_FFI_REGISTER_GLOBAL("script.ir_builder.IRBuilderGet")
-    .set_body_method(&IRBuilderNode::Get<ObjectRef>);
-TVM_FFI_REGISTER_GLOBAL("script.ir_builder.IRBuilderName")
-    .set_body_typed(IRBuilder::Name<ObjectRef>);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef()
+      .def_method("script.ir_builder.IRBuilderFrameEnter", &IRBuilderFrameNode::EnterWithScope)
+      .def_method("script.ir_builder.IRBuilderFrameExit", &IRBuilderFrameNode::ExitWithScope)
+      .def_method("script.ir_builder.IRBuilderFrameAddCallback", &IRBuilderFrameNode::AddCallback)
+      .def("script.ir_builder.IRBuilder", []() { return IRBuilder(); })
+      .def_method("script.ir_builder.IRBuilderEnter", &IRBuilder::EnterWithScope)
+      .def_method("script.ir_builder.IRBuilderExit", &IRBuilder::ExitWithScope)
+      .def("script.ir_builder.IRBuilderCurrent", IRBuilder::Current)
+      .def("script.ir_builder.IRBuilderIsInScope", IRBuilder::IsInScope)
+      .def_method("script.ir_builder.IRBuilderGet", &IRBuilderNode::Get<ObjectRef>)
+      .def("script.ir_builder.IRBuilderName", IRBuilder::Name<ObjectRef>);
+}
 
 }  // namespace ir_builder
 }  // namespace script

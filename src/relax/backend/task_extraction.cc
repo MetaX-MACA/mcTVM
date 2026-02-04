@@ -17,6 +17,7 @@
  * under the License.
  */
 
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/meta_schedule/extracted_task.h>
 #include <tvm/relax/expr.h>
 #include <tvm/relax/expr_functor.h>
@@ -66,15 +67,16 @@ class BlockCounter : public tir::StmtVisitor {
 
 class TaskExtractor : public ExprVisitor {
  public:
-  static Array<ExtractedTask> ExtractTask(IRModule mod, Target target, String mod_eq_name) {
+  static ffi::Array<ExtractedTask> ExtractTask(IRModule mod, Target target,
+                                               ffi::String mod_eq_name) {
     TaskExtractor extractor(mod, target, mod_eq_name);
     // We go through each Relax function in the module.
     for (const auto& kv : mod->functions) {
       if (const auto* func = kv.second.as<FunctionNode>()) {
-        extractor(GetRef<Function>(func));
+        extractor(ffi::GetRef<Function>(func));
       }
     }
-    Array<ExtractedTask> tasks;
+    ffi::Array<ExtractedTask> tasks;
     for (const auto& it : extractor.func2task_) {
       tasks.push_back(it.second);
     }
@@ -82,7 +84,7 @@ class TaskExtractor : public ExprVisitor {
   }
 
  private:
-  explicit TaskExtractor(IRModule mod, Target target, String mod_eq_name)
+  explicit TaskExtractor(IRModule mod, Target target, ffi::String mod_eq_name)
       : mod_(std::move(mod)),
         target_(std::move(target)),
         mod_eq_(ModuleEquality::Create(mod_eq_name)),
@@ -139,10 +141,13 @@ class TaskExtractor : public ExprVisitor {
   std::optional<tvm::ffi::Function> normalize_mod_func_;
 };
 
-TVM_FFI_REGISTER_GLOBAL("relax.backend.MetaScheduleExtractTask")
-    .set_body_typed([](IRModule mod, Target target, String mod_eq_name) {
-      return TaskExtractor::ExtractTask(std::move(mod), std::move(target), std::move(mod_eq_name));
-    });
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("relax.backend.MetaScheduleExtractTask", [](IRModule mod, Target target,
+                                                                    ffi::String mod_eq_name) {
+    return TaskExtractor::ExtractTask(std::move(mod), std::move(target), std::move(mod_eq_name));
+  });
+}
 
 }  // namespace backend
 }  // namespace relax

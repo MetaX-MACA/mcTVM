@@ -22,6 +22,7 @@
  * \brief Socket based RPC implementation.
  */
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/registry.h>
 
 #include <memory>
 
@@ -104,8 +105,8 @@ std::shared_ptr<RPCEndpoint> RPCConnect(std::string url, int port, std::string k
   return endpt;
 }
 
-Module RPCClientConnect(std::string url, int port, std::string key, bool enable_logging,
-                        ffi::PackedArgs init_seq) {
+ffi::Module RPCClientConnect(std::string url, int port, std::string key, bool enable_logging,
+                             ffi::PackedArgs init_seq) {
   auto endpt = RPCConnect(url, port, "client:" + key, enable_logging, init_seq);
   return CreateRPCSessionModule(CreateClientSession(endpt));
 }
@@ -121,21 +122,25 @@ void RPCServerLoop(ffi::Function fsend, ffi::Function frecv) {
       ->ServerLoop();
 }
 
-TVM_FFI_REGISTER_GLOBAL("rpc.Connect").set_body_packed([](ffi::PackedArgs args, ffi::Any* rv) {
-  auto url = args[0].cast<std::string>();
-  int port = args[1].cast<int>();
-  auto key = args[2].cast<std::string>();
-  bool enable_logging = args[3].cast<bool>();
-  *rv = RPCClientConnect(url, port, key, enable_logging, args.Slice(4));
-});
-
-TVM_FFI_REGISTER_GLOBAL("rpc.ServerLoop").set_body_packed([](ffi::PackedArgs args, ffi::Any* rv) {
-  if (auto opt_int = args[0].as<int64_t>()) {
-    RPCServerLoop(opt_int.value());
-  } else {
-    RPCServerLoop(args[0].cast<tvm::ffi::Function>(), args[1].cast<tvm::ffi::Function>());
-  }
-});
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef()
+      .def_packed("rpc.Connect",
+                  [](ffi::PackedArgs args, ffi::Any* rv) {
+                    auto url = args[0].cast<std::string>();
+                    int port = args[1].cast<int>();
+                    auto key = args[2].cast<std::string>();
+                    bool enable_logging = args[3].cast<bool>();
+                    *rv = RPCClientConnect(url, port, key, enable_logging, args.Slice(4));
+                  })
+      .def_packed("rpc.ServerLoop", [](ffi::PackedArgs args, ffi::Any* rv) {
+        if (auto opt_int = args[0].as<int64_t>()) {
+          RPCServerLoop(opt_int.value());
+        } else {
+          RPCServerLoop(args[0].cast<tvm::ffi::Function>(), args[1].cast<tvm::ffi::Function>());
+        }
+      });
+}
 
 class SimpleSockHandler : public dmlc::Stream {
   // Things that will interface with user directly.
@@ -162,11 +167,14 @@ class SimpleSockHandler : public dmlc::Stream {
   support::TCPSocket sock_;
 };
 
-TVM_FFI_REGISTER_GLOBAL("rpc.ReturnException").set_body_typed([](int sockfd, String msg) {
-  auto handler = SimpleSockHandler(sockfd);
-  RPCReference::ReturnException(msg.c_str(), &handler);
-  return;
-});
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("rpc.ReturnException", [](int sockfd, ffi::String msg) {
+    auto handler = SimpleSockHandler(sockfd);
+    RPCReference::ReturnException(msg.c_str(), &handler);
+    return;
+  });
+}
 
 }  // namespace runtime
 }  // namespace tvm

@@ -140,7 +140,19 @@ void CodeGenCUDA::Init(bool output_ssa) {
   ICHECK_EQ(vid_global_barrier_state_, runtime::symbol::tvm_global_barrier_state);
 }
 
-void CodeGenCUDA::PrintFuncPrefix(std::ostream& os) { os << "extern \"C\" __global__ "; }
+void CodeGenCUDA::PrintFunctionSignature(const ffi::String& function_name, const PrimFunc& func,
+                                         std::ostream& os) {
+  auto calling_conv =
+      func->GetAttr<Integer>(tvm::attr::kCallingConv, Integer(tvm::CallingConv::kDefault));
+  if (calling_conv == CallingConv::kDeviceKernelLaunch) {
+    os << "extern \"C\" __global__ ";
+  } else if (calling_conv == CallingConv::kDefault) {
+    os << "extern \"C\" __device__ ";
+  } else {
+    LOG(FATAL) << "Unsupported calling convention for cuda codegen: " << calling_conv;
+  }
+  CodeGenC::PrintFunctionSignature(function_name, func, os);
+}
 
 class ThreadIdxExtractor : public tir::StmtVisitor {
  private:
@@ -307,7 +319,6 @@ std::string CodeGenCUDA::Finish() {
 }
 
 void CodeGenCUDA::VisitStmt_(const tir::ForNode* op) {
-  ICHECK(is_const_int(op->min, 0));
   if (op->kind == tir::ForKind::kUnrolled) {
     PrintIndent();
     stream << "#pragma unroll\n";
@@ -628,12 +639,12 @@ void CodeGenCUDA::PrintVecElemLoad(const std::string& vec, DataType t, int i,
   static const char access[] = {'x', 'y', 'z', 'w'};
   ICHECK(i >= 0 && i < (t.bits() == 8 ? 16 : (t.bits() == 16 || t.bits() == 32) ? 8 : 4));
   if (t.bits() == 8 && (t.is_int() || t.is_uint())) {
-    std::string type_name = t.is_int() ? "char" : "unsigned char";
+    std::string type_name = t.is_int() ? "signed char" : "unsigned char";
     if (t.lanes() == 2 || t.lanes() == 3) {
       os << vec << "." << access[i % t.lanes()];
     } else {
       std::string ac = t.lanes() == 4 ? vec : (vec + "." + access[i / 4]);
-      os << "((" << type_name << ")(" << ac << " >> " << i % 4 * 8 << "))";
+      os << "(reinterpret_cast<const " << type_name << "*>(&(" << ac << "))[" << (i % 4) << "])";
     }
   } else if (t.is_float16()) {
     if (t.lanes() <= 4) {
@@ -685,12 +696,9 @@ void CodeGenCUDA::PrintVecElemStore(const std::string& vec, DataType t, int i,
              << "(" << value << ");\n";
     } else {
       std::string ac = t.lanes() == 4 ? vec : (vec + "." + access[i / 4]);
-      stream << ac << "=";
-      // Do not read the first undef lane.
-      if (i != 0) {
-        stream << ac << " & ~(0x000000ff << " << i % 4 * 8 << ") |";
-      }
-      stream << "(" << value << " << " << i % 4 * 8 << ");\n";
+      std::string type_name = t.is_int() ? "signed char" : "unsigned char";
+      stream << "reinterpret_cast<" << type_name << "*>(&(" << ac << "))[" << (i % 4) << "] = ("
+             << type_name << ")(" << value << ");\n";
     }
   } else if (t.is_float16()) {
     if (t.lanes() <= 4) {
@@ -854,8 +862,9 @@ void CodeGenCUDA::VisitExpr_(const CastNode* op, std::ostream& os) {
   os << sret;
 }
 
-void CodeGenCUDA::PrintCallExtern(Type ret_type, String global_symbol, const Array<PrimExpr>& args,
-                                  bool skip_first_arg, std::ostream& os) {  // NOLINT(*)
+void CodeGenCUDA::PrintCallExtern(Type ret_type, ffi::String global_symbol,
+                                  const ffi::Array<PrimExpr>& args, bool skip_first_arg,
+                                  std::ostream& os) {  // NOLINT(*)
   DataType ret_dtype = GetRuntimeDataType(ret_type);
   if (ret_dtype.is_fixed_length_vector()) {
     //
@@ -1322,6 +1331,8 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       LOG(FATAL) << "Invalid number of lanes for float4_e2m1fn reinterpret: " << lanes;
     }
     EndScope(ssa_scope);
+  } else if (op->op.same_as(builtin::thread_return())) {
+    os << "return";
   } else {
     CodeGenC::VisitExpr_(op, os);
   }
@@ -1600,13 +1611,17 @@ inline void PrintConst(const FloatImmNode* op, std::ostream& os, CodeGenCUDA* p)
   // Type code is kBFloat
   if (op->dtype.is_bfloat16()) {
     os << "__float2bfloat16_rn";
-    os << '(' << std::scientific << op->value << 'f' << ')';
+    os << '(' << std::hexfloat << op->value << 'f';
+    os << "/*" << std::scientific << op->value << "*/";
+    os << ')';
     return;
   }
   // Type code is kFloat8_e5m2 or kE4M4Float
   if (op->dtype.is_float8() || op->dtype.is_float4()) {
     p->PrintType(op->dtype, os);
-    os << '(' << std::scientific << op->value << 'f' << ')';
+    os << '(' << std::hexfloat << op->value << 'f';
+    os << "/*" << std::scientific << op->value << "*/";
+    os << ')';
     return;
   }
   // Type code is kFloat
@@ -1641,7 +1656,8 @@ inline void PrintConst(const FloatImmNode* op, std::ostream& os, CodeGenCUDA* p)
         temp << "CUDART_NAN_F";
         p->need_math_constants_h_ = true;
       } else {
-        temp << std::scientific << op->value << 'f';
+        temp << std::hexfloat << op->value << 'f';
+        temp << "/*" << std::scientific << op->value << "*/";
       }
       p->MarkConst(temp.str());
       os << temp.str();

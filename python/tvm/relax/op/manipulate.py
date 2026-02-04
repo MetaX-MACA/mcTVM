@@ -624,6 +624,7 @@ def index_put(
     Examples
     --------
     .. code-block:: python
+
         # inputs
         data = torch.zeros(3, 3)
         indices = (torch.tensor([0, 2]), torch.tensor([1, 1]))
@@ -641,7 +642,7 @@ def index_put(
             [0.0, 3.0, 0.0],
         ]
     """
-    if not isinstance(indices, (list, tuple)):
+    if isinstance(indices, (list, tuple)):
         indices = RxTuple(indices)
     return _ffi_api.index_put(data, indices, values, accumulate)  # type: ignore
 

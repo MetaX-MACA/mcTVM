@@ -22,6 +22,7 @@
  * \brief Pass to check if memory accesses are legal.
  */
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/transform.h>
 #include <tvm/target/target.h>
 #include <tvm/tir/analysis.h>
@@ -62,7 +63,7 @@ class MemoryAccessVerifier final : protected StmtExprVisitor {
   }
 
   /// Verification result
-  std::vector<String> Errors() const { return errs_; }
+  std::vector<ffi::String> Errors() const { return errs_; }
 
  protected:
   /// Visitor implementation
@@ -157,7 +158,7 @@ class MemoryAccessVerifier final : protected StmtExprVisitor {
   /// Status of visitor
   //@{
   bool in_thread_env_{false};
-  std::vector<String> errs_;
+  std::vector<ffi::String> errs_;
   //@}
   tir::PrimFunc func_{nullptr};                        ///< Function to be verified.
   int dev_type_{kDLCPU};                               ///< Device type
@@ -166,7 +167,7 @@ class MemoryAccessVerifier final : protected StmtExprVisitor {
 }  // namespace
 
 /// Interface of VerifyMemory pass
-std::vector<String> VerifyMemory_(const PrimFunc& func) {
+std::vector<ffi::String> VerifyMemory_(const PrimFunc& func) {
   auto target = func->GetAttr<Target>(tvm::attr::kTarget);
   ICHECK(target.defined()) << "VerifyMemory: Require the target attribute";
 
@@ -186,7 +187,10 @@ std::vector<String> VerifyMemory_(const PrimFunc& func) {
 
 bool VerifyMemory(const PrimFunc& func) { return VerifyMemory_(func).size() == 0; }
 
-TVM_FFI_REGISTER_GLOBAL("tir.analysis.verify_memory").set_body_typed(VerifyMemory);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.analysis.verify_memory", VerifyMemory);
+}
 
 namespace transform {
 
@@ -211,7 +215,10 @@ Pass VerifyMemory() {
   return tvm::transform::CreateModulePass(pass_func, 0, "tir.VerifyMemory", {});
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.transform.VerifyMemory").set_body_typed(VerifyMemory);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.transform.VerifyMemory", VerifyMemory);
+}
 
 }  // namespace transform
 }  // namespace tir

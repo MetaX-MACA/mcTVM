@@ -26,6 +26,7 @@
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/Target/TargetMachine.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/registry.h>
 
 #include "../../arith/scalable_expression.h"
 #include "codegen_cpu.h"
@@ -58,9 +59,11 @@ void CodeGenAArch64::SetTargetAttributes(llvm::Function* func) {
   // Add vscale_range() function attribute when appropriate.
   if (llvm_target_->TargetHasCPUFeature("sve") || llvm_target_->TargetHasCPUFeature("sme")) {
     auto kVScaleValues = arith::GetVScaleValues(Target::Current());
-    unsigned int max_val = *std::max_element(kVScaleValues.begin(), kVScaleValues.end());
-    func->addFnAttr(
-        llvm::Attribute::getWithVScaleRangeArgs(*llvm_target_->GetContext(), 1, max_val));
+    if (!kVScaleValues.empty()) {
+      unsigned int max_val = *std::max_element(kVScaleValues.begin(), kVScaleValues.end());
+      func->addFnAttr(
+          llvm::Attribute::getWithVScaleRangeArgs(*llvm_target_->GetContext(), 1, max_val));
+    }
   }
 #endif
   CodeGenCPU::SetTargetAttributes(func);
@@ -84,7 +87,7 @@ void CodeGenAArch64::VisitStmt_(const AttrStmtNode* op) {
   }
 
   const auto* attr_value = op->value.as<StringImmNode>();
-  ICHECK(attr_value) << "Expect " << attr_key << " to have a String value but was "
+  ICHECK(attr_value) << "Expect " << attr_key << " to have a ffi::String value but was "
                      << op->value->GetTypeKey();
 
   std::string aarch64_attr_key = attr_key.substr(7);
@@ -106,10 +109,13 @@ void CodeGenAArch64::VisitStmt_(const AttrStmtNode* op) {
   this->VisitStmt(op->body);
 }
 
-TVM_FFI_REGISTER_GLOBAL("tvm.codegen.llvm.target_aarch64")
-    .set_body_packed([](const ffi::PackedArgs& targs, ffi::Any* rv) {
-      *rv = static_cast<void*>(new CodeGenAArch64());
-    });
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def_packed("tvm.codegen.llvm.target_aarch64",
+                               [](const ffi::PackedArgs& targs, ffi::Any* rv) {
+                                 *rv = static_cast<void*>(new CodeGenAArch64());
+                               });
+}
 
 }  // namespace codegen
 }  // namespace tvm

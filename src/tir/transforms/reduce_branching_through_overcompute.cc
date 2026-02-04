@@ -24,6 +24,7 @@
  * extra computations that do not impact the final results.
  */
 
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/tir/op.h>
 #include <tvm/tir/transform.h>
 
@@ -50,20 +51,18 @@ struct ReduceBranchingThroughOvercomputeConfigNode
         "to statically prove that overcompute is valid.",
         refl::DefaultValue(false));
   }
-
-  static constexpr const char* _type_key = "tir.transform.ReduceBranchingThroughOvercomputeConfig";
-  TVM_FFI_DECLARE_FINAL_OBJECT_INFO(ReduceBranchingThroughOvercomputeConfigNode, BaseAttrsNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tir.transform.ReduceBranchingThroughOvercomputeConfig",
+                                    ReduceBranchingThroughOvercomputeConfigNode, BaseAttrsNode);
 };
 
 class ReduceBranchingThroughOvercomputeConfig : public Attrs {
  public:
-  TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(ReduceBranchingThroughOvercomputeConfig, Attrs,
-                                            ReduceBranchingThroughOvercomputeConfigNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ReduceBranchingThroughOvercomputeConfig, Attrs,
+                                                ReduceBranchingThroughOvercomputeConfigNode);
 };
 
-TVM_FFI_STATIC_INIT_BLOCK({ ReduceBranchingThroughOvercomputeConfigNode::RegisterReflection(); });
+TVM_FFI_STATIC_INIT_BLOCK() { ReduceBranchingThroughOvercomputeConfigNode::RegisterReflection(); }
 
-TVM_REGISTER_NODE_TYPE(ReduceBranchingThroughOvercomputeConfigNode);
 TVM_REGISTER_PASS_CONFIG_OPTION("tir.ReduceBranchingThroughOvercompute",
                                 ReduceBranchingThroughOvercomputeConfig);
 
@@ -176,8 +175,11 @@ Pass ReduceBranchingThroughOvercompute() {
   return CreatePrimFuncPass(pass_func, 0, "tir.ReduceBranchingThroughOvercompute", {});
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.transform.ReduceBranchingThroughOvercompute")
-    .set_body_typed(ReduceBranchingThroughOvercompute);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.transform.ReduceBranchingThroughOvercompute",
+                        ReduceBranchingThroughOvercompute);
+}
 
 }  // namespace transform
 

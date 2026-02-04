@@ -25,6 +25,7 @@
  */
 #if defined(__linux__)
 #include <sys/stat.h>
+#include <tvm/ffi/reflection/registry.h>
 #endif
 #include <cuda_runtime.h>
 #include <nvrtc.h>
@@ -125,18 +126,21 @@ std::string NVRTCCompile(const std::string& code, bool include_path = false) {
   return ptx;
 }
 
-runtime::Module BuildCUDA(IRModule mod, Target target) {
+ffi::Module BuildCUDA(IRModule mod, Target target) {
   bool output_ssa = false;
   CodeGenCUDA cg;
   cg.Init(output_ssa);
 
-  Map<GlobalVar, PrimFunc> functions;
+  ffi::Map<GlobalVar, PrimFunc> functions;
   for (auto [gvar, base_func] : mod->functions) {
     ICHECK(base_func->IsInstance<PrimFuncNode>()) << "CodeGenCUDA: Can only take PrimFunc";
     auto prim_func = Downcast<PrimFunc>(base_func);
-    auto calling_conv = prim_func->GetAttr<Integer>(tvm::attr::kCallingConv);
-    ICHECK(calling_conv == CallingConv::kDeviceKernelLaunch)
-        << "CodeGenCUDA: expect calling_conv equals CallingConv::kDeviceKernelLaunch";
+    auto calling_conv =
+        prim_func->GetAttr<Integer>(tvm::attr::kCallingConv, Integer(tvm::CallingConv::kDefault));
+    ICHECK(calling_conv == CallingConv::kDeviceKernelLaunch ||
+           calling_conv == CallingConv::kDefault)
+        << "CodeGenCUDA: expect calling_conv equals CallingConv::kDeviceKernelLaunch or "
+           "CallingConv::kDefault";
     functions.Set(gvar, prim_func);
   }
 
@@ -169,7 +173,10 @@ runtime::Module BuildCUDA(IRModule mod, Target target) {
   return CUDAModuleCreate(ptx, fmt, ExtractFuncInfo(mod), code);
 }
 
-TVM_FFI_REGISTER_GLOBAL("target.build.cuda").set_body_typed(BuildCUDA);
-TVM_REGISTER_PASS_CONFIG_OPTION("cuda.kernels_output_dir", String);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("target.build.cuda", BuildCUDA);
+}
+TVM_REGISTER_PASS_CONFIG_OPTION("cuda.kernels_output_dir", ffi::String);
 }  // namespace codegen
 }  // namespace tvm

@@ -22,6 +22,8 @@
  */
 #include "codegen_opencl.h"
 
+#include <tvm/ffi/reflection/registry.h>
+
 #include <cmath>
 #include <string>
 #include <vector>
@@ -224,6 +226,12 @@ void CodeGenOpenCL::PrintType(DataType t, std::ostream& os) {  // NOLINT(*)
         break;
     }
     if (!fail && lanes == 1) return;
+    if (!fail && ((lanes >= 2 && lanes <= 4) || lanes == 8 || lanes == 16)) {
+      os << lanes;
+      return;
+    }
+  } else if (t.is_bool()) {
+    os << "uint";
     if (!fail && ((lanes >= 2 && lanes <= 4) || lanes == 8 || lanes == 16)) {
       os << lanes;
       return;
@@ -473,10 +481,10 @@ void CodeGenOpenCL::VisitExpr_(const CallNode* op, std::ostream& os) {
     // Enable atomics extension if used.
     if (func->value == "atomic_add" && op->dtype.is_float()) {
       enable_atomics_ = true;
-      this->PrintCallExtern(GetType(GetRef<PrimExpr>(op)), "atomic_add_float_emu", op->args, true,
-                            os);
+      this->PrintCallExtern(GetType(ffi::GetRef<PrimExpr>(op)), "atomic_add_float_emu", op->args,
+                            true, os);
     } else if (func->value == "nearbyint") {
-      this->PrintCallExtern(GetType(GetRef<PrimExpr>(op)), "round", op->args, true, os);
+      this->PrintCallExtern(GetType(ffi::GetRef<PrimExpr>(op)), "round", op->args, true, os);
     } else {
       if (func->value == "atomic_add") {
         enable_atomics_ = true;
@@ -631,9 +639,9 @@ void CodeGenOpenCL::SetTextureScope(
   }
 }
 
-runtime::Module BuildOpenCL(IRModule mod, Target target) {
+ffi::Module BuildOpenCL(IRModule mod, Target target) {
 #if TVM_ENABLE_SPIRV
-  Optional<String> device = target->GetAttr<String>("device");
+  ffi::Optional<ffi::String> device = target->GetAttr<ffi::String>("device");
   if (device && device.value() == "spirv") {
     auto [smap, spirv_text] = LowerToSPIRV(mod, target);
     return runtime::OpenCLModuleCreate(smap, spirv_text, ExtractFuncInfo(mod));
@@ -642,7 +650,7 @@ runtime::Module BuildOpenCL(IRModule mod, Target target) {
 
   bool output_ssa = false;
 
-  Map<GlobalVar, PrimFunc> functions;
+  ffi::Map<GlobalVar, PrimFunc> functions;
   for (auto [gvar, base_func] : mod->functions) {
     ICHECK(base_func->IsInstance<PrimFuncNode>()) << "CodeGenOpenCL: Can only take PrimFunc";
     auto prim_func = Downcast<PrimFunc>(base_func);
@@ -672,20 +680,25 @@ runtime::Module BuildOpenCL(IRModule mod, Target target) {
   return OpenCLModuleCreate(code.str(), "cl", ExtractFuncInfo(mod), code.str());
 }
 
-TVM_FFI_REGISTER_GLOBAL("target.build.opencl").set_body_typed(BuildOpenCL);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("target.build.opencl", BuildOpenCL);
+}
 
-String DeviceScopeCompatibilityFromTarget(Target target, String memory_scope) {
+ffi::String DeviceScopeCompatibilityFromTarget(Target target, ffi::String memory_scope) {
   auto prototype_keys = target->GetKeys();
   bool is_adreno =
       std::find(prototype_keys.begin(), prototype_keys.end(), "adreno") != prototype_keys.end();
   if (is_adreno) {
-    return String("global");
+    return ffi::String("global");
   }
   return memory_scope;
 }
 
-TVM_FFI_REGISTER_GLOBAL("DeviceScopeCompatibility.opencl")
-    .set_body_typed(DeviceScopeCompatibilityFromTarget);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("DeviceScopeCompatibility.opencl", DeviceScopeCompatibilityFromTarget);
+}
 
 }  // namespace codegen
 }  // namespace tvm

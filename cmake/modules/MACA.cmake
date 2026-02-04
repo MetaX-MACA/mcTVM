@@ -15,19 +15,38 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# update 3rdparty/dlpack/include/dlpack/dlpack.h for adding kDLMACA/kDLMACAHost
-set(dlpack_header "${CMAKE_SOURCE_DIR}/3rdparty/dlpack/include/dlpack/dlpack.h")
+# update 3rdparty/tvm-ffi for adding kDLMACA/kDLMACAHost
+set(dlpack_header "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/tvm-ffi/3rdparty/dlpack/include/dlpack/dlpack.h")
 file(READ "${dlpack_header}" FILE_CONTENTS)
 if(NOT FILE_CONTENTS MATCHES ".*kDLMACA.*")
-  string(REPLACE "} DLDeviceType;" "  kDLMACA,\n  kDLMACAHost,\n} DLDeviceType;" NEW_CONTENTS "${FILE_CONTENTS}")
+  string(REPLACE "} DLDeviceType;" "  kDLMACA = 19,\n  kDLMACAHost = 20,\n} DLDeviceType;" NEW_CONTENTS "${FILE_CONTENTS}")
   file(WRITE "${dlpack_header}" "${NEW_CONTENTS}")
 endif()
-# update ffi/3rdparty/dlpack/include/dlpack/dlpack.h for adding kDLMACA/kDLMACAHost
-set(dlpack_header "${CMAKE_SOURCE_DIR}/ffi/3rdparty/dlpack/include/dlpack/dlpack.h")
-file(READ "${dlpack_header}" FILE_CONTENTS)
+set(ffi_core_pyi "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/tvm-ffi/python/tvm_ffi/core.pyi")
+file(READ "${ffi_core_pyi}" FILE_CONTENTS)
 if(NOT FILE_CONTENTS MATCHES ".*kDLMACA.*")
-  string(REPLACE "} DLDeviceType;" "  kDLMACA,\n  kDLMACAHost,\n} DLDeviceType;" NEW_CONTENTS "${FILE_CONTENTS}")
-  file(WRITE "${dlpack_header}" "${NEW_CONTENTS}")
+  string(REPLACE "kDLTrn = 17" "kDLTrn = 17\n    kDLMACA = 19\n    kDLMACAHost = 20" NEW_CONTENTS "${FILE_CONTENTS}")
+  file(WRITE "${ffi_core_pyi}" "${NEW_CONTENTS}")
+endif()
+set(ffi_container_tensor "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/tvm-ffi/include/tvm/ffi/container/tensor.h")
+file(READ "${ffi_container_tensor}" FILE_CONTENTS)
+if(NOT FILE_CONTENTS MATCHES ".*kDLMACA.*")
+  string(REPLACE "device.device_type == kDLROCMHost;" "device.device_type == kDLROCMHost ||\n         device.device_type == kDLMACA || device.device_type == kDLMACAHost;" NEW_CONTENTS "${FILE_CONTENTS}")
+  file(WRITE "${ffi_container_tensor}" "${NEW_CONTENTS}")
+endif()
+set(ffi_cython_base_pxi "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/tvm-ffi/python/tvm_ffi/cython/base.pxi")
+file(READ "${ffi_cython_base_pxi}" FILE_CONTENTS)
+if(NOT FILE_CONTENTS MATCHES ".*kDLMACA.*")
+  string(REPLACE "kDLTrn = 18" "kDLTrn = 18\n        kDLMACA = 19\n        kDLMACAHost = 20" NEW_CONTENTS "${FILE_CONTENTS}")
+  file(WRITE "${ffi_cython_base_pxi}" "${NEW_CONTENTS}")
+endif()
+set(ffi_cython_device_pxi "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/tvm-ffi/python/tvm_ffi/cython/device.pxi")
+file(READ "${ffi_cython_device_pxi}" FILE_CONTENTS)
+if(NOT FILE_CONTENTS MATCHES ".*kDLMACA.*")
+  string(REPLACE "kDLTrn = 17" "kDLTrn = 17\n    kDLMACA = 19\n    kDLMACAHost = 20" NEW_CONTENTS "${FILE_CONTENTS}")
+  string(REPLACE "DLDeviceType.kDLTrn: \"trn\"," "DLDeviceType.kDLTrn: \"trn\",\n      DLDeviceType.kDLMACA: \"maca\",\n      DLDeviceType.kDLMACAHost: \"maca_host\"," NEW_CONTENTS "${NEW_CONTENTS}")
+  string(REPLACE "\"trn\": DLDeviceType.kDLTrn," "\"trn\": DLDeviceType.kDLTrn,\n        \"maca\": DLDeviceType.kDLMACA," NEW_CONTENTS "${NEW_CONTENTS}")
+  file(WRITE "${ffi_cython_device_pxi}" "${NEW_CONTENTS}")
 endif()
 
 # MACA Module

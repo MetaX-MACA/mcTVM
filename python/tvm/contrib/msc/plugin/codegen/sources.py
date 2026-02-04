@@ -684,6 +684,17 @@ class TVMUtils {
     return cuda_dev;
   }
 };
+
+#define TVM_MSC_PLUGIN_REGISTER_GLOBAL_DEF(FuncName, Body)  \
+  TVM_FFI_STATIC_INIT_BLOCK() {                             \
+    tvm::ffi::reflection::GlobalDef().def(FuncName, Body);  \
+  }
+
+#define TVM_MSC_PLUGIN_REGISTER_GLOBAL_DEF_PACKED(FuncName, Body)  \
+  TVM_FFI_STATIC_INIT_BLOCK() {                                    \
+    tvm::ffi::reflection::GlobalDef().def_packed(FuncName, Body);  \
+  }
+
 #endif  // PLUGIN_SUPPORT_TVM
 """
 
@@ -1101,6 +1112,7 @@ def get_plugin_utils_h_code() -> str:
 
 #ifdef PLUGIN_SUPPORT_TVM
 #include <tvm/relax/expr.h>
+#include <tvm/ffi/reflection/registry.h>
 
 #include "tvm/../../src/contrib/msc/core/transform/layout_utils.h"
 #include "tvm/../../src/contrib/msc/core/utils.h"
@@ -1150,4 +1162,7 @@ def get_plugin_sources() -> Dict[str, str]:
         The base utils sources.
     """
 
-    return {"plugin_base.h": get_plugin_base_h_code(), "plugin_utils.h": get_plugin_utils_h_code()}
+    return {
+        "plugin_base.h": get_plugin_base_h_code(),
+        "plugin_utils.h": get_plugin_utils_h_code(),
+    }
