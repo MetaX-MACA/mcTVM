@@ -23,6 +23,7 @@
  *
  * \file build_maca.cc
  */
+#include "tvm/ffi/reflection/registry.h"
 #if defined(__linux__)
 #include <sys/stat.h>
 #endif
@@ -152,12 +153,12 @@ std::string MCRTCCompile(const std::string& code, bool include_path = false) {
   return bitcode;
 }
 
-runtime::Module BuildMACA(IRModule mod, Target target) {
+ffi::Module BuildMACA(IRModule mod, Target target) {
   bool output_ssa = false;
   CodeGenMACA cg;
   cg.Init(output_ssa);
 
-  Map<GlobalVar, PrimFunc> functions;
+  ffi::Map<GlobalVar, PrimFunc> functions;
   for (auto [gvar, base_func] : mod->functions) {
     ICHECK(base_func->IsInstance<PrimFuncNode>()) << "CodeGenMACA: Can only take PrimFunc";
     auto prim_func = Downcast<PrimFunc>(base_func);
@@ -196,7 +197,10 @@ runtime::Module BuildMACA(IRModule mod, Target target) {
   return MACAModuleCreate(mcir, fmt, ExtractFuncInfo(mod), code);
 }
 
-TVM_FFI_REGISTER_GLOBAL("target.build.maca").set_body_typed(BuildMACA);
-TVM_REGISTER_PASS_CONFIG_OPTION("maca.kernels_output_dir", String);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("target.build.maca", BuildMACA);
+}
+TVM_REGISTER_PASS_CONFIG_OPTION("maca.kernels_output_dir", ffi::String);
 }  // namespace codegen
 }  // namespace tvm

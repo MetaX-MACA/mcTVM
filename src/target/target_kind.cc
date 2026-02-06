@@ -263,7 +263,7 @@ TargetJSON UpdateMACAAttrs(TargetJSON target) {
   // Update -mcpu=xcore1000
   std::string arch = "xcore1000";
   if (target.count("mcpu")) {
-    String mcpu = Downcast<String>(target.at("mcpu"));
+    ffi::String mcpu = Downcast<ffi::String>(target.at("mcpu"));
     arch = ExtractStringWithPrefix(mcpu, "xcore");
     ICHECK(!arch.empty()) << "ValueError: MACA target gets an invalid XCORE version: -mcpu="
                           << mcpu;
@@ -271,7 +271,7 @@ TargetJSON UpdateMACAAttrs(TargetJSON target) {
     if (auto f_get_maca_arch = tvm::ffi::Function::GetGlobal("tvm_callback_maca_get_arch")) {
       arch = (*f_get_maca_arch)().cast<std::string>();
     }
-    target.Set("mcpu", String(arch));
+    target.Set("mcpu", ffi::String(arch));
   }
 
   return target;
@@ -461,9 +461,9 @@ TVM_REGISTER_TARGET_KIND("hexagon", kDLHexagon)
     .set_default_keys({"hexagon", "cpu"});
 
 TVM_REGISTER_TARGET_KIND("maca", kDLMACA)
-    .add_attr_option<String>("mcpu")
-    .add_attr_option<String>("mtriple")
-    .add_attr_option<Array<String>>("mattr")
+    .add_attr_option<ffi::String>("mcpu")
+    .add_attr_option<ffi::String>("mtriple")
+    .add_attr_option<ffi::Array<ffi::String>>("mattr")
     .add_attr_option<int64_t>("max_num_threads", 1024)
     .add_attr_option<int64_t>("max_threads_per_block", 1024)
     .add_attr_option<int64_t>("max_shared_memory_per_block", 65536)

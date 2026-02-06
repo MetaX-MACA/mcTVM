@@ -22,14 +22,20 @@
  * \brief GPU specific API
  */
 #include <dmlc/thread_local.h>
+#include <mcc/mcc_global.h>
 #include <mcr/mc_runtime_api.h>
 #include <mxc/mxc.h>
+#include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/runtime/device_api.h>
-#include <tvm/runtime/logging.h>
 #include <tvm/runtime/profiling.h>
 
+#include <cstdlib>
+#include <cstring>
+
 #include "maca_common.h"
+#include "tvm/ffi/base_details.h"
 
 namespace tvm {
 namespace runtime {
@@ -102,12 +108,8 @@ class MACADeviceAPI final : public DeviceAPI {
         MACA_CALL(
             mcDeviceGetAttribute(&value, mcDeviceAttributeMaxRegistersPerBlock, device.device_id));
         break;
-      case kMxcArch: {
-        mcDeviceProp_t prop;
-        MACA_CALL(mcGetDeviceProperties(&prop, device.device_id));
-        *rv = prop.mxArchName;
+      case kGcnArch:
         return;
-      }
       case kApiVersion: {
         // *rv = MACA_VERSION;
         return;
@@ -132,6 +134,14 @@ class MACADeviceAPI final : public DeviceAPI {
         size_t free_mem, total_mem;
         MACA_CALL(mcMemGetInfo(&free_mem, &total_mem));
         *rv = static_cast<int64_t>(free_mem);
+        return;
+      }
+      case kImagePitchAlignment:
+        return;
+      case kMxcArch: {
+        mcDeviceProp_t prop;
+        MACA_CALL(mcGetDeviceProperties(&prop, device.device_id));
+        *rv = prop.mxArchName;
         return;
       }
     }
@@ -160,6 +170,7 @@ class MACADeviceAPI final : public DeviceAPI {
     }
   }
 
+protected:
   void CopyDataFromTo(const void* from, size_t from_offset, void* to, size_t to_offset, size_t size,
                       Device dev_from, Device dev_to, DLDataType type_hint,
                       TVMStreamHandle stream) final {
@@ -192,13 +203,34 @@ class MACADeviceAPI final : public DeviceAPI {
     }
   }
 
+public:
+  TVMStreamHandle CreateStream(Device dev) {
+    MACA_CALL(mcSetDevice(dev.device_id));
+    mcStream_t retval;
+    MACA_CALL(mcStreamCreateWithFlags(&retval, mcStreamNonBlocking));
+    return static_cast<TVMStreamHandle>(retval);
+  }
+
+  void FreeStream(Device dev, TVMStreamHandle stream) {
+    MACA_CALL(mcSetDevice(dev.device_id));
+    mcStream_t mc_stream = static_cast<mcStream_t>(stream);
+    MACA_CALL(mcStreamDestroy(mc_stream));
+  }
+
+  void SyncStreamFromTo(Device dev, TVMStreamHandle event_src, TVMStreamHandle event_dst) {
+    MACA_CALL(mcSetDevice(dev.device_id));
+    mcStream_t src_stream = static_cast<mcStream_t>(event_src);
+    mcStream_t dst_stream = static_cast<mcStream_t>(event_dst);
+    mcEvent_t evt;
+    MACA_CALL(mcEventCreate(&evt));
+    MACA_CALL(mcEventRecord(evt, src_stream));
+    MACA_CALL(mcStreamWaitEvent(dst_stream, evt, 0));
+    MACA_CALL(mcEventDestroy(evt));
+  }
+
   void StreamSync(Device dev, TVMStreamHandle stream) final {
     MACA_CALL(mcSetDevice(dev.device_id));
     MACA_CALL(mcStreamSynchronize(static_cast<mcStream_t>(stream)));
-  }
-
-  void SetStream(Device dev, TVMStreamHandle stream) final {
-    MACAThreadEntry::ThreadLocal()->stream = static_cast<mcStream_t>(stream);
   }
 
   void* AllocWorkspace(Device dev, size_t size, DLDataType type_hint) final {
@@ -217,11 +249,7 @@ class MACADeviceAPI final : public DeviceAPI {
  private:
   static void GPUCopy(const void* from, void* to, size_t size, mcMemcpyKind kind,
                       mcStream_t stream) {
-    if (stream != 0) {
-      MACA_CALL(mcMemcpyAsync(to, from, size, kind, stream));
-    } else {
-      MACA_CALL(mcMemcpy(to, from, size, kind));
-    }
+    MACA_CALL(mcMemcpyAsync(to, from, size, kind, stream));
   }
 };
 
@@ -231,21 +259,31 @@ MACAThreadEntry::MACAThreadEntry() : pool(kDLMACA, MACADeviceAPI::Global()) {}
 
 MACAThreadEntry* MACAThreadEntry::ThreadLocal() { return MACAThreadStore::Get(); }
 
-TVM_FFI_REGISTER_GLOBAL("device_api.maca").set_body_packed([](ffi::PackedArgs args, ffi::Any* rv) {
-  DeviceAPI* ptr = MACADeviceAPI::Global();
-  *rv = static_cast<void*>(ptr);
-});
-
-TVM_FFI_REGISTER_GLOBAL("device_api.maca_host")
-    .set_body_packed([](ffi::PackedArgs args, ffi::Any* rv) {
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef()
+    .def_packed("device_api.maca",
+                [](ffi::PackedArgs args, ffi::Any *rv) {
+                  DeviceAPI* ptr = MACADeviceAPI::Global();
+                  *rv = static_cast<void*>(ptr);
+                })
+    .def_packed("device_api.maca_host", [](ffi::PackedArgs args, ffi::Any* rv) {
       DeviceAPI* ptr = MACADeviceAPI::Global();
       *rv = static_cast<void*>(ptr);
     });
+}
 
 class MACATimerNode : public TimerNode {
  public:
-  virtual void Start() { MACA_CALL(mcEventRecord(start_, MACAThreadEntry::ThreadLocal()->stream)); }
-  virtual void Stop() { MACA_CALL(mcEventRecord(stop_, MACAThreadEntry::ThreadLocal()->stream)); }
+  virtual void Start() {
+    int device_id;
+    MACA_CALL(mcGetDevice(&device_id));
+    stream_ = TVMFFIEnvGetStream(kDLMACA, device_id);
+    MACA_CALL(mcEventRecord(start_, static_cast<mcStream_t>(stream_)));
+  }
+  virtual void Stop() {
+    MACA_CALL(mcEventRecord(stop_, static_cast<mcStream_t>(stream_)));
+  }
   virtual int64_t SyncAndGetElapsedNanos() {
     MACA_CALL(mcEventSynchronize(stop_));
     float milliseconds = 0;
@@ -261,19 +299,18 @@ class MACATimerNode : public TimerNode {
     MACA_CALL(mcEventCreate(&stop_));
   }
 
-  static constexpr const char* _type_key = "MACATimerNode";
-  TVM_DECLARE_FINAL_OBJECT_INFO(MACATimerNode, TimerNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("runtime.maca.MACATimerNode", MACATimerNode, TimerNode);
 
  private:
   mcEvent_t start_;
   mcEvent_t stop_;
+  TVMStreamHandle stream_;
 };
 
-TVM_REGISTER_OBJECT_TYPE(MACATimerNode);
-
-TVM_FFI_REGISTER_GLOBAL("profiling.timer.maca").set_body_typed([](Device dev) {
-  return Timer(make_object<MACATimerNode>());
-});
-
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("profiling.timer.maca",
+                        [](Device dev) { return Timer(ffi::make_object<MACATimerNode>()); });
+}
 }  // namespace runtime
 }  // namespace tvm

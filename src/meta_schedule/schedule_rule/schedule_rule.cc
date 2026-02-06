@@ -459,11 +459,11 @@ ffi::Array<ScheduleRule> ScheduleRule::DefaultMACA() {
           /*max_innermost_factor=*/Integer(64),
           /*vector_load_lens=*/ffi::Array<Integer>{1, 2, 3, 4, 8, 16},
           /*reuse_read=*/
-          ffi::Map<ffi::String, ffi::Any>{{"req", String("must")},
+          ffi::Map<ffi::String, ffi::Any>{{"req", ffi::String("must")},
                                 {"levels", ffi::Array<Integer>{4}},  //
                                 {"scope", ffi::String("shared")}},
           /*reuse_write=*/
-          ffi::Map<ffi::String, ffi::Any>{{"req", String("must")},
+          ffi::Map<ffi::String, ffi::Any>{{"req", ffi::String("must")},
                                 {"levels", ffi::Array<Integer>{3}},  //
                                 {"scope", ffi::String("local")}}),
       ScheduleRule::InlineConstantScalars(),
@@ -474,7 +474,7 @@ ffi::Array<ScheduleRule> ScheduleRule::DefaultMACA() {
           /*disallow_if_then_else=*/false,
           /*require_injective=*/false,
           /*require_ordered=*/false,
-          /*disallow_op=*/Array<String>{}),
+          /*disallow_op=*/ffi::Array<ffi::String>{}),
       ScheduleRule::CrossThreadReduction(
           /*thread_extents=*/ffi::Array<Integer>{4, 8, 16, 32, 64, 128, 256, 512}),
       ScheduleRule::ParallelizeVectorizeUnroll(

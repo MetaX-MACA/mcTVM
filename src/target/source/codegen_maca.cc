@@ -463,9 +463,9 @@ void CodeGenMACA::VisitStmt_(const tir::ForNode* op) {
 
 void CodeGenMACA::VisitStmt_(const DeclBufferNode* op) {
   auto data = op->buffer->data;
-  String data_scope = (Downcast<PointerType>(data->type_annotation))->storage_scope.c_str();
+  ffi::String data_scope = (Downcast<PointerType>(data->type_annotation))->storage_scope.c_str();
   if (data_scope == "shared.dyn") {
-    String data_name = data->name_hint;
+    ffi::String data_name = data->name_hint;
     uint32_t buffer_alignment = std::max(op->buffer->dtype.bytes(), 1);
     auto it = shd_aligns.find(data_name);
     if (it != shd_aligns.end()) {
@@ -985,7 +985,7 @@ void CodeGenMACA::VisitExpr_(const CastNode* op, std::ostream& os) {
   os << sret;
 }
 
-void CodeGenMACA::PrintCallExtern(Type ret_type, String global_symbol, const Array<PrimExpr>& args,
+void CodeGenMACA::PrintCallExtern(Type ret_type, ffi::String global_symbol, const ffi::Array<PrimExpr>& args,
                                   bool skip_first_arg, std::ostream& os) {  // NOLINT(*)
   DataType ret_dtype = GetRuntimeDataType(ret_type);
   if (ret_dtype.is_fixed_length_vector()) {

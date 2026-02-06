@@ -15,13 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 """Utility for MACA backend"""
-import re
-import subprocess
-import os
+from __future__ import absolute_import as _abs
 
-import tvm.ffi
-import tvm.runtime
-import tvm.target
+import re
+import os
+import subprocess
+import warnings
+from typing import Tuple
+
+import tvm_ffi
+import tvm
+from tvm.target import Target
 
 from ..base import py_str
 from . import utils
@@ -61,7 +65,7 @@ def compile_maca(
     temp_code = temp.relpath(f"{file_name}.maca")
     temp_target = temp.relpath(f"{file_name}.{target_format}")
 
-    pass_context = tvm.get_global_func("transform.GetCurrentPassContext")()
+    pass_context = tvm_ffi.get_global_func("transform.GetCurrentPassContext")()
     kernels_output_dir = (
         pass_context.config["maca.kernels_output_dir"]
         if "maca.kernels_output_dir" in pass_context.config
@@ -141,7 +145,7 @@ def parse_compute_version(compute_version):
         raise RuntimeError("Compute version parsing error: " + str(err))
 
 
-@tvm.ffi.register_func("tvm_callback_maca_have_wmma")
+@tvm_ffi.register_global_func("tvm_callback_maca_have_wmma")
 def have_wmma(compute_version=None):
     """Either wmma support is provided in the compute capability or not
 
@@ -183,7 +187,7 @@ def have_fp16(compute_version):
     return False
 
 
-@tvm.ffi.register_func("tvm_callback_maca_get_arch")
+@tvm_ffi.register_global_func("tvm_callback_maca_get_arch")
 def get_maca_arch(maca_path="/opt/maca"):
     """Utility function to get the MetaX GPU architecture
 
@@ -242,14 +246,14 @@ def find_maca_path():
     raise RuntimeError("Cannot find MACA path")
 
 
-@tvm.ffi.register_func
+@tvm_ffi.register_global_func
 def tvm_callback_maca_compile(code, target):  # pylint: disable=unused-argument
     """use mxcc to generate fatbin code for better optimization"""
     dev_obj = compile_maca(code, target_format="mcbin")
     return dev_obj
 
 
-@tvm.ffi.register_func("tvm.contrib.mxcc.get_compute_version")
+@tvm_ffi.register_global_func("tvm.contrib.mxcc.get_compute_version")
 def get_target_compute_version(target=None):
     """Utility function to get compute capability of compilation target.
 
@@ -287,7 +291,7 @@ def get_target_compute_version(target=None):
     )
 
 
-@tvm.ffi.register_func("tvm.contrib.mxcc.supports_fp8")
+@tvm_ffi.register_global_func("tvm.contrib.mxcc.supports_fp8")
 def have_fp8(compute_version):  # pylint: disable=unused-argument
     """Whether fp8 support is provided in the specified compute capability or not
 
