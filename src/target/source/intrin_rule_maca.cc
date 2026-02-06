@@ -138,7 +138,7 @@ static PrimExpr DispatchMACAShuffle(const PrimExpr& e) {
   const CallNode* call = e.as<CallNode>();
   ICHECK(call != nullptr);
   ICHECK_EQ(call->args.size(), 5);  // mask, value, warp_id, width, warp_size
-  Array<PrimExpr> maca_args{{call->args[0], call->args[1], call->args[2], call->args[3]}};
+  ffi::Array<PrimExpr> maca_args{{call->args[0], call->args[1], call->args[2], call->args[3]}};
   return Call(call->dtype, T()(call->dtype, Downcast<Op>(call->op)), maca_args);
 }
 

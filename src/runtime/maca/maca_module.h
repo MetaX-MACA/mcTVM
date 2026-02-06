@@ -47,7 +47,7 @@ static constexpr const int kMaxNumGPUs = 32;
  * \param fmap The map function information map of each function.
  * \param maca_source Optional, maca source file
  */
-Module MACAModuleCreate(std::string data, std::string fmt,
+ffi::Module MACAModuleCreate(std::string data, std::string fmt,
                         std::unordered_map<std::string, FunctionInfo> fmap,
                         std::string maca_source);
 }  // namespace runtime

@@ -104,7 +104,7 @@ class CodeGenMACA final : public CodeGenC {
   void VisitStmt_(const DeclBufferNode* op) final;
 
  protected:
-  void PrintCallExtern(Type ret_type, String global_symbol, const Array<PrimExpr>& args,
+  void PrintCallExtern(Type ret_type, ffi::String global_symbol, const ffi::Array<PrimExpr>& args,
                        bool skip_first_arg, std::ostream& os) final;  // NOLINT(*)
 
  private:
@@ -160,7 +160,7 @@ class CodeGenMACA final : public CodeGenC {
   std::queue<size_t> cp_async_remain_nums;
   std::unordered_map<int, int> mcDummyRetNum = {{4, 0}, {8, 0}, {16, 0}};
   // shared buffer ailgnments, {"shd var name": aligns}
-  std::unordered_map<String, uint32_t> shd_aligns;
+  std::unordered_map<ffi::String, uint32_t> shd_aligns;
 };
 }  // namespace maca
 }  // namespace codegen
