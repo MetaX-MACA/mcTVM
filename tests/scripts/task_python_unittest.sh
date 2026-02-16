@@ -52,6 +52,7 @@ TEST_FILES=(
   "tir-schedule"
   "tir-transform"
   "tvmscript"
+  "dlight"
 )
 
 for TEST_FILE in ${TEST_FILES[@]}; do
