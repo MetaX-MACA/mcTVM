@@ -31,6 +31,7 @@
 #include <mcr/mcrtc.h>
 
 #include <cstdlib>
+#include <string>
 
 #include "../../runtime/maca/maca_common.h"
 #include "../../runtime/maca/maca_module.h"
@@ -104,22 +105,70 @@ std::string FindCubridgeIncludePath() {
   return cubridge_include_path;
 }
 
+namespace {
+
+/*!
+ * \brief Normalize TVM_MACA_MCRTC_ARCH / MACA_MCRTC_ARCH to the suffix used in -arch=compute_<suffix>.
+ *        Accepts "53" or "compute_53".
+ */
+std::string NormalizeMcrtcArchEnv(const char* raw) {
+  std::string s = raw;
+  static constexpr const char* kPrefix = "compute_";
+  static constexpr size_t kPrefixLen = 8;
+  if (s.size() >= kPrefixLen && s.compare(0, kPrefixLen, kPrefix) == 0) {
+    s = s.substr(kPrefixLen);
+  }
+  ICHECK(!s.empty()) << "TVM_MACA_MCRTC_ARCH / MACA_MCRTC_ARCH is empty after stripping compute_ prefix.";
+  return s;
+}
+
+/*!
+ * \brief Resolve the compute_* suffix for mcrtc (same convention as CUDA major/minor concatenation).
+ *
+ * Resolution order:
+ * 1. TVM_MACA_MCRTC_ARCH, or MACA_MCRTC_ARCH (e.g. "53" or "compute_53") for cross-build / CI.
+ * 2. mcDeviceGetAttribute on device TVM_MACA_MCRTC_DEVICE_ID (default 0).
+ * 3. LOG(FATAL) with a clear message — we no longer fall back to compute_30, which is wrong on
+ *    MetaX hardware (e.g. C500) and can hide driver/runtime issues.
+ */
+std::string GetMcrtcComputeArchSuffix() {
+  const char* env_arch = std::getenv("TVM_MACA_MCRTC_ARCH");
+  if (env_arch == nullptr || env_arch[0] == '\0') {
+    env_arch = std::getenv("MACA_MCRTC_ARCH");
+  }
+  if (env_arch != nullptr && env_arch[0] != '\0') {
+    return NormalizeMcrtcArchEnv(env_arch);
+  }
+
+  int device_id = 0;
+  const char* env_dev = std::getenv("TVM_MACA_MCRTC_DEVICE_ID");
+  if (env_dev != nullptr && env_dev[0] != '\0') {
+    device_id = std::atoi(env_dev);
+  }
+
+  int major = 0;
+  int minor = 0;
+  mcError_t e1 = mcDeviceGetAttribute(&major, mcDeviceAttributeComputeCapabilityMajor, device_id);
+  mcError_t e2 = mcDeviceGetAttribute(&minor, mcDeviceAttributeComputeCapabilityMinor, device_id);
+
+  if (e1 == mcSuccess && e2 == mcSuccess) {
+    return std::to_string(major) + std::to_string(minor);
+  }
+
+  LOG(FATAL) << "Cannot determine MCRTC -arch=compute_*: mcDeviceGetAttribute failed for device "
+             << device_id << " (errors " << static_cast<int>(e1) << ", " << static_cast<int>(e2)
+             << "). Set TVM_MACA_MCRTC_ARCH or MACA_MCRTC_ARCH to the compute suffix (e.g. 53 for "
+                "compute_53) for cross-compilation or headless build; or set TVM_MACA_MCRTC_DEVICE_ID "
+                "and ensure a MACA GPU is visible to the runtime.";
+}
+
+}  // namespace
+
 std::string MCRTCCompile(const std::string& code, bool include_path = false) {
   std::vector<std::string> compile_params;
   std::vector<const char*> param_cstrings{};
   mcrtcProgram prog;
-  std::string cc = "30";
-  int major, minor;
-  mcError_t e1 = mcDeviceGetAttribute(&major, mcDeviceAttributeComputeCapabilityMajor, 0);
-  mcError_t e2 = mcDeviceGetAttribute(&minor, mcDeviceAttributeComputeCapabilityMinor, 0);
-
-  if (e1 == mcSuccess && e2 == mcSuccess) {
-    cc = std::to_string(major) + std::to_string(minor);
-  } else {
-    LOG(WARNING) << "cannot detect compute capability from your device, "
-                 << "fall back to compute_30.";
-  }
-  // FIXME:
+  const std::string cc = GetMcrtcComputeArchSuffix();
   compile_params.push_back("-arch=compute_" + cc);
 
   if (include_path) {
