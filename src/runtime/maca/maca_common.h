@@ -39,14 +39,16 @@ namespace runtime {
   {                                                                                            \
     mcError_t result = x;                                                                      \
     if (result != mcSuccess && result != mcErrorDeinitialized) {                               \
-      LOG(FATAL) << "MACA MACA Error: " #x " failed with error: " << mcGetErrorString(result); \
+      LOG(FATAL) << "MACA driver call failed: " #x " returned " << static_cast<int>(result)    \
+                 << " (" << mcGetErrorString(result) << ")";                                 \
     }                                                                                          \
   }
 
-#define MACA_CALL(func)                                             \
-  {                                                                 \
-    mcError_t e = (func);                                           \
-    ICHECK(e == mcSuccess) << "MACA MACA: " << mcGetErrorString(e); \
+#define MACA_CALL(func)                                                                           \
+  {                                                                                               \
+    mcError_t e = (func);                                                                         \
+    ICHECK(e == mcSuccess) << "MACA runtime call failed: " #func " returned " << static_cast<int>(e) \
+                           << " (" << mcGetErrorString(e) << ")";                               \
   }
 
 /*! \brief Thread local workspace */
