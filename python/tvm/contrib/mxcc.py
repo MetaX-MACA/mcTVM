@@ -19,6 +19,7 @@ from __future__ import absolute_import as _abs
 
 import re
 import os
+import shlex
 import subprocess
 import warnings
 from typing import Tuple
@@ -29,6 +30,21 @@ from tvm.target import Target
 
 from ..base import py_str
 from . import utils
+
+
+def _format_mxcc_error(cmd, compiler_output, code):
+    """Format an mxcc failure with enough context for reproduction."""
+    return "\n".join(
+        [
+            "MACA compilation failed.",
+            "Command:",
+            shlex.join(cmd),
+            "Compiler output:",
+            py_str(compiler_output),
+            "Source:",
+            code,
+        ]
+    )
 
 
 def compile_maca(
@@ -108,10 +124,7 @@ def compile_maca(
     (out, _) = proc.communicate()
 
     if proc.returncode != 0:
-        msg = code
-        msg += "\nCompilation error:\n"
-        msg += py_str(out)
-        raise RuntimeError(msg)
+        raise RuntimeError(_format_mxcc_error(cmd, out, code))
 
     with open(file_target, "rb") as f:
         data = bytearray(f.read())
