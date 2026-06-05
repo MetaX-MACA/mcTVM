@@ -19,6 +19,7 @@ from __future__ import absolute_import as _abs
 
 import re
 import os
+import hashlib
 import subprocess
 import warnings
 from typing import Tuple
@@ -29,6 +30,12 @@ from tvm.target import Target
 
 from ..base import py_str
 from . import utils
+
+
+def _kernel_file_name(code):
+    """Return a stable kernel dump filename for the given MACA source."""
+    digest = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
+    return f"tvm_kernels_{digest}"
 
 
 def compile_maca(
@@ -74,6 +81,7 @@ def compile_maca(
     if kernels_output_dir is not None:
         if not os.path.isdir(kernels_output_dir):
             os.makedirs(kernels_output_dir)
+        file_name = _kernel_file_name(code)
         temp_code = os.path.join(kernels_output_dir, f"{file_name}.maca")
         temp_target = os.path.join(kernels_output_dir, f"{file_name}.{target_format}")
 
