@@ -1,3 +1,7 @@
+if(NOT TVM_SOURCE_DIR)
+  get_filename_component(TVM_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
+endif()
+
 include("${TVM_SOURCE_DIR}/cmake/utils/FindMACA.cmake")
 
 set(MACA_FOUND TRUE)
