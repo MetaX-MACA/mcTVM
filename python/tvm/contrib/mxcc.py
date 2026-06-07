@@ -31,6 +31,12 @@ from ..base import py_str
 from . import utils
 
 
+def _get_kernels_output_dir(pass_context):
+    if "maca.kernels_output_dir" in pass_context.config:
+        return pass_context.config["maca.kernels_output_dir"]
+    return os.environ.get("TVM_MACA_KERNELS_OUTPUT_DIR")
+
+
 def compile_maca(
     code, target_format="mcbin", arch=None, options=None, path_target=None
 ):  # pylint: disable=unused-argument
@@ -66,11 +72,7 @@ def compile_maca(
     temp_target = temp.relpath(f"{file_name}.{target_format}")
 
     pass_context = tvm_ffi.get_global_func("transform.GetCurrentPassContext")()
-    kernels_output_dir = (
-        pass_context.config["maca.kernels_output_dir"]
-        if "maca.kernels_output_dir" in pass_context.config
-        else None
-    )
+    kernels_output_dir = _get_kernels_output_dir(pass_context)
     if kernels_output_dir is not None:
         if not os.path.isdir(kernels_output_dir):
             os.makedirs(kernels_output_dir)
