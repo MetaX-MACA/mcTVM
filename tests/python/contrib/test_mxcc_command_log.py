@@ -10,10 +10,14 @@ def _load_mxcc_logging_helper():
         Path(__file__).resolve().parents[3] / "python" / "tvm" / "contrib" / "mxcc.py"
     )
     tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    allowed_imports = {"json", "os"}
     nodes = [
         node
         for node in tree.body
-        if isinstance(node, (ast.Import, ast.ImportFrom))
+        if (
+            isinstance(node, ast.Import)
+            and all(alias.name in allowed_imports for alias in node.names)
+        )
         or (isinstance(node, ast.FunctionDef) and node.name == "_write_compile_command_log")
     ]
     module = ast.Module(body=nodes, type_ignores=[])
