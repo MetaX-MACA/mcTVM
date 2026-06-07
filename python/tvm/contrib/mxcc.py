@@ -19,6 +19,7 @@ from __future__ import absolute_import as _abs
 
 import re
 import os
+import shlex
 import subprocess
 import warnings
 from typing import Tuple
@@ -29,6 +30,13 @@ from tvm.target import Target
 
 from ..base import py_str
 from . import utils
+
+
+def _get_env_mxcc_options():
+    value = os.environ.get("TVM_MXCC_OPTIONS")
+    if not value:
+        return []
+    return shlex.split(value)
 
 
 def compile_maca(
@@ -99,6 +107,7 @@ def compile_maca(
             cmd += options
         else:
             raise ValueError("options must be str of list of str")
+    cmd += _get_env_mxcc_options()
 
     cmd += ["-D__FAST_HALF_CVT__", "-o", file_target]
     cmd += [temp_code]
