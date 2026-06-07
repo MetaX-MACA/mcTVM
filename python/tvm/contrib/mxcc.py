@@ -17,6 +17,7 @@
 """Utility for MACA backend"""
 from __future__ import absolute_import as _abs
 
+import json
 import re
 import os
 import subprocess
@@ -29,6 +30,24 @@ from tvm.target import Target
 
 from ..base import py_str
 from . import utils
+
+
+def _write_compile_command_log(cmd, source, output):
+    log_path = os.environ.get("TVM_MACA_COMPILE_COMMAND_LOG")
+    if not log_path:
+        return
+    log_dir = os.path.dirname(os.path.abspath(log_path))
+    if log_dir and not os.path.isdir(log_dir):
+        os.makedirs(log_dir)
+    record = {
+        "command": cmd,
+        "source": source,
+        "output": output,
+        "target_format": os.path.splitext(output)[1].lstrip("."),
+    }
+    with open(log_path, "a", encoding="utf-8") as log_file:
+        log_file.write(json.dumps(record, sort_keys=True))
+        log_file.write("\n")
 
 
 def compile_maca(
@@ -102,6 +121,7 @@ def compile_maca(
 
     cmd += ["-D__FAST_HALF_CVT__", "-o", file_target]
     cmd += [temp_code]
+    _write_compile_command_log(cmd, temp_code, file_target)
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
