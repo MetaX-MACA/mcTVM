@@ -188,7 +188,7 @@ def have_fp16(compute_version):
 
 
 @tvm_ffi.register_global_func("tvm_callback_maca_get_arch")
-def get_maca_arch(maca_path="/opt/maca"):
+def get_maca_arch(maca_path=None):
     """Utility function to get the MetaX GPU architecture
 
     Parameters
@@ -202,6 +202,7 @@ def get_maca_arch(maca_path="/opt/maca"):
         The MetaX GPU architecture
     """
     gpu_arch = "xcore1000"
+    maca_path = maca_path or os.environ.get("MACA_PATH", "/opt/maca")
     # check if maca is installed
     if not os.path.exists(maca_path):
         print("MACA not detected, using default xcore1000")
@@ -210,10 +211,7 @@ def get_maca_arch(maca_path="/opt/maca"):
         # Execute macainfo command
         macainfo_output = subprocess.check_output([f"{maca_path}/bin/macainfo"]).decode("utf-8")
 
-        # Use regex to match the "Name" field
-        match = re.search(r"Name:\s+(XCORE\d+[a-zA-Z]*)", macainfo_output)
-        if match:
-            gpu_arch = match.group(1)
+        gpu_arch = _parse_macainfo_arch(macainfo_output) or gpu_arch
         return gpu_arch.lower()
     except subprocess.CalledProcessError:
         print(
@@ -222,6 +220,12 @@ def get_maca_arch(maca_path="/opt/maca"):
                     using default {gpu_arch}."
         )
         return gpu_arch
+
+
+def _parse_macainfo_arch(macainfo_output):
+    """Parse MetaX GPU architecture from macainfo output."""
+    match = re.search(r"Name:\s+(XCORE\d+[a-zA-Z]*)", macainfo_output)
+    return match.group(1) if match else None
 
 
 def find_maca_path():
