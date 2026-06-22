@@ -37,8 +37,8 @@ def _write_compile_command_log(cmd, source, output):
     if not log_path:
         return
     log_dir = os.path.dirname(os.path.abspath(log_path))
-    if log_dir and not os.path.isdir(log_dir):
-        os.makedirs(log_dir)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
     record = {
         "command": cmd,
         "source": source,
