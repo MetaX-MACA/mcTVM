@@ -28,7 +28,7 @@ class FindMACACMakeTest(unittest.TestCase):
             "MACA_HCA_LIBRARY",
             "MACA_FLASHATTN_LIBRARY",
         ]:
-            self.assertRegex(self.content, rf"unset\({re.escape(variable)}\)")
+            self.assertRegex(self.content, rf"unset\({re.escape(variable)}(?:\s+CACHE)?\)")
 
     def test_libraries_are_resolved_inside_selected_sdk(self):
         for variable in [
@@ -38,7 +38,7 @@ class FindMACACMakeTest(unittest.TestCase):
         ]:
             self.assertRegex(
                 self.content,
-                rf"find_library\({variable} .* PATHS \${{__maca_sdk}}/lib NO_DEFAULT_PATH\)",
+                rf"find_library\({variable} .* PATHS \"?\${{__maca_sdk}}/lib\"? NO_DEFAULT_PATH\)",
             )
 
 
