@@ -121,7 +121,10 @@ def compile_maca(
     try:
         (out, _) = proc.communicate(timeout=_get_mxcc_timeout())
     except subprocess.TimeoutExpired as err:
-        proc.kill()
+        try:
+            proc.kill()
+        except OSError:
+            pass
         out, _ = proc.communicate()
         msg = "MACA compilation timed out"
         msg += f" after {err.timeout} seconds:\n"
