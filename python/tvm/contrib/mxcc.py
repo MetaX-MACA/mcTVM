@@ -32,7 +32,7 @@ from . import utils
 
 
 def _get_kernels_output_dir(pass_context):
-    if "maca.kernels_output_dir" in pass_context.config:
+    if pass_context is not None and "maca.kernels_output_dir" in pass_context.config:
         return pass_context.config["maca.kernels_output_dir"]
     return os.environ.get("TVM_MACA_KERNELS_OUTPUT_DIR")
 
