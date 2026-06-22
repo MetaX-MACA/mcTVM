@@ -35,21 +35,21 @@
 namespace tvm {
 namespace runtime {
 
-#define MACA_DRIVER_CALL(x)                                                                    \
-  {                                                                                            \
-    mcError_t result = x;                                                                      \
-    if (result != mcSuccess && result != mcErrorDeinitialized) {                               \
-      LOG(FATAL) << "MACA driver call failed: " #x " returned " << static_cast<int>(result)    \
-                 << " (" << mcGetErrorString(result) << ")";                                 \
-    }                                                                                          \
-  }
+#define MACA_DRIVER_CALL(x)                                                                     \
+  do {                                                                                          \
+    mcError_t result = x;                                                                       \
+    if (result != mcSuccess && result != mcErrorDeinitialized) {                                \
+      LOG(FATAL) << "MACA driver call failed: " #x " returned " << static_cast<int>(result)     \
+                 << " (" << mcGetErrorString(result) << ")";                                    \
+    }                                                                                           \
+  } while (0)
 
-#define MACA_CALL(func)                                                                           \
-  {                                                                                               \
-    mcError_t e = (func);                                                                         \
+#define MACA_CALL(func)                                                                            \
+  do {                                                                                             \
+    mcError_t e = (func);                                                                          \
     ICHECK(e == mcSuccess) << "MACA runtime call failed: " #func " returned " << static_cast<int>(e) \
-                           << " (" << mcGetErrorString(e) << ")";                               \
-  }
+                           << " (" << mcGetErrorString(e) << ")";                                 \
+  } while (0)
 
 /*! \brief Thread local workspace */
 class MACAThreadEntry {
