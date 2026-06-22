@@ -227,7 +227,8 @@ def get_maca_arch(maca_path="/opt/maca"):
 
 def _maca_path_from_mxcc(mxcc_path):
     """Infer MACA root from an mxcc executable path."""
-    return os.path.realpath(os.path.join(os.path.dirname(mxcc_path), "../.."))
+    real_path = os.path.realpath(mxcc_path)
+    return os.path.realpath(os.path.join(os.path.dirname(real_path), "../.."))
 
 
 def find_maca_path():
