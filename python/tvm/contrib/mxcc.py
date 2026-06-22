@@ -31,6 +31,19 @@ from ..base import py_str
 from . import utils
 
 
+def _get_mxcc_timeout():
+    value = os.environ.get("TVM_MXCC_TIMEOUT")
+    if not value:
+        return None
+    try:
+        timeout = float(value)
+    except ValueError as err:
+        raise ValueError("TVM_MXCC_TIMEOUT must be a positive number") from err
+    if timeout <= 0:
+        raise ValueError("TVM_MXCC_TIMEOUT must be a positive number")
+    return timeout
+
+
 def compile_maca(
     code, target_format="mcbin", arch=None, options=None, path_target=None
 ):  # pylint: disable=unused-argument
@@ -105,7 +118,20 @@ def compile_maca(
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
-    (out, _) = proc.communicate()
+    try:
+        (out, _) = proc.communicate(timeout=_get_mxcc_timeout())
+    except subprocess.TimeoutExpired as err:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        out, _ = proc.communicate()
+        msg = "MACA compilation timed out"
+        msg += f" after {err.timeout} seconds:\n"
+        msg += " ".join(cmd)
+        msg += "\nCompiler output before timeout:\n"
+        msg += py_str(out)
+        raise RuntimeError(msg) from err
 
     if proc.returncode != 0:
         msg = code
