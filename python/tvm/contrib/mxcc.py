@@ -34,13 +34,18 @@ from . import utils
 
 def _format_mxcc_error(cmd, compiler_output, code):
     """Format an mxcc failure with enough context for reproduction."""
+    command_text = shlex.join([str(part) for part in cmd])
+    if isinstance(compiler_output, bytes):
+        compiler_text = compiler_output.decode("utf-8", errors="replace")
+    else:
+        compiler_text = py_str(compiler_output)
     return "\n".join(
         [
             "MACA compilation failed.",
             "Command:",
-            shlex.join(cmd),
+            command_text,
             "Compiler output:",
-            py_str(compiler_output),
+            compiler_text,
             "Source:",
             code,
         ]
