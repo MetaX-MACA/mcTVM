@@ -1,41 +1,29 @@
-import ast
-from pathlib import Path
+from unittest.mock import patch
 
+import pytest
 
-def _load_arch_helpers():
-    source_path = (
-        Path(__file__).resolve().parents[3] / "python" / "tvm" / "contrib" / "mxcc.py"
-    )
-    tree = ast.parse(source_path.read_text(encoding="utf-8"))
-    wanted = {"parse_compute_version", "normalize_maca_arch"}
-    nodes = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name in wanted
-    ]
-    module = ast.Module(body=nodes, type_ignores=[])
-    ast.fix_missing_locations(module)
-    namespace = {}
-    exec(compile(module, str(source_path), "exec"), namespace)
-    return namespace
+from tvm.contrib.mxcc import get_maca_arch, normalize_maca_arch
 
 
 def test_normalize_maca_arch_accepts_xcore_and_compute_version():
-    helpers = _load_arch_helpers()
-
-    assert helpers["normalize_maca_arch"]("xcore1000") == "10.0"
-    assert helpers["normalize_maca_arch"]("xcore1030") == "10.30"
-    assert helpers["normalize_maca_arch"]("10.0") == "10.0"
+    assert normalize_maca_arch("xcore1000") == "10.0"
+    assert normalize_maca_arch("xcore1000b") == "10.0"
+    assert normalize_maca_arch("xcore1030") == "10.30"
+    assert normalize_maca_arch("10.0") == "10.0"
 
 
 def test_normalize_maca_arch_rejects_unknown_string():
-    helpers = _load_arch_helpers()
-    try:
-        helpers["normalize_maca_arch"]("xcore")
-    except RuntimeError as err:
-        assert "architecture parsing" in str(err)
-    else:
-        raise AssertionError("expected RuntimeError")
+    with pytest.raises(RuntimeError, match="architecture parsing"):
+        normalize_maca_arch("xcore")
+
+
+def test_get_maca_arch_strips_vendor_suffix():
+    with patch("tvm.contrib.mxcc.os.path.exists", return_value=True):
+        with patch(
+            "tvm.contrib.mxcc.subprocess.check_output",
+            return_value=b"Name: XCORE1000B\n",
+        ):
+            assert get_maca_arch("/opt/maca") == "xcore1000"
 
 
 if __name__ == "__main__":

@@ -237,7 +237,7 @@ def get_maca_arch(maca_path="/opt/maca"):
         # Use regex to match the "Name" field
         match = re.search(r"Name:\s+(XCORE\d+[a-zA-Z]*)", macainfo_output)
         if match:
-            gpu_arch = match.group(1)
+            gpu_arch = re.sub(r"^(xcore\d+)[a-z]+$", r"\1", match.group(1).lower())
         return gpu_arch.lower()
     except subprocess.CalledProcessError:
         print(
