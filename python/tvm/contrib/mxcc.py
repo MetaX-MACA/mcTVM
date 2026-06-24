@@ -145,6 +145,30 @@ def parse_compute_version(compute_version):
         raise RuntimeError("Compute version parsing error: " + str(err))
 
 
+def normalize_maca_arch(arch):
+    """Normalize MACA arch strings to compute version strings.
+
+    Examples
+    --------
+    xcore1000 -> 10.0
+    xcore1030 -> 10.30
+    10.0 -> 10.0
+    """
+    arch = arch.lower()
+    if arch.startswith("xcore"):
+        arch = arch[len("xcore") :]
+    if "." in arch:
+        parse_compute_version(arch)
+        return arch
+    if not arch.isdigit() or len(arch) < 3:
+        raise RuntimeError("MACA architecture parsing error: " + arch)
+    major = arch[:2]
+    minor = arch[2:]
+    if set(minor) == {"0"}:
+        minor = "0"
+    return major + "." + minor
+
+
 @tvm_ffi.register_global_func("tvm_callback_maca_have_wmma")
 def have_wmma(compute_version=None):
     """Either wmma support is provided in the compute capability or not
@@ -213,7 +237,7 @@ def get_maca_arch(maca_path="/opt/maca"):
         # Use regex to match the "Name" field
         match = re.search(r"Name:\s+(XCORE\d+[a-zA-Z]*)", macainfo_output)
         if match:
-            gpu_arch = match.group(1)
+            gpu_arch = re.sub(r"^(xcore\d+)[a-z]+$", r"\1", match.group(1).lower())
         return gpu_arch.lower()
     except subprocess.CalledProcessError:
         print(
@@ -274,12 +298,7 @@ def get_target_compute_version(target=None):
     # 2. Target.current()
     target = target or tvm.target.Target.current()
     if target and target.mcpu:
-        arch = target.mcpu[5:]
-        major = arch[:2]
-        minor = arch[2:]
-        if minor == "00":
-            minor = "0"
-        return major + "." + minor
+        return normalize_maca_arch(target.mcpu)
 
     # 3. GPU compute version
     if tvm.maca(0).exist:
