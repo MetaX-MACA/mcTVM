@@ -123,11 +123,10 @@ def compile_maca(
 
 def _find_mxcc():
     """Find mxcc from MACA_PATH or PATH."""
-    maca_path = os.environ.get("MACA_PATH")
-    if maca_path:
-        candidate = os.path.join(maca_path, "mxgpu_llvm", "bin", "mxcc")
-        if os.path.isfile(candidate):
-            return candidate
+    maca_path = os.environ.get("MACA_PATH", "/opt/maca")
+    candidate = os.path.join(maca_path, "mxgpu_llvm", "bin", "mxcc")
+    if os.path.isfile(candidate):
+        return candidate
     mxcc = shutil.which("mxcc")
     if mxcc:
         return mxcc
