@@ -34,7 +34,13 @@ from . import utils
 
 def _kernel_file_name(code):
     """Return a stable kernel dump filename for the given MACA source."""
-    digest = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
+    if code is None:
+        code_bytes = b""
+    elif isinstance(code, bytes):
+        code_bytes = code
+    else:
+        code_bytes = str(code).encode("utf-8")
+    digest = hashlib.sha256(code_bytes).hexdigest()[:16]
     return f"tvm_kernels_{digest}"
 
 
