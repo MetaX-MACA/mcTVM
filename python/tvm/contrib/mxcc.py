@@ -201,7 +201,14 @@ def get_maca_arch(maca_path="/opt/maca"):
     gpu_arch : str
         The MetaX GPU architecture
     """
+    # Check MACA_ARCH environment variable first
+    gpu_arch = os.environ.get("MACA_ARCH")
+    if gpu_arch:
+        return gpu_arch.lower()
+
     gpu_arch = "xcore1000"
+    # resolve maca path from parameter or environment variable
+    maca_path = maca_path or os.environ.get("MACA_PATH", "/opt/maca")
     # check if maca is installed
     if not os.path.exists(maca_path):
         print("MACA not detected, using default xcore1000")
@@ -215,7 +222,7 @@ def get_maca_arch(maca_path="/opt/maca"):
         if match:
             gpu_arch = match.group(1)
         return gpu_arch.lower()
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, OSError):
         print(
             f"Unable to execute macainfo command, \
                 please ensure MACA is installed and you have an MetaX GPU on your system.\
