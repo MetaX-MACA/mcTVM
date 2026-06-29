@@ -45,17 +45,24 @@ macro(find_maca use_maca)
 
   if(__maca_sdk)
     set(MACA_INCLUDE_DIRS ${__maca_sdk}/include)
-    find_library(MACA_MACAMCC_LIBRARY mcruntime ${__maca_sdk}/lib)
-    find_library(MACA_HCA_LIBRARY mxc-runtime64 ${__maca_sdk}/lib)
-    find_library(MACA_FLASHATTN_LIBRARY mcFlashAttn ${__maca_sdk}/lib)
+    set(__maca_library_paths
+      ${__maca_sdk}/lib
+      ${__maca_sdk}/lib64
+      ${__maca_sdk}/lib/x86_64-linux-gnu
+    )
+    find_library(MACA_MACAMCC_LIBRARY mcruntime PATHS ${__maca_library_paths} NO_DEFAULT_PATH)
+    find_library(MACA_HCA_LIBRARY mxc-runtime64 PATHS ${__maca_library_paths} NO_DEFAULT_PATH)
+    find_library(MACA_FLASHATTN_LIBRARY mcFlashAttn PATHS ${__maca_library_paths} NO_DEFAULT_PATH)
 
     if(MACA_MACAMCC_LIBRARY)
       set(MACA_FOUND TRUE)
     endif()
   endif(__maca_sdk)
   if(MACA_FOUND)
+    message(STATUS "Found MACA SDK=" ${__maca_sdk})
     message(STATUS "Found MACA_INCLUDE_DIRS=" ${MACA_INCLUDE_DIRS})
     message(STATUS "Found MACA_MACAMCC_LIBRARY=" ${MACA_MACAMCC_LIBRARY})
+    message(STATUS "Found MACA_HCA_LIBRARY=" ${MACA_HCA_LIBRARY})
     message(STATUS "Found MACA_FLASHATTN_LIBRARY=" ${MACA_FLASHATTN_LIBRARY})
   endif(MACA_FOUND)
 endmacro(find_maca)
