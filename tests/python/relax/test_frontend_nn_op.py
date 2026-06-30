@@ -1003,7 +1003,7 @@ def test_multinomial_from_uniform():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_sample_top_p_top_k_from_sorted_prob():
     prob_shape = (2, 3)
     sample_shape = (3, 1)
@@ -1136,7 +1136,7 @@ def test_sample_top_p_top_k_from_sorted_prob():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_renormalize_top_p_top_k_prob():
     prob_shape = (2, 3)
     sample_shape = (2, 1)

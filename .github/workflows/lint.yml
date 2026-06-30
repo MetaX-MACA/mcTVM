@@ -19,9 +19,9 @@ name: Lint
 
 on:
   push:
-    branches: [main]
+    branches: [dev, main]
   pull_request:
-    branches: [main]
+    branches: [dev, main]
 
 concurrency:
   group: Lint-${{ github.event.pull_request.number || github.sha }}

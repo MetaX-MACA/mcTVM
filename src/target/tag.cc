@@ -82,15 +82,15 @@ Target TargetTag::AddTag(ffi::String name, ffi::Map<ffi::String, ffi::Any> confi
   return Target(config);
 }
 
-#define TVM_REGISTER_MACA_TAG(Name, CPU, TRIPLE, SharedMem)                                \
-  TVM_REGISTER_TARGET_TAG(Name).set_config({                                               \
-      {"kind", ffi::String("maca")},                                                       \
-      {"keys", ffi::Array<ffi::String>{"maca", "gpu"}},                                   \
-      {"mcpu", ffi::String(CPU)},                                                          \
-      {"mtriple", ffi::String(TRIPLE)},                                                    \
-      {"max_shared_memory_per_block", SharedMem},                                          \
-      {"max_threads_per_block", 1024},                                                     \
-      {"thread_warp_size", 64},                                                            \
+#define TVM_REGISTER_MACA_TAG(Name, CPU, TRIPLE, SharedMem) \
+  TVM_REGISTER_TARGET_TAG(Name).set_config({                \
+      {"kind", ffi::String("maca")},                        \
+      {"keys", ffi::Array<ffi::String>{"maca", "gpu"}},     \
+      {"mcpu", ffi::String(CPU)},                           \
+      {"mtriple", ffi::String(TRIPLE)},                     \
+      {"max_shared_memory_per_block", SharedMem},           \
+      {"max_threads_per_block", 1024},                      \
+      {"thread_warp_size", 64},                             \
   })
 
 TVM_REGISTER_MACA_TAG("metax/mxc-c500", "xcore1000", "mxc-metax-macahca", 65536);

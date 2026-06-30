@@ -18,18 +18,26 @@
  */
 
 /*!
- *  Optional module when build maca is switched to off
+ *  Optional build entry when MACA codegen is switched off.
  */
 #include <tvm/ffi/error.h>
+#include <tvm/ffi/extra/module.h>
+#include <tvm/ffi/reflection/registry.h>
+#include <tvm/ir/module.h>
+#include <tvm/target/target.h>
 
-#include "../../../runtime/maca/maca_module.h"
 namespace tvm {
-namespace runtime {
+namespace codegen {
 
-ffi::Module MACAModuleCreate(ffi::Bytes data, ffi::String fmt,
-                             ffi::Map<ffi::String, FunctionInfo> fmap, ffi::String maca_source) {
-  TVM_FFI_THROW(InternalError) << "MACA is not enabled";
+ffi::Module BuildMACA(IRModule mod, Target target) {
+  TVM_FFI_THROW(InternalError) << "MACA codegen is not enabled";
   TVM_FFI_UNREACHABLE();
 }
-}  // namespace runtime
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("target.build.maca", BuildMACA);
+}
+
+}  // namespace codegen
 }  // namespace tvm

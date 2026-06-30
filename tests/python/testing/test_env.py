@@ -31,6 +31,7 @@ _BOOL_PROBES = [
     env.has_metal,
     env.has_opencl,
     env.has_nvptx,
+    env.has_maca,
     env.has_llvm,
     env.has_gpu,
     # build support
@@ -73,6 +74,7 @@ def test_has_gpu_is_raw_any_device():
         or env._device_exists("opencl")  # pylint: disable=protected-access
         or env._device_exists("metal")  # pylint: disable=protected-access
         or env._device_exists("vulkan")  # pylint: disable=protected-access
+        or env._device_exists("maca")  # pylint: disable=protected-access
     )
     assert env.has_gpu() == any_device
 

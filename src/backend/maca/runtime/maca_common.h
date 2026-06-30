@@ -21,8 +21,8 @@
  * \file maca_common.h
  * \brief Common utilities for MACA
  */
-#ifndef TVM_RUNTIME_MACA_MACA_COMMON_H_
-#define TVM_RUNTIME_MACA_MACA_COMMON_H_
+#ifndef TVM_BACKEND_MACA_RUNTIME_MACA_COMMON_H_
+#define TVM_BACKEND_MACA_RUNTIME_MACA_COMMON_H_
 
 #include <mcr/mc_runtime_api.h>
 // #include <mcr/mc_version.h>
@@ -30,23 +30,23 @@
 
 #include <string>
 
-#include "../workspace_pool.h"
+#include "../../../runtime/workspace_pool.h"
 
 namespace tvm {
 namespace runtime {
 
-#define MACA_DRIVER_CALL(x)                                                                    \
-  {                                                                                            \
-    mcError_t result = x;                                                                      \
-    if (result != mcSuccess && result != mcErrorDeinitialized) {                               \
-      TVM_FFI_THROW(InternalError)                                                             \
-          << "MACA MACA Error: " #x " failed with error: " << mcGetErrorString(result);        \
-    }                                                                                          \
+#define MACA_DRIVER_CALL(x)                                                             \
+  {                                                                                     \
+    mcError_t result = x;                                                               \
+    if (result != mcSuccess && result != mcErrorDeinitialized) {                        \
+      TVM_FFI_THROW(InternalError)                                                      \
+          << "MACA MACA Error: " #x " failed with error: " << mcGetErrorString(result); \
+    }                                                                                   \
   }
 
-#define MACA_CALL(func)                                             \
-  {                                                                 \
-    mcError_t e = (func);                                           \
+#define MACA_CALL(func)                                                     \
+  {                                                                         \
+    mcError_t e = (func);                                                   \
     TVM_FFI_ICHECK(e == mcSuccess) << "MACA MACA: " << mcGetErrorString(e); \
   }
 
@@ -64,4 +64,4 @@ class MACAThreadEntry {
 };
 }  // namespace runtime
 }  // namespace tvm
-#endif  // TVM_RUNTIME_MACA_MACA_COMMON_H_
+#endif  // TVM_BACKEND_MACA_RUNTIME_MACA_COMMON_H_

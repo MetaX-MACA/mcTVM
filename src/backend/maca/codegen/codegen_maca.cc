@@ -35,8 +35,8 @@
 #include <utility>
 #include <vector>
 
-#include "../../tirx/transform/ir_utils.h"
-#include "../../backend/cuda/codegen/literal/maca_half_t.h"
+#include "../../../tirx/transform/ir_utils.h"
+#include "../../cuda/codegen/literal/maca_half_t.h"
 
 namespace tvm {
 namespace codegen {
@@ -242,9 +242,8 @@ void CodeGenMACA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
   ThreadIdxExtractor extractor;
   extractor(f->body);
   arith::Analyzer analyzer;
-  PrimExpr threadIdx_ext = analyzer->Simplify(extractor.threadIdx_x_ext *
-                                              extractor.threadIdx_y_ext *
-                                              extractor.threadIdx_z_ext);
+  PrimExpr threadIdx_ext = analyzer->Simplify(
+      extractor.threadIdx_x_ext * extractor.threadIdx_y_ext * extractor.threadIdx_z_ext);
   if (const IntImmNode* const threadIdx_ext_int = threadIdx_ext.as<IntImmNode>()) {
     if (threadIdx_ext_int->value == 1) {
       // unable to extract the number of threads per block, hence directly return
@@ -697,7 +696,8 @@ void CodeGenMACA::PrintType(const PrimType& t, std::ostream& os) {  // NOLINT(*)
           // s4.z is emitted as *(short2*)(&(i2.y)).x
           // s4.w is emitted as *(short2*)(&(i2.y)).y
           //
-          TVM_FFI_ICHECK_EQ(t.lanes() % 2, 0) << "only support even lane for shorT type with lanes > 4";
+          TVM_FFI_ICHECK_EQ(t.lanes() % 2, 0)
+              << "only support even lane for shorT type with lanes > 4";
           os << "int" << t.lanes() / 2;
         } else {
           fail = true;
@@ -951,8 +951,9 @@ void CodeGenMACA::PrintStorageSync(const CallNode* op) {
 }
 
 void CodeGenMACA::PrintStorageScope(const std::string& scope, std::ostream& os) {  // NOLINT(*)
-  TVM_FFI_ICHECK_NE(scope, "global") << "Cannot allocate global memory when targeting MACA. You must pass "
-                                "all global arrays as input instead";
+  TVM_FFI_ICHECK_NE(scope, "global")
+      << "Cannot allocate global memory when targeting MACA. You must pass "
+         "all global arrays as input instead";
   if (scope == "shared") {
     os << "__shared__ ";
   } else if (scope == "shared.dyn") {
@@ -1020,8 +1021,9 @@ void CodeGenMACA::VisitExpr_(const CastNode* op, std::ostream& os) {
   os << sret;
 }
 
-void CodeGenMACA::PrintCallExtern(Type ret_type, ffi::String global_symbol, const ffi::Array<PrimExpr>& args,
-                                  bool skip_first_arg, std::ostream& os) {  // NOLINT(*)
+void CodeGenMACA::PrintCallExtern(Type ret_type, ffi::String global_symbol,
+                                  const ffi::Array<PrimExpr>& args, bool skip_first_arg,
+                                  std::ostream& os) {  // NOLINT(*)
   DLDataType ret_dtype = GetRuntimeDataType(ret_type);
   PrimType ret_ty(ret_dtype);
   if (ret_ty.IsFixedLengthVector()) {
@@ -1164,13 +1166,15 @@ void CodeGenMACA::VisitStmt_(const AttrStmtNode* op) {
     fragment_layouts[buffer] = layout_str->value;
   } else if (op->attr_key == tirx::attr::async_commit_queue_scope) {
     const IntImmNode* queue_id = op->value.as<IntImmNode>();
-    TVM_FFI_ICHECK(queue_id && queue_id->value == 0) << "For MACA, the index of an async queue must be 0.";
+    TVM_FFI_ICHECK(queue_id && queue_id->value == 0)
+        << "For MACA, the index of an async queue must be 0.";
     this->VisitStmt(op->body);
     return;
   } else if (op->attr_key == tirx::attr::async_wait_queue_scope) {
     auto wait_attrs = GetAsyncWaitAttributes(op);
     auto queue_id = wait_attrs.first.as<IntImmNode>();
-    TVM_FFI_ICHECK(queue_id && queue_id->value == 0) << "For MACA, the index of an async queue must be 0.";
+    TVM_FFI_ICHECK(queue_id && queue_id->value == 0)
+        << "For MACA, the index of an async queue must be 0.";
     // TODO(metax): Because the data type of the operation written into this block cannot be
     // obtained temporarily, for a barrier_arrive_and_wait function that only involves one type
     // of data,assume that if there is a method to obtain it in the future, replace the bit here.
@@ -1210,8 +1214,8 @@ void CodeGenMACA::VisitStmt_(const AllocBufferNode* op) {
   if (scope.find("wmma.") == 0) {
     if (scope == "wmma.matrix_a" || scope == "wmma.matrix_b") {
       bool supported_wmma_input_dtype =
-          dtype == PrimType::Float(16) || dtype == PrimType::Int(8) ||
-          dtype == PrimType::UInt(8) || dtype == PrimType(DLDataType{kDLInt, 4, 1}) ||
+          dtype == PrimType::Float(16) || dtype == PrimType::Int(8) || dtype == PrimType::UInt(8) ||
+          dtype == PrimType(DLDataType{kDLInt, 4, 1}) ||
           dtype == PrimType(DLDataType{kDLUInt, 4, 1}) ||
           dtype == PrimType(DLDataType{kDLInt, 1, 1}) ||
           dtype == PrimType(DLDataType{kDLBfloat, 16, 1}) || dtype == PrimType::Float(32);
@@ -1219,9 +1223,9 @@ void CodeGenMACA::VisitStmt_(const AllocBufferNode* op) {
           << "Matrix_a and matrix_b only support half or char or unsigned char "
           << "or uint4 or int4 or int1 type for now";
     } else {
-      bool supported_wmma_accumulator_dtype =
-          dtype == PrimType::Float(16) || dtype == PrimType::Float(32) ||
-          dtype == PrimType::Int(32);
+      bool supported_wmma_accumulator_dtype = dtype == PrimType::Float(16) ||
+                                              dtype == PrimType::Float(32) ||
+                                              dtype == PrimType::Int(32);
       TVM_FFI_ICHECK(supported_wmma_accumulator_dtype)
           << "Accumulator only support half, float and int type for now";
     }
@@ -1417,8 +1421,7 @@ void CodeGenMACA::VisitExpr_(const BroadcastNode* op, std::ostream& os) {  // NO
     return;
   }
 
-  if (IsIntOrUInt(op_ty) && (op_ty.bits() == 16 || op_ty.bits() == 32) && lanes > 4 &&
-      lanes <= 8) {
+  if (IsIntOrUInt(op_ty) && (op_ty.bits() == 16 || op_ty.bits() == 32) && lanes > 4 && lanes <= 8) {
     std::string v = PrintExpr(op->value);
     PrintVecConstructor(op_ty, os);
     os << '(';
@@ -1501,7 +1504,7 @@ void CodeGenMACA::VisitExpr_(const SelectNode* op, std::ostream& os) {
 
   // Codegen vector condition case by serializing the select op.
   TVM_FFI_ICHECK(op->false_value.ty() == op_ty && op->true_value.ty() == op_ty &&
-         op_ty.lanes() == op->condition.ty().lanes());
+                 op_ty.lanes() == op->condition.ty().lanes());
 
   std::string r_var = name_supply_->FreshName("_");
   this->PrintIndent();

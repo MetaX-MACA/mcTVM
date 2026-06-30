@@ -19,7 +19,7 @@
 import pytest
 import torch
 
-pytest.importorskip("triton")  # tvm.tirx.bench imports triton.profiler
+pytest.importorskip("triton.profiler")  # tvm.tirx.bench imports triton.profiler
 
 from tvm.testing import env
 from tvm.tirx.bench import _compute_group_count, _parse_proton_tree, bench, tensor_bytes

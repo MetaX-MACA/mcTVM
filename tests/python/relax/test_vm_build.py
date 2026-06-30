@@ -473,7 +473,7 @@ def test_vm_emit_te_constant_param_cpu(exec_mode):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_vm_emit_te_constant_param_gpu(exec_mode):
     x_np = np.random.rand(2, 2).astype("float32")
     c_np = np.random.rand(2, 2).astype("float32")
@@ -855,7 +855,7 @@ def test_recursion(exec_mode):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_vm_to_device(exec_mode):
     @tvm.script.ir_module
     class TestToVDevice:
@@ -1264,7 +1264,7 @@ def test_set_input_get_failure_rpc(exec_mode):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_relax_module_with_multiple_targets(exec_mode):
     """Relax functions may contain kernels for multiple targets
 

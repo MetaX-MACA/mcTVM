@@ -334,8 +334,6 @@ tvm_file_glob(GLOB_RECURSE COMPILER_SRCS
     src/relax/script/*.cc
     src/relax/testing/*.cc
     )
-list(FILTER COMPILER_SRCS EXCLUDE REGEX ".*/src/relax/op/vision/build_maca_(on|off)\\.cc$")
-
 tvm_file_glob(GLOB CODEGEN_SRCS
   src/target/*.cc
   src/target/source/*.cc
@@ -344,6 +342,10 @@ tvm_file_glob(GLOB CODEGEN_SRCS
   src/backend/cuda/codegen/*.cc
   src/backend/cuda/op/*.cc
   src/backend/hexagon/codegen/*.cc
+  src/backend/maca/codegen/codegen_maca.cc
+  src/backend/maca/codegen/intrin_rule_maca.cc
+  src/backend/maca/codegen/maca_fallback_module.cc
+  src/backend/maca/codegen/target_kind.cc
   src/backend/metal/codegen/*.cc
   src/backend/metal/op/*.cc
   src/backend/opencl/codegen/*.cc

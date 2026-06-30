@@ -779,9 +779,8 @@ bool CheckDataTypeSupport(const Target& target, const std::string& support_func_
   std::string version_func_name;
   if (target->kind->name == "cuda" && support_func_name.rfind("tvm.support.nvcc.", 0) == 0) {
     version_func_name = "tvm.support.nvcc.get_compute_version";
-  } else if (target->kind->name == "maca" &&
-             support_func_name.rfind("tvm.contrib.mxcc.", 0) == 0) {
-    version_func_name = "tvm.contrib.mxcc.get_compute_version";
+  } else if (target->kind->name == "maca" && support_func_name.rfind("tvm.support.mxcc.", 0) == 0) {
+    version_func_name = "tvm.support.mxcc.get_compute_version";
   }
   if (!version_func_name.empty()) {
     if (auto get_cv = tvm::ffi::Function::GetGlobal(version_func_name)) {
@@ -796,7 +795,7 @@ bool CheckDataTypeSupport(const Target& target, const std::string& support_func_
 
 std::string FP8SupportFuncName(const Target& target) {
   if (target->kind->name == "maca") {
-    return "tvm.contrib.mxcc.supports_fp8";
+    return "tvm.support.mxcc.supports_fp8";
   }
   return "tvm.support.nvcc.supports_fp8";
 }

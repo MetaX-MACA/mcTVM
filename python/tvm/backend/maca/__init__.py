@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -15,13 +14,29 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+"""MACA-owned backend hooks."""
 
-set -exo pipefail
+from pathlib import Path
 
-export TVM_TEST_TARGETS=maca
-export TVM_RELAY_TEST_TARGETS=maca
-export TVM_INTEGRATION_GPU_ONLY=1
-export TVM_INTEGRATION_TESTSUITE_NAME=python-integration-maca
-export PYTEST_ADDOPTS="-m gpu ${PYTEST_ADDOPTS:-}"
+from tvm_ffi.libinfo import load_lib_ctypes
 
-./tests/scripts/task_python_integration.sh
+from tvm.base import _LOADED_LIBS
+
+
+def register_backend():
+    """Register MACA-owned Python semantics."""
+
+    runtime_dir = Path(_LOADED_LIBS["tvm_runtime"]._name).resolve().parent
+    try:
+        _LOADED_LIBS["tvm_runtime_maca"] = load_lib_ctypes(
+            package="tvm",
+            target_name="tvm_runtime_maca",
+            extra_lib_paths=[runtime_dir],
+            mode="RTLD_LOCAL",
+        )
+    except (OSError, FileNotFoundError, RuntimeError):
+        pass
+    return None
+
+
+__all__ = ["register_backend"]

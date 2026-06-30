@@ -88,6 +88,7 @@ import tvm.te
 import tvm.tirx
 from tvm.contrib import cudnn
 from tvm.support import nvcc
+from tvm.testing import env
 
 SKIP_SLOW_TESTS = os.getenv("SKIP_SLOW_TESTS", "").lower() in {"true", "1", "yes"}
 IS_IN_CI = os.getenv("CI", "") == "true"
@@ -547,8 +548,12 @@ def parametrize_targets(*targets):
             marks = []
             if target_kind != "llvm":
                 marks.append(pytest.mark.gpu)
-            marks.append(pytest.mark.skipif(not device_enabled(target), reason=f"{target} not enabled"))
-            params.append(pytest.param(target, tvm.device(target_kind), marks=marks, id=str(target)))
+            marks.append(
+                pytest.mark.skipif(not device_enabled(target), reason=f"{target} not enabled")
+            )
+            params.append(
+                pytest.param(target, tvm.device(target_kind), marks=marks, id=str(target))
+            )
         return pytest.mark.parametrize("target,dev", params)(func)
 
     return decorator
@@ -593,7 +598,7 @@ def _tvm_test_targets():
     return DEFAULT_TEST_TARGETS
 
 
-requires_maca = pytest.mark.skipif(not device_enabled("maca"), reason="maca not enabled")
+requires_maca = pytest.mark.skipif(not env.has_maca(), reason="need maca")
 
 
 def _compose(args, decs):

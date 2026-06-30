@@ -147,7 +147,7 @@ def test_multi_gpu():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_multi_device():
     @I.ir_module
     class Example:

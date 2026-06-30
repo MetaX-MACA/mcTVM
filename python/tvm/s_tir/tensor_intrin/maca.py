@@ -16,7 +16,8 @@
 # under the License.
 # pylint: disable=invalid-name,missing-function-docstring,unused-variable
 """Intrinsics for tensorization on MetaX GPU."""
-from typing import Dict, Literal, Tuple
+
+from typing import Literal
 
 from tvm.script import tirx as T
 from tvm.tirx import Cast, IntImm, TensorIntrin
@@ -42,7 +43,7 @@ def get_wmma_load_intrin(
     shared_scope: str,
     is_b: bool,
     is_col_major: bool,
-) -> Tuple[PrimFunc, PrimFunc]:
+) -> tuple[PrimFunc, PrimFunc]:
     """Generator of wmma_load intrins"""
     wmma_fragment_scope = f"wmma.matrix_{'b' if is_b else 'a'}"
     layout = "col_major" if is_col_major else "row_major"
@@ -52,7 +53,7 @@ def get_wmma_load_intrin(
         frag_m, frag_n = frag_n, frag_m
     offset_factor = frag_n
 
-    @T.prim_func
+    @T.prim_func(s_tir=True)
     def wmma_load_desc(a: T.handle, c: T.handle) -> None:
         A = T.match_buffer(
             a, (frag_m, frag_n), dtype, align=64, offset_factor=offset_factor, scope=shared_scope
@@ -65,15 +66,15 @@ def get_wmma_load_intrin(
             offset_factor=offset_factor,
             scope=wmma_fragment_scope,
         )
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads(A[0:frag_m, 0:frag_n])
             T.writes(C[0:frag_m, 0:frag_n])
             for i, j in T.grid(frag_m, frag_n):
-                with T.block("load"):
+                with T.sblock("load"):
                     vii, vjj = T.axis.remap("SS", [i, j])
                     C[vii, vjj] = A[vii, vjj]
 
-    @T.prim_func
+    @T.prim_func(s_tir=True)
     def wmma_load_impl(a: T.handle, c: T.handle) -> None:
         s1 = T.int32()
         s0 = T.int32()
@@ -97,7 +98,7 @@ def get_wmma_load_intrin(
             scope=wmma_fragment_scope,
             strides=[d1, d0],
         )
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads(A[0:frag_m, 0:frag_n])
             T.writes(C[0:frag_m, 0:frag_n])
             T.evaluate(
@@ -119,12 +120,12 @@ def get_wmma_load_intrin(
 
 def get_wmma_fill_intrin(
     m_dim: int, n_dim: int, k_dim: int, dtype: str
-) -> Tuple[PrimFunc, PrimFunc]:
+) -> tuple[PrimFunc, PrimFunc]:
     """Generator of wmma_fill intrins"""
     zero = IntImm("int32", 0).astype(dtype)
     offset_factor = n_dim
 
-    @T.prim_func
+    @T.prim_func(s_tir=True)
     def wmma_fill_desc(c: T.handle) -> None:
         C = T.match_buffer(
             c,
@@ -134,15 +135,15 @@ def get_wmma_fill_intrin(
             offset_factor=offset_factor,
             scope="wmma.accumulator",
         )
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads()
             T.writes(C[0:m_dim, 0:n_dim])
             for i, j in T.grid(m_dim, n_dim):
-                with T.block("init"):
+                with T.sblock("init"):
                     vii, vjj = T.axis.remap("SS", [i, j])
                     C[vii, vjj] = zero
 
-    @T.prim_func
+    @T.prim_func(s_tir=True)
     def wmma_fill_impl(c: T.handle) -> None:
         d1 = T.int32()
         d0 = T.int32()
@@ -155,7 +156,7 @@ def get_wmma_fill_intrin(
             scope="wmma.accumulator",
             strides=[d1, d0],
         )
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads()
             T.writes(C[0:m_dim, 0:n_dim])
             T.evaluate(
@@ -175,11 +176,11 @@ def get_wmma_fill_intrin(
 
 def get_wmma_store_intrin(
     m_dim: int, n_dim: int, k_dim: int, dtype: str, scope: str
-) -> Tuple[PrimFunc, PrimFunc]:
+) -> tuple[PrimFunc, PrimFunc]:
     """Generator of wmma_store intrins"""
     offset_factor = n_dim
 
-    @T.prim_func
+    @T.prim_func(s_tir=True)
     def wmma_store_desc(a: T.handle, c: T.handle) -> None:
         A = T.match_buffer(
             a,
@@ -192,15 +193,15 @@ def get_wmma_store_intrin(
         C = T.match_buffer(
             c, (m_dim, n_dim), dtype, align=64, offset_factor=offset_factor, scope=scope
         )
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads(A[0:m_dim, 0:n_dim])
             T.writes(C[0:m_dim, 0:n_dim])
             for i, j in T.grid(m_dim, n_dim):
-                with T.block("store"):
+                with T.sblock("store"):
                     vii, vjj = T.axis.remap("SS", [i, j])
                     C[vii, vjj] = A[vii, vjj]
 
-    @T.prim_func
+    @T.prim_func(s_tir=True)
     def wmma_store_impl(a: T.handle, c: T.handle) -> None:
         s1 = T.int32()
         s0 = T.int32()
@@ -224,7 +225,7 @@ def get_wmma_store_intrin(
             scope=scope,
             strides=[s1, s0],
         )
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads(A[0:m_dim, 0:n_dim])
             T.writes(C[0:m_dim, 0:n_dim])
             T.evaluate(
@@ -246,7 +247,7 @@ def get_wmma_store_intrin(
 
 def get_wmma_sync_intrin(
     m_dim: int, n_dim: int, k_dim: int, in_dtype: str, out_dtype: str, b_transposed: bool
-) -> Tuple[PrimFunc, PrimFunc]:
+) -> tuple[PrimFunc, PrimFunc]:
     """Generator of wmma_sync intrins"""
 
     def maybe_cast(v):
@@ -265,7 +266,7 @@ def get_wmma_sync_intrin(
     B_offset_factor = b_shape_1
     out_offset_factor = n_dim
 
-    @T.prim_func
+    @T.prim_func(s_tir=True)
     def wmma_sync_desc(a: T.handle, b: T.handle, c: T.handle) -> None:
         A = T.match_buffer(
             a,
@@ -292,18 +293,18 @@ def get_wmma_sync_intrin(
             scope="wmma.accumulator",
         )
 
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads(C[0:m_dim, 0:n_dim], A[0:m_dim, 0:k_dim], B[0:b_shape_0, 0:b_shape_1])
             T.writes(C[0:m_dim, 0:n_dim])
             for i, j, k in T.grid(m_dim, n_dim, k_dim):
-                with T.block(""):
+                with T.sblock(""):
                     vii, vjj, vkk = T.axis.remap("SSR", [i, j, k])
                     B_index_0, B_index_1 = T.meta_var(maybe_swap(vkk, vjj))
                     C[vii, vjj] = C[vii, vjj] + maybe_cast(A[vii, vkk]) * maybe_cast(
                         B[B_index_0, B_index_1]
                     )
 
-    @T.prim_func
+    @T.prim_func(s_tir=True)
     def wmma_sync_impl(a: T.handle, b: T.handle, c: T.handle) -> None:
         a1 = T.int32()
         a0 = T.int32()
@@ -340,7 +341,7 @@ def get_wmma_sync_intrin(
             strides=[c1, c0],
         )
 
-        with T.block("root"):
+        with T.sblock("root"):
             T.reads(C[0:m_dim, 0:n_dim], A[0:m_dim, 0:k_dim], B[0:b_shape_0, 0:b_shape_1])
             T.writes(C[0:m_dim, 0:n_dim])
             T.evaluate(
@@ -663,7 +664,7 @@ def get_wmma_intrin_group(
     in_dtype: str,
     out_dtype: str,
     trans_b: bool,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Get a group of intrinsics for wmma tensor core with the given configurations
 
     Parameters

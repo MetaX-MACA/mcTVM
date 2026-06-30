@@ -21,11 +21,11 @@
  * \file codegen_maca.h
  * \brief Utility to generate maca code
  */
-#ifndef TVM_TARGET_SOURCE_CODEGEN_MACA_H_
-#define TVM_TARGET_SOURCE_CODEGEN_MACA_H_
+#ifndef TVM_BACKEND_MACA_CODEGEN_CODEGEN_MACA_H_
+#define TVM_BACKEND_MACA_CODEGEN_CODEGEN_MACA_H_
 
-#include <tvm/target/codegen.h>
 #include <tvm/ffi/error.h>
+#include <tvm/target/codegen.h>
 #include <tvm/tirx/expr.h>
 #include <tvm/tirx/op.h>
 
@@ -34,7 +34,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "codegen_c.h"
+#include "../../../target/source/codegen_c.h"
 
 namespace tvm {
 namespace codegen {
@@ -84,7 +84,7 @@ class CodeGenMACA final : public CodeGenC {
   void PrintStorageScope(const std::string& scope, std::ostream& os) final;  // NOLINT(*)
   using CodeGenC::PrintType;
   void PrintVecBinaryOp(const std::string& op, const PrimType& t, PrimExpr lhs, PrimExpr rhs,
-                        std::ostream& os) final;       // NOLINT(*)
+                        std::ostream& os) final;              // NOLINT(*)
   void PrintType(const PrimType& t, std::ostream& os) final;  // NOLINT(*)
   void PrintVecConstructor(const PrimType& t, std::ostream& os) final;
   void PrintVecElemLoad(const std::string& vec, const PrimType& t, int i,
@@ -170,4 +170,4 @@ class CodeGenMACA final : public CodeGenC {
 }  // namespace codegen
 }  // namespace tvm
 
-#endif  // TVM_TARGET_SOURCE_CODEGEN_MACA_H_
+#endif  // TVM_BACKEND_MACA_CODEGEN_CODEGEN_MACA_H_

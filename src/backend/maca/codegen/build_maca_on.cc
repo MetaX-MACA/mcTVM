@@ -23,8 +23,9 @@
  *
  * \file build_maca.cc
  */
-#include "tvm/ffi/reflection/registry.h"
 #include <tvm/runtime/logging.h>
+
+#include "tvm/ffi/reflection/registry.h"
 #if defined(__linux__)
 #include <sys/stat.h>
 #endif
@@ -33,10 +34,9 @@
 
 #include <cstdlib>
 
-#include "../../../runtime/maca/maca_common.h"
-#include "../../../runtime/maca/maca_module.h"
 #include "../../../target/build_common.h"
-#include "../../../target/source/codegen_maca.h"
+#include "codegen_maca.h"
+#include "maca_fallback_module.h"
 
 namespace tvm {
 namespace codegen {
@@ -161,8 +161,7 @@ ffi::Module BuildMACA(IRModule mod, Target target) {
 
   ffi::Map<GlobalVar, PrimFunc> functions;
   for (auto [gvar, base_func] : mod->functions) {
-    TVM_FFI_ICHECK(base_func->IsInstance<PrimFuncNode>())
-        << "CodeGenMACA: Can only take PrimFunc";
+    TVM_FFI_ICHECK(base_func->IsInstance<PrimFuncNode>()) << "CodeGenMACA: Can only take PrimFunc";
     auto prim_func = base_func.as_or_throw<PrimFunc>();
     CallingConv calling_conv =
         prim_func->GetAttr<CallingConv>(tvm::attr::kCallingConv, CallingConv::kDefault).value();
@@ -199,8 +198,8 @@ ffi::Module BuildMACA(IRModule mod, Target target) {
   }
   auto f_exit = ffi::Function::GetGlobal("target.TargetExitScope");
   (*f_exit)(target);
-  return MACAModuleCreate(ffi::Bytes(std::move(mcir)), ffi::String(fmt), ExtractFuncInfo(mod),
-                          ffi::String(code));
+  return ::tvm::target::MACAModuleCreateWithFallback(ffi::Bytes(std::move(mcir)), ffi::String(fmt),
+                                                     ExtractFuncInfo(mod), ffi::String(code));
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {

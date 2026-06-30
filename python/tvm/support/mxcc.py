@@ -15,24 +15,20 @@
 # specific language governing permissions and limitations
 # under the License.
 """Utility for MACA backend"""
+
 from __future__ import absolute_import as _abs
 
-import re
 import os
+import re
 import subprocess
-import warnings
-from typing import Tuple
 
 import tvm_ffi
-import tvm
-from tvm.target import Target
 
+import tvm
 from tvm.support import utils
 
 
-def compile_maca(
-    code, target_format="mcbin", arch=None, options=None, path_target=None
-):  # pylint: disable=unused-argument
+def compile_maca(code, target_format="mcbin", arch=None, options=None, path_target=None):  # pylint: disable=unused-argument
     """Compile maca code with MXCC from env.
 
     Parameters
@@ -252,7 +248,7 @@ def tvm_callback_maca_compile(code, target):  # pylint: disable=unused-argument
     return dev_obj
 
 
-@tvm_ffi.register_global_func("tvm.contrib.mxcc.get_compute_version")
+@tvm_ffi.register_global_func("tvm.support.mxcc.get_compute_version")
 def get_target_compute_version(target=None):
     """Utility function to get compute capability of compilation target.
 
@@ -290,7 +286,7 @@ def get_target_compute_version(target=None):
     )
 
 
-@tvm_ffi.register_global_func("tvm.contrib.mxcc.supports_fp8")
+@tvm_ffi.register_global_func("tvm.support.mxcc.supports_fp8")
 def have_fp8(compute_version):  # pylint: disable=unused-argument
     """Whether fp8 support is provided in the specified compute capability or not
 

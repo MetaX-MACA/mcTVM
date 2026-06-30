@@ -25,6 +25,11 @@ from tvm import te, topi
 from tvm.script import tirx as T
 
 
+def have_int8(compute_version):  # pylint: disable=unused-argument
+    """Stub until MACA exposes an int8 capability query."""
+    return False
+
+
 @tvm.testing.requires_gpu
 @tvm.testing.requires_maca
 def test_maca_vectorize_add():
@@ -319,7 +324,7 @@ def test_maca_reduction_binding():
     sch.reorder(k, x)
     mo, _ = sch.split(x, factors=[None, 32])
     sch.bind(mo, "blockIdx.x")
-    func = tvm.compile(sch.mod, target="maca")
+    tvm.compile(sch.mod, target="maca")
 
 
 @tvm.testing.requires_gpu
@@ -510,7 +515,7 @@ def test_vectorized_intrin1():
             tvm.tirx.sinh,
         }
         if dtype == "float16" and tvm_intrin in skip_set:
-            print("Skip because '{0}' does not support fp16 yet".format(tvm_intrin.__name__))
+            print(f"Skip because '{tvm_intrin.__name__}' does not support fp16 yet")
             return
 
         n = 128
@@ -581,13 +586,13 @@ def test_vectorized_popcount():
 @tvm.testing.requires_gpu
 @tvm.testing.requires_maca
 def test_maca_vectorize_load_permute_pad():
-    def check_maca(dtype, n, l, padding, lanes):
+    def check_maca(dtype, n, width, padding, lanes):
         dev = tvm.maca(0)
-        A = tvm.te.placeholder((n, l), name="A", dtype=dtype)
+        A = tvm.te.placeholder((n, width), name="A", dtype=dtype)
         B = tvm.te.compute(
-            (n // lanes, l + 2 * padding, lanes),
+            (n // lanes, width + 2 * padding, lanes),
             lambda i, j, k: tvm.te.if_then_else(
-                tvm.te.any(j < padding, j >= l + padding),
+                tvm.te.any(j < padding, j >= width + padding),
                 tvm.tirx.const(0, dtype),
                 A[i * lanes + k, j - padding],
             ),
@@ -601,11 +606,11 @@ def test_maca_vectorize_load_permute_pad():
         sch.vectorize(vectorize)
         fun = tvm.compile(sch.mod, target="maca")
 
-        np_a = np.random.randint(low=-128, high=127, size=(n, l)).astype(A.dtype)
-        a = tvm.runtime.empty((n, l), A.dtype, dev).copyfrom(np_a)
-        b = tvm.runtime.empty((n // lanes, l + padding * 2, lanes), B.dtype, dev)
+        np_a = np.random.randint(low=-128, high=127, size=(n, width)).astype(A.dtype)
+        a = tvm.runtime.empty((n, width), A.dtype, dev).copyfrom(np_a)
+        b = tvm.runtime.empty((n // lanes, width + padding * 2, lanes), B.dtype, dev)
         fun(a, b)
-        np_a_reshape = np_a.reshape(n // lanes, lanes, l).transpose(0, 2, 1)
+        np_a_reshape = np_a.reshape(n // lanes, lanes, width).transpose(0, 2, 1)
         ref = np.pad(
             np_a_reshape, ((0, 0), (padding, padding), (0, 0)), mode="constant", constant_values=0
         )

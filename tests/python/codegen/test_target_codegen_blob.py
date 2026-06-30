@@ -101,7 +101,7 @@ def test_cuda_multi_lib():
     worker.recv()
 
 
-@tvm.testing.uses_gpu
+@pytest.mark.gpu
 def test_maca_multi_lib():
     # test combining two system lib together
     # each contains a fatbin component in maca

@@ -32,6 +32,7 @@ _BUILTIN_BACKENDS = (
     "cuda",
     "metal",
     "rocm",
+    "maca",
     "trn",
     "opencl",
     "vulkan",

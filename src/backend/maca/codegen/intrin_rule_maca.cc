@@ -25,7 +25,7 @@
 #include <tvm/tirx/builtin.h>
 #include <tvm/tirx/op_attr_types.h>
 
-#include "../intrin_rule.h"
+#include "../../../target/intrin_rule.h"
 
 namespace tvm {
 namespace codegen {

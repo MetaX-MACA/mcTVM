@@ -164,7 +164,7 @@ class MACADeviceAPI final : public DeviceAPI {
     }
   }
 
-protected:
+ protected:
   void CopyDataFromTo(const void* from, size_t from_offset, void* to, size_t to_offset, size_t size,
                       Device dev_from, Device dev_to, DLDataType type_hint,
                       TVMStreamHandle stream) final {
@@ -197,7 +197,7 @@ protected:
     }
   }
 
-public:
+ public:
   TVMStreamHandle CreateStream(Device dev) {
     MACA_CALL(mcSetDevice(dev.device_id));
     mcStream_t retval;
@@ -257,15 +257,15 @@ MACAThreadEntry* MACAThreadEntry::ThreadLocal() {
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
-    .def_packed("device_api.maca",
-                [](ffi::PackedArgs args, ffi::Any *rv) {
-                  DeviceAPI* ptr = MACADeviceAPI::Global();
-                  *rv = static_cast<void*>(ptr);
-                })
-    .def_packed("device_api.maca_host", [](ffi::PackedArgs args, ffi::Any* rv) {
-      DeviceAPI* ptr = MACADeviceAPI::Global();
-      *rv = static_cast<void*>(ptr);
-    });
+      .def_packed("device_api.maca",
+                  [](ffi::PackedArgs args, ffi::Any* rv) {
+                    DeviceAPI* ptr = MACADeviceAPI::Global();
+                    *rv = static_cast<void*>(ptr);
+                  })
+      .def_packed("device_api.maca_host", [](ffi::PackedArgs args, ffi::Any* rv) {
+        DeviceAPI* ptr = MACADeviceAPI::Global();
+        *rv = static_cast<void*>(ptr);
+      });
 }
 
 class MACATimerNode : public TimerNode {
@@ -276,9 +276,7 @@ class MACATimerNode : public TimerNode {
     stream_ = TVMFFIEnvGetStream(kDLMACA, device_id);
     MACA_CALL(mcEventRecord(start_, static_cast<mcStream_t>(stream_)));
   }
-  virtual void Stop() {
-    MACA_CALL(mcEventRecord(stop_, static_cast<mcStream_t>(stream_)));
-  }
+  virtual void Stop() { MACA_CALL(mcEventRecord(stop_, static_cast<mcStream_t>(stream_))); }
   virtual int64_t SyncAndGetElapsedNanos() {
     MACA_CALL(mcEventSynchronize(stop_));
     float milliseconds = 0;
@@ -304,7 +302,7 @@ class MACATimerNode : public TimerNode {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("profiling.timer.maca",
+  refl::GlobalDef().def("runtime.timer.maca",
                         [](Device dev) { return Timer(ffi::make_object<MACATimerNode>()); });
 }
 }  // namespace runtime

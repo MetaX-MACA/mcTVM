@@ -71,16 +71,19 @@ The following files are newly added by MetaX Integrated Circuits (Shanghai) Co.,
     added: imgs/logo.png
     added: python/tvm/contrib/mxcc.py
     added: python/tvm/tir/tensor_intrin/maca.py
-    added: src/runtime/maca/maca_common.h
-    added: src/runtime/maca/maca_device_api.cc
-    added: src/runtime/maca/maca_module.cc
-    added: src/runtime/maca/maca_module.h
-    added: src/target/opt/build_maca_off.cc
-    added: src/target/opt/build_maca_on.cc
-    added: src/target/source/codegen_maca.cc
-    added: src/target/source/codegen_maca.h
-    added: src/target/source/intrin_rule_maca.cc
-    added: src/target/source/literal/maca_half_t.h
+    added: src/backend/maca/runtime/maca_common.h
+    added: src/backend/maca/runtime/maca_device_api.cc
+    added: src/backend/maca/runtime/maca_module.cc
+    added: src/backend/maca/runtime/maca_module.h
+    added: src/backend/maca/codegen/build_maca_off.cc
+    added: src/backend/maca/codegen/build_maca_on.cc
+    added: src/backend/maca/codegen/codegen_maca.cc
+    added: src/backend/maca/codegen/codegen_maca.h
+    added: src/backend/maca/codegen/intrin_rule_maca.cc
+    added: src/backend/maca/codegen/maca_fallback_module.cc
+    added: src/backend/maca/codegen/maca_fallback_module.h
+    added: src/backend/maca/codegen/target_kind.cc
+    added: src/backend/cuda/codegen/literal/maca_half_t.h
     added: tests/python/codegen/test_target_codegen_maca.py
     added: tests/scripts/notice.py
 

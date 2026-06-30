@@ -61,5 +61,5 @@ TEST_FILES=(
 )
 
 for TEST_FILE in ${TEST_FILES[@]}; do
-    run_pytest ${TEST_FILE}, tests/python/${TEST_FILE}
+    run_pytest ${TEST_FILE}, tests/python/${TEST_FILE} -n 4
 done

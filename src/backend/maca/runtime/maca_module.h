@@ -21,8 +21,8 @@
  * \file maca_module.h
  * \brief Execution handling of MACA kernels
  */
-#ifndef TVM_RUNTIME_MACA_MACA_MODULE_H_
-#define TVM_RUNTIME_MACA_MACA_MODULE_H_
+#ifndef TVM_BACKEND_MACA_RUNTIME_MACA_MODULE_H_
+#define TVM_BACKEND_MACA_RUNTIME_MACA_MODULE_H_
 
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/extra/module.h>
@@ -34,7 +34,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "../metadata.h"
+#include "../../../runtime/metadata.h"
 
 namespace tvm {
 namespace runtime {
@@ -55,4 +55,4 @@ TVM_RUNTIME_DLL ffi::Module MACAModuleCreate(ffi::Bytes data, ffi::String fmt,
                                              ffi::String maca_source);
 }  // namespace runtime
 }  // namespace tvm
-#endif  // TVM_RUNTIME_MACA_MACA_MODULE_H_
+#endif  // TVM_BACKEND_MACA_RUNTIME_MACA_MODULE_H_
