@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
+import tempfile
 from pathlib import Path
 
 PATTERNS = ['build/**/*.so', 'build/**/*.o', 'build/**/*.log', '*.txt']
@@ -20,6 +22,8 @@ def sha256(path: Path) -> str:
 
 
 def collect(root: Path) -> dict[str, object]:
+    if not root.is_dir():
+        raise NotADirectoryError(f"artifact root is not a directory: {root}")
     seen: set[str] = set()
     artifacts: list[dict[str, object]] = []
     for pattern in PATTERNS:
@@ -35,14 +39,14 @@ def collect(root: Path) -> dict[str, object]:
 
 
 def self_test() -> None:
-    sample = Path("_artifact_manifest_sample.txt")
-    sample.write_text("maca artifact\n", encoding="utf-8")
-    try:
-        data = collect(Path.cwd())
-        assert any(item["path"] == sample.name for item in data["artifacts"])
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        sample = root / "_artifact_manifest_sample.txt"
+        sample.write_text("maca artifact\n", encoding="utf-8")
+        data = collect(root)
+        if not any(item["path"] == sample.name for item in data["artifacts"]):
+            raise RuntimeError("self-test failed: sample artifact was not collected")
         print(json.dumps({"ok": True, "count": data["count"]}, ensure_ascii=False))
-    finally:
-        sample.unlink(missing_ok=True)
 
 
 def main() -> int:
@@ -53,7 +57,11 @@ def main() -> int:
     if args.self_test:
         self_test()
         return 0
-    print(json.dumps(collect(Path(args.root)), ensure_ascii=False, indent=2))
+    root = Path(args.root)
+    if not root.is_dir():
+        print(f"artifact root is not a directory: {root}", file=sys.stderr)
+        return 2
+    print(json.dumps(collect(root), ensure_ascii=False, indent=2))
     return 0
 
 
