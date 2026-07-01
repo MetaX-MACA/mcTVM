@@ -28,7 +28,7 @@ def compare(baseline: dict[str, float], current: dict[str, float]) -> dict[str, 
             continue
         new = current[name]
         ratio = (new - old) / old if old else 0.0
-        status = "regression" if ratio < -TOLERANCE else "ok"
+        status = "regression" if ratio > TOLERANCE else "ok"
         failed = failed or status != "ok"
         rows.append({"name": name, "baseline": old, "current": new, "delta_ratio": ratio, "status": status})
     return {"ok": not failed, "metric": METRIC, "rows": rows}
@@ -36,7 +36,11 @@ def compare(baseline: dict[str, float], current: dict[str, float]) -> dict[str, 
 
 def self_test() -> None:
     data = compare({"case": 100.0}, {"case": 99.0})
-    assert data["ok"]
+    if not data["ok"]:
+        raise RuntimeError("self-test failed: faster compile time should pass")
+    regression = compare({"case": 100.0}, {"case": 120.0})
+    if regression["ok"]:
+        raise RuntimeError("self-test failed: slower compile time should regress")
     print(json.dumps({"ok": True, "rows": len(data["rows"])}, ensure_ascii=False))
 
 
