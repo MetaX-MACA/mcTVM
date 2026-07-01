@@ -34,7 +34,7 @@ macro(find_maca use_maca)
   set(__use_maca ${use_maca})
   if(IS_DIRECTORY ${__use_maca})
     set(__maca_sdk ${__use_maca})
-    message(STATUS "Custom MACA SDK PATH=" ${__use_maca})
+    message(STATUS "Custom MACA SDK PATH=${__use_maca}")
   elseif(IS_DIRECTORY $ENV{MACA_PATH})
     set(__maca_sdk $ENV{MACA_PATH})
   elseif(IS_DIRECTORY /opt/maca)
@@ -44,11 +44,11 @@ macro(find_maca use_maca)
   endif()
 
   if(__maca_sdk)
-    set(MACA_INCLUDE_DIRS ${__maca_sdk}/include)
+    set(MACA_INCLUDE_DIRS "${__maca_sdk}/include")
     set(__maca_library_paths
-      ${__maca_sdk}/lib
-      ${__maca_sdk}/lib64
-      ${__maca_sdk}/lib/x86_64-linux-gnu
+      "${__maca_sdk}/lib"
+      "${__maca_sdk}/lib64"
+      "${__maca_sdk}/lib/x86_64-linux-gnu"
     )
     find_library(MACA_MACAMCC_LIBRARY mcruntime PATHS ${__maca_library_paths} NO_DEFAULT_PATH)
     find_library(MACA_HCA_LIBRARY mxc-runtime64 PATHS ${__maca_library_paths} NO_DEFAULT_PATH)
@@ -59,10 +59,10 @@ macro(find_maca use_maca)
     endif()
   endif(__maca_sdk)
   if(MACA_FOUND)
-    message(STATUS "Found MACA SDK=" ${__maca_sdk})
-    message(STATUS "Found MACA_INCLUDE_DIRS=" ${MACA_INCLUDE_DIRS})
-    message(STATUS "Found MACA_MACAMCC_LIBRARY=" ${MACA_MACAMCC_LIBRARY})
-    message(STATUS "Found MACA_HCA_LIBRARY=" ${MACA_HCA_LIBRARY})
-    message(STATUS "Found MACA_FLASHATTN_LIBRARY=" ${MACA_FLASHATTN_LIBRARY})
+    message(STATUS "Found MACA SDK=${__maca_sdk}")
+    message(STATUS "Found MACA_INCLUDE_DIRS=${MACA_INCLUDE_DIRS}")
+    message(STATUS "Found MACA_MACAMCC_LIBRARY=${MACA_MACAMCC_LIBRARY}")
+    message(STATUS "Found MACA_HCA_LIBRARY=${MACA_HCA_LIBRARY}")
+    message(STATUS "Found MACA_FLASHATTN_LIBRARY=${MACA_FLASHATTN_LIBRARY}")
   endif(MACA_FOUND)
 endmacro(find_maca)
