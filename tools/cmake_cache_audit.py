@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+import tempfile
 from pathlib import Path
 
 REQUIRED = ['MACA_HOME', 'USE_MACA', 'CMAKE_CXX_COMPILER']
@@ -13,11 +15,12 @@ REQUIRED = ['MACA_HOME', 'USE_MACA', 'CMAKE_CXX_COMPILER']
 def parse_cache(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
         if not line or line.startswith("//") or line.startswith("#") or "=" not in line:
             continue
         key_type, value = line.split("=", 1)
-        key = key_type.split(":", 1)[0]
-        values[key] = value
+        key = key_type.split(":", 1)[0].strip()
+        values[key] = value.strip()
     return values
 
 
@@ -28,14 +31,13 @@ def audit(path: Path) -> dict[str, object]:
 
 
 def self_test() -> None:
-    sample = Path("_CMakeCache_sample.txt")
-    sample.write_text("MACA_HOME:PATH=/opt/maca\n", encoding="utf-8")
-    try:
+    with tempfile.TemporaryDirectory() as tmp:
+        sample = Path(tmp) / "CMakeCache.txt"
+        sample.write_text(" MACA_HOME:PATH = /opt/maca \n", encoding="utf-8")
         data = audit(sample)
-        assert "missing" in data
+        if "missing" not in data or data["values"]["MACA_HOME"] != "/opt/maca":
+            raise RuntimeError("self-test failed: cache parser did not normalize values")
         print(json.dumps({"ok": True, "missing": len(data["missing"])}, ensure_ascii=False))
-    finally:
-        sample.unlink(missing_ok=True)
 
 
 def main() -> int:
@@ -46,7 +48,11 @@ def main() -> int:
     if args.self_test:
         self_test()
         return 0
-    print(json.dumps(audit(Path(args.cache)), ensure_ascii=False, indent=2))
+    cache = Path(args.cache)
+    if not cache.is_file():
+        print(f"CMake cache file not found: {cache}", file=sys.stderr)
+        return 2
+    print(json.dumps(audit(cache), ensure_ascii=False, indent=2))
     return 0
 
 
