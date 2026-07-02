@@ -2,6 +2,7 @@ The MetaX-MACA/mcTVM project is modified from apache/tvm (https://github.com/apa
 
 The following files may have been Modified by MetaX Integrated Circuits (Shanghai) Co., Ltd. in 2025.
     modified: .github/workflows/main.yml
+    modified: .gitmodules
     modified: .pre-commit-config.yaml
     modified: CMakeLists.txt
     modified: README.md
