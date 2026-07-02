@@ -19,6 +19,7 @@ from __future__ import absolute_import as _abs
 
 import re
 import os
+import shutil
 import subprocess
 import warnings
 from typing import Tuple
@@ -81,7 +82,7 @@ def compile_maca(
         out_file.write(code)
 
     file_target = path_target if path_target else temp_target
-    cmd = ["mxcc"]
+    cmd = [_find_mxcc()]
     if target_format == "mcbin":
         cmd.append("-device-obj")
     elif target_format == "mcir":
@@ -118,6 +119,18 @@ def compile_maca(
         if not data:
             raise RuntimeError("Compilation error: empty result is generated")
         return data
+
+
+def _find_mxcc():
+    """Find mxcc from MACA_PATH or PATH."""
+    maca_path = os.environ.get("MACA_PATH", "/opt/maca")
+    candidate = os.path.join(maca_path, "mxgpu_llvm", "bin", "mxcc")
+    if os.path.isfile(candidate):
+        return candidate
+    mxcc = shutil.which("mxcc")
+    if mxcc:
+        return mxcc
+    raise RuntimeError("Cannot find mxcc. Set MACA_PATH or add mxcc to PATH.")
 
 
 def parse_compute_version(compute_version):
