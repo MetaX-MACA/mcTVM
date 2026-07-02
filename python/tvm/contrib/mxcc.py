@@ -19,6 +19,7 @@ from __future__ import absolute_import as _abs
 
 import re
 import os
+import shutil
 import subprocess
 import warnings
 from typing import Tuple
@@ -231,6 +232,12 @@ def get_maca_arch(maca_path="/opt/maca"):
         return gpu_arch
 
 
+def _maca_path_from_mxcc(mxcc_path):
+    """Infer MACA root from an mxcc executable path."""
+    real_path = os.path.realpath(mxcc_path)
+    return os.path.realpath(os.path.join(os.path.dirname(real_path), "../.."))
+
+
 def find_maca_path():
     """Utility function to find MACA path
 
@@ -241,12 +248,9 @@ def find_maca_path():
     """
     if "MACA_PATH" in os.environ:
         return os.environ["MACA_PATH"]
-    cmd = ["which", "mxcc"]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    (out, _) = proc.communicate()
-    out = out.decode("utf-8").strip()
-    if proc.returncode == 0:
-        return os.path.realpath(os.path.join(out, "../../.."))
+    mxcc_path = shutil.which("mxcc")
+    if mxcc_path:
+        return _maca_path_from_mxcc(mxcc_path)
     maca_path = "/opt/maca"
     if os.path.exists(os.path.join(maca_path, "mxgpu_llvm/bin/mxcc")):
         return maca_path
