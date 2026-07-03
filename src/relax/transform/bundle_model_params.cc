@@ -22,12 +22,13 @@
  * \brief Lift local functions into global functions.
  */
 
+#include <tvm/ffi/cast.h>
+#include <tvm/ffi/error.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/analysis.h>
 #include <tvm/relax/expr.h>
 #include <tvm/relax/expr_functor.h>
 #include <tvm/relax/transform.h>
-#include <tvm/runtime/logging.h>
 
 #include "utils.h"
 
@@ -41,12 +42,12 @@ class ModelParamBundler : public ExprMutator {
 
   Expr VisitExpr_(const FunctionNode* op) override {
     Function func = ffi::GetRef<Function>(op);
-    auto opt_num_input = func->attrs.GetAttr<Integer>(attr::kNumInput);
+    auto opt_num_input = func->attrs.GetAttr<int64_t>(attr::kNumInput);
     if (!opt_num_input) return func;
-    auto signed_num_input = opt_num_input.value()->value;
+    auto signed_num_input = opt_num_input.value();
 
-    ICHECK_GE(signed_num_input, 0);
-    ICHECK_LE(signed_num_input, func->params.size())
+    TVM_FFI_ICHECK_GE(signed_num_input, 0);
+    TVM_FFI_ICHECK_LE(signed_num_input, func->params.size())
         << "Function was declared to have " << signed_num_input << " runtime inputs, "
         << "but only has " << func->params.size() << " parameters total.";
     size_t num_input = signed_num_input;
@@ -56,12 +57,12 @@ class ModelParamBundler : public ExprMutator {
       params.push_back(func->params[i]);
     }
 
-    ffi::Array<StructInfo> param_tuple;
+    ffi::Array<Type> param_tuple;
     for (size_t i = num_input; i < func->params.size(); i++) {
-      param_tuple.push_back(GetStructInfo(func->params[i]));
+      param_tuple.push_back(GetType(func->params[i]));
     }
 
-    Var var_param_tuple(param_tuple_name_.value_or("model_params"), TupleStructInfo(param_tuple));
+    Var var_param_tuple(param_tuple_name_.value_or("model_params"), TupleType(param_tuple));
     params.push_back(var_param_tuple);
 
     for (size_t i = num_input; i < func->params.size(); i++) {
@@ -89,7 +90,7 @@ class ModelParamBundler : public ExprMutator {
 
 Function BundleModelParams(const Function& func, ffi::Optional<ffi::String> param_tuple_name) {
   ModelParamBundler mutator(param_tuple_name);
-  return Downcast<Function>(mutator(func));
+  return mutator(func).as_or_throw<Function>();
 }
 
 namespace transform {
@@ -101,7 +102,7 @@ Pass BundleModelParams(ffi::Optional<ffi::String> param_tuple_name) {
 
     for (const auto& [gvar, func] : mod->functions) {
       if (auto opt = func.as<relax::Function>()) {
-        auto new_func = Downcast<relax::Function>(mutator(opt.value()));
+        auto new_func = mutator(opt.value()).as_or_throw<relax::Function>();
         if (!new_func.same_as(func)) {
           updates->Add(gvar, new_func);
         }

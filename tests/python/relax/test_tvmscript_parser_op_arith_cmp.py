@@ -15,7 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Optional, Union, Callable
+from collections.abc import Callable
+
+import pytest
 
 import tvm
 import tvm.script
@@ -25,8 +27,8 @@ from tvm.script import relax as R
 
 
 def _check(
-    parsed: Union[relax.Function, IRModule],
-    expect: Optional[Union[relax.Function, IRModule]],
+    parsed: relax.Function | IRModule,
+    expect: relax.Function | IRModule | None,
 ):
     test = parsed.script(show_meta=True)
     roundtrip_mod = tvm.script.from_source(test)
@@ -35,34 +37,35 @@ def _check(
         tvm.ir.assert_structural_equal(parsed, expect)
 
 
-(unary_arith_op,) = tvm.testing.parameters(
-    (relax.op.abs,),
-    (relax.op.acos,),
-    (relax.op.acosh,),
-    (relax.op.asin,),
-    (relax.op.asinh,),
-    (relax.op.atan,),
-    (relax.op.atanh,),
-    (relax.op.ceil,),
-    (relax.op.cos,),
-    (relax.op.cosh,),
-    (relax.op.exp,),
-    (relax.op.floor,),
-    (relax.op.log,),
-    (relax.op.negative,),
-    (relax.op.round,),
-    (relax.op.rsqrt,),
-    (relax.op.sigmoid,),
-    (relax.op.sign,),
-    (relax.op.sin,),
-    (relax.op.sinh,),
-    (relax.op.square,),
-    (relax.op.sqrt,),
-    (relax.op.tan,),
-    (relax.op.tanh,),
+@pytest.mark.parametrize(
+    "unary_arith_op",
+    [
+        relax.op.abs,
+        relax.op.acos,
+        relax.op.acosh,
+        relax.op.asin,
+        relax.op.asinh,
+        relax.op.atan,
+        relax.op.atanh,
+        relax.op.ceil,
+        relax.op.cos,
+        relax.op.cosh,
+        relax.op.exp,
+        relax.op.floor,
+        relax.op.log,
+        relax.op.negative,
+        relax.op.round,
+        relax.op.rsqrt,
+        relax.op.sigmoid,
+        relax.op.sign,
+        relax.op.sin,
+        relax.op.sinh,
+        relax.op.square,
+        relax.op.sqrt,
+        relax.op.tan,
+        relax.op.tanh,
+    ],
 )
-
-
 def test_unary_arith(unary_arith_op: Callable):
     @R.function
     def foo(x: R.Tensor((2, 3), "float32")) -> R.Tensor((2, 3), "float32"):
@@ -78,13 +81,14 @@ def test_unary_arith(unary_arith_op: Callable):
     _check(foo, bb.get()["foo"])
 
 
-(unary_check_op,) = tvm.testing.parameters(
-    (relax.op.isfinite,),
-    (relax.op.isinf,),
-    (relax.op.isnan,),
+@pytest.mark.parametrize(
+    "unary_check_op",
+    [
+        relax.op.isfinite,
+        relax.op.isinf,
+        relax.op.isnan,
+    ],
 )
-
-
 def test_unary_check(unary_check_op: Callable):
     @R.function
     def foo(x: R.Tensor((2, 3), "float32")) -> R.Tensor((2, 3), "bool"):
@@ -100,23 +104,24 @@ def test_unary_check(unary_check_op: Callable):
     _check(foo, bb.get()["foo"])
 
 
-(binary_arith_op,) = tvm.testing.parameters(
-    (relax.op.add,),
-    (relax.op.divide,),
-    (relax.op.floor_divide,),
-    (relax.op.multiply,),
-    (relax.op.power,),
-    (relax.op.subtract,),
-    (relax.op.maximum,),
-    (relax.op.minimum,),
+@pytest.mark.parametrize(
+    "binary_arith_op",
+    [
+        relax.op.add,
+        relax.op.divide,
+        relax.op.floor_divide,
+        relax.op.multiply,
+        relax.op.power,
+        relax.op.subtract,
+        relax.op.maximum,
+        relax.op.minimum,
+    ],
 )
-
-
 def test_binary_arith(binary_arith_op: Callable):
     @R.function
-    def foo(
-        x: R.Tensor((2, 3), "float32"), y: R.Tensor((2, 1), "float32")
-    ) -> R.Tensor((2, 3), "float32"):
+    def foo(x: R.Tensor((2, 3), "float32"), y: R.Tensor((2, 1), "float32")) -> R.Tensor(
+        (2, 3), "float32"
+    ):
         gv: R.Tensor((2, 3), "float32") = binary_arith_op(x, y)
         return gv
 
@@ -130,21 +135,22 @@ def test_binary_arith(binary_arith_op: Callable):
     _check(foo, bb.get()["foo"])
 
 
-(binary_cmp_op,) = tvm.testing.parameters(
-    (relax.op.equal,),
-    (relax.op.greater,),
-    (relax.op.greater_equal,),
-    (relax.op.less,),
-    (relax.op.less_equal,),
-    (relax.op.not_equal,),
+@pytest.mark.parametrize(
+    "binary_cmp_op",
+    [
+        relax.op.equal,
+        relax.op.greater,
+        relax.op.greater_equal,
+        relax.op.less,
+        relax.op.less_equal,
+        relax.op.not_equal,
+    ],
 )
-
-
 def test_binary_cmp(binary_cmp_op: Callable):
     @R.function
-    def foo(
-        x: R.Tensor((2, 3), "float32"), y: R.Tensor((2, 1), "float32")
-    ) -> R.Tensor((2, 3), "bool"):
+    def foo(x: R.Tensor((2, 3), "float32"), y: R.Tensor((2, 1), "float32")) -> R.Tensor(
+        (2, 3), "bool"
+    ):
         gv: R.Tensor((2, 3), "bool") = binary_cmp_op(x, y)
         return gv
 

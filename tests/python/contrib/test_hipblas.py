@@ -14,12 +14,15 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: E741
 import numpy as np
+import pytest
 
 import tvm
 import tvm.testing
 from tvm import te
 from tvm.contrib import hipblas
+from tvm.testing import env
 
 
 def verify_matmul_add(in_dtype, out_dtype, rtol=1e-5):
@@ -75,7 +78,8 @@ def verify_batch_matmul(Ashape, Bshape, Cshape, in_dtype, out_dtype, rtol=1e-5):
     )
 
 
-@tvm.testing.requires_rocm
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_rocm(), reason="need rocm")
 def test_matmul_add():
     verify_matmul_add("float", "float", rtol=1e-3)
     verify_matmul_add("float16", "float")
@@ -83,7 +87,8 @@ def test_matmul_add():
     verify_matmul_add("int8", "int32")
 
 
-@tvm.testing.requires_rocm
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_rocm(), reason="need rocm")
 def test_batch_matmul():
     if not tvm.get_global_func("tvm.contrib.hipblas.batch_matmul", True):
         print("skip because extern function is not available")

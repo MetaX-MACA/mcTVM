@@ -22,12 +22,13 @@
  * \brief Lift local functions into global functions.
  */
 
+#include <tvm/ffi/cast.h>
+#include <tvm/ffi/error.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/analysis.h>
 #include <tvm/relax/expr.h>
 #include <tvm/relax/expr_functor.h>
 #include <tvm/relax/transform.h>
-#include <tvm/runtime/logging.h>
 
 #include <iostream>
 #include <vector>
@@ -70,7 +71,7 @@ class LambdaNameCollector : ExprVisitor {
       // model definition, they are intentionally verbose to
       // (hopefully) provide sufficient context to a user encountering
       // the error.
-      CHECK(!previous_global_vars_.count(public_name))
+      TVM_FFI_ICHECK(!previous_global_vars_.count(public_name))
           << "Function " << name_stack_.front() << " contains a lambda with kGlobalSymbol (\""
           << tvm::attr::kGlobalSymbol << "\" attribute of \"" << public_name << "\".  "
           << "However, the module already contains a GlobalVar with this name.  "
@@ -80,7 +81,7 @@ class LambdaNameCollector : ExprVisitor {
           << " would require violating one of these two conditions.";
 
       auto it = new_public_names_.find(public_name);
-      CHECK(it == new_public_names_.end())
+      TVM_FFI_ICHECK(it == new_public_names_.end())
           << "Function " << name_stack_.front() << " contains a lambda with kGlobalSymbol (\""
           << tvm::attr::kGlobalSymbol << "\" attribute of \"" << public_name << "\".  "
           << "However, the function " << it->second.front()
@@ -213,7 +214,7 @@ class LambdaNameCollector : ExprVisitor {
       return stream.str();
     });
 
-    ICHECK(remaining_to_name.empty())
+    TVM_FFI_ICHECK(remaining_to_name.empty())
         << "Fallback failed to make unique names for all lifted lambda functions";
 
     return lifted_names;
@@ -263,8 +264,7 @@ class LambdaLifter : public ExprMutator {
 
     ffi::String lift_func_name = [&]() {
       auto it = lifted_names_.find(func_node);
-      ICHECK(it != lifted_names_.end())
-          << "InternalError: "
+      TVM_FFI_CHECK(it != lifted_names_.end(), InternalError)
           << "Found lambda function during mutation step, "
           << "but it wasn't found during the earlier name-generation step.";
       return it->second;
@@ -285,7 +285,7 @@ class LambdaLifter : public ExprMutator {
     ffi::Array<Var> typed_captured_vars;
     ffi::Map<Var, Expr> rebinding_map;
     for (auto free_var : captured_vars) {
-      Var var = Var(free_var->name_hint(), GetStructInfo(free_var), free_var->span);
+      Var var = Var(free_var->name_hint(), GetType(free_var), free_var->span);
       typed_captured_vars.push_back(var);
       rebinding_map.Set(free_var, var);
     }
@@ -298,12 +298,11 @@ class LambdaLifter : public ExprMutator {
 
     auto gvar_lifted_func = GlobalVar(lift_func_name);
     {
-      auto func_sinfo = Downcast<FuncStructInfo>(func_node->struct_info_);
+      auto func_ty = func_node->ty.as_or_throw<FuncType>();
       if (is_closure) {
-        func_sinfo = FuncStructInfo(lifted_func_params.Map(GetStructInfo), func_sinfo->ret,
-                                    func_sinfo->purity);
+        func_ty = FuncType(lifted_func_params.Map(GetType), func_ty->ret, func_ty->purity);
       }
-      UpdateStructInfo(gvar_lifted_func, func_sinfo);
+      UpdateType(gvar_lifted_func, func_ty);
     }
 
     Expr body = func_node->body;
@@ -321,19 +320,19 @@ class LambdaLifter : public ExprMutator {
     }
 
     body = this->VisitWithNewScope(body, lifted_func_params);
-    StructInfo ret_struct_info = GetStructInfo(body);
+    Type ret_ty = GetType(body);
     body = Bind(body, rebinding_map);
 
     Function lifted_func;
     if (lifted_func_params.same_as(func_node->params) && body.same_as(func_node->body) &&
-        ret_struct_info.same_as(func_node->ret_struct_info)) {
+        ret_ty.same_as(func_node->ret_ty)) {
       lifted_func = ffi::GetRef<Function>(func_node);
     } else {
       lifted_func =
-          Function(lifted_func_params, body, ret_struct_info, func_node->is_pure, func_node->attrs);
+          Function(lifted_func_params, body, ret_ty, func_node->is_pure, func_node->attrs);
     }
 
-    ICHECK(lifted_func.defined());
+    TVM_FFI_ICHECK(lifted_func.defined());
 
     if (is_closure || IsClosure(lifted_func)) {
       closures_.insert(gvar_lifted_func);
@@ -341,7 +340,7 @@ class LambdaLifter : public ExprMutator {
 
     // Add the lifted function to the module.
     lifted_func = CopyWithNewVars(lifted_func);
-    gvar_lifted_func->struct_info_ = GetStructInfo(lifted_func);
+    gvar_lifted_func->ty = GetType(lifted_func);
 
     builder_->UpdateFunction(gvar_lifted_func, lifted_func);
 
@@ -360,7 +359,7 @@ class LambdaLifter : public ExprMutator {
   Expr VisitExpr_(const CallNode* call_node) final {
     auto call = ffi::GetRef<Call>(call_node);
 
-    auto orig_sinfo = Downcast<StructInfo>(call->struct_info_);
+    auto orig_ty = call->ty.as_or_throw<Type>();
 
     if (auto opt_var = call->op.as<Var>()) {
       auto var = opt_var.value();
@@ -369,26 +368,25 @@ class LambdaLifter : public ExprMutator {
 
       if (IsClosure(var) && builder_->LookupBinding(var).as<CallNode>()) {
         // if the original op was pure, we should use invoke_pure_closure
-        Call orig_call = Downcast<Call>(builder_->LookupBinding(var));
+        Call orig_call = builder_->LookupBinding(var).as_or_throw<Call>();
         bool is_pure = [&]() -> bool {
           if (auto op = orig_call->op.as<Op>()) {
-            static const auto& purity_map = Op::GetAttrMap<Bool>("FPurity");
-            return purity_map.get(op.value(), Bool(false))->value;
-          } else if (const auto* func_sinfo =
-                         orig_call->op->struct_info_.as<FuncStructInfoNode>()) {
-            return func_sinfo->purity;
+            static const auto& purity_map = Op::GetAttrMap<bool>("FPurity");
+            return purity_map.get(op.value(), false);
+          } else if (const auto* func_ty = orig_call->op->ty.as<FuncTypeNode>()) {
+            return func_ty->purity;
           } else {
-            LOG(FATAL) << "Could not determine purity of call to " << orig_call->op
-                       << ", as it is neither a tvm::Op (type = \"" << orig_call->op->GetTypeKey()
-                       << "\"), "
-                       << "nor is is annotated with FuncStructInfo (sinfo = "
-                       << orig_call->op->struct_info_ << ")";
+            TVM_FFI_THROW(InternalError)
+                << "Could not determine purity of call to " << orig_call->op
+                << ", as it is neither a tvm::Op (type = \"" << orig_call->op->GetTypeKey()
+                << "\"), "
+                << "nor is is annotated with FuncType (ty = " << orig_call->op->ty << ")";
           }
         }();
 
         auto prev = call;
         call = Call(is_pure ? invoke_pure_closure_op_ : invoke_closure_op_,
-                    {var, Tuple(call->args)}, {}, {orig_sinfo});
+                    {var, Tuple(call->args)}, {}, {orig_ty});
       }
     }
 
@@ -403,7 +401,7 @@ class LambdaLifter : public ExprMutator {
         }
 
         auto prev = call;
-        call = Call(nested_call->op, new_args, call->attrs, call->sinfo_args);
+        call = Call(nested_call->op, new_args, call->attrs, call->ty_args);
       }
     }
 
@@ -444,7 +442,7 @@ class LambdaLifter : public ExprMutator {
         return true;
       }
       IRModule ctx_mod = builder_->GetContextIRModule();
-      ICHECK(ctx_mod->functions.size() > 0);
+      TVM_FFI_ICHECK(ctx_mod->functions.size() > 0);
       BaseFunc func = ctx_mod->Lookup(ffi::GetRef<GlobalVar>(global_var));
       const auto* func_node = func.as<FunctionNode>();
       if (func_node) {
@@ -471,7 +469,7 @@ class LambdaLifter : public ExprMutator {
         // Must visit the function itself, and not just the function
         // body, to ensure that EraseToWellDefined recognized symbolic
         // variables that are exposed by the function signature.
-        auto func = Downcast<Function>(VisitExpr(opt.value()));
+        auto func = VisitExpr(opt.value()).as_or_throw<Function>();
         builder_->UpdateFunction(gvar, func);
       }
     }
@@ -481,7 +479,8 @@ class LambdaLifter : public ExprMutator {
  private:
   std::unordered_map<Var, Call> nested_closure_map_;
   std::unordered_map<Var, Expr> rebind_map_;
-  std::unordered_set<ffi::Variant<GlobalVar, Var>, ObjectPtrHash, ObjectPtrEqual> closures_;
+  std::unordered_set<ffi::Variant<GlobalVar, Var>, ffi::ObjectPtrHash, ffi::ObjectPtrEqual>
+      closures_;
   ffi::Optional<Var> current_lambda_var_ = std::nullopt;
   IRModule mod_;
 

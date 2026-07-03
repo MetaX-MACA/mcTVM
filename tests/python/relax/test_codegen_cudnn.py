@@ -14,11 +14,16 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: F821, F841
 import numpy as np
 import pytest
 
 import tvm
 import tvm.testing
+from tvm.testing import env
+
+pytest.importorskip("scipy")  # tvm.topi.testing imports scipy
+
 import tvm.topi.testing
 from tvm import relax
 from tvm.contrib.pickle_memoize import memoize
@@ -34,7 +39,10 @@ def reset_seed():
     np.random.seed(0)
 
 
-pytestmark = tvm.testing.requires_cudnn.marks()
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.skipif(not env.has_cudnn(), reason="need cudnn"),
+]
 
 
 _activation_table = {
@@ -67,7 +75,7 @@ def get_relax_conv2d_module(
                 elif data_layout == "NCHW":
                     bias = R.arg("bias", R.Tensor((1, weight_shape[0], 1, 1), dtype))
                 else:
-                    raise ValueError("Unsupported data_layout: {}".format(data_layout))
+                    raise ValueError(f"Unsupported data_layout: {data_layout}")
 
             with R.dataflow() as frame:
                 output = R.emit(
@@ -262,7 +270,7 @@ def get_numpy_stacked_attention_ref(b, s, n, h, h_v, bias_shape, qk_scale, dtype
         q, k, v = np.split(qkv, [h, h * 2], axis=3)
         layout = "SBNH"
     else:
-        raise ValueError("Unsupported layout: {}".format(layout))
+        raise ValueError(f"Unsupported layout: {layout}")
     if not bias_shape == "none":
         bias = np.random.randn(*bias_shape).astype(dtype)
         score = score + bias  # b, n, s, s

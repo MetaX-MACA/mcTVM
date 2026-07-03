@@ -14,19 +14,22 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: E501, RUF005
 """Test various CI scripts and GitHub Actions workflows"""
+
+import json
+import logging
 import shutil
 import subprocess
-import json
-import textwrap
 import sys
-import logging
+import textwrap
 from pathlib import Path
 
 import pytest
+
 import tvm.testing
 
-from .test_utils import REPO_ROOT, GITHUB_SCRIPT_ROOT, JENKINS_SCRIPT_ROOT, TempGit, run_script
+from .test_utils import GITHUB_SCRIPT_ROOT, JENKINS_SCRIPT_ROOT, REPO_ROOT, TempGit, run_script
 
 # pylint: disable=wrong-import-position,wrong-import-order
 sys.path.insert(0, str(REPO_ROOT / "ci"))
@@ -35,7 +38,6 @@ sys.path.insert(0, str(GITHUB_SCRIPT_ROOT))
 
 import scripts.github
 import scripts.jenkins
-
 from scripts.github.update_branch import EXPECTED_CI_JOBS
 
 # pylint: enable=wrong-import-position,wrong-import-order
@@ -1196,7 +1198,7 @@ def test_github_tag_teams(tmpdir_factory, source_type, data, check):
         },
         expected="Using tlcpackstaging tag on tlcpack",
         expected_images=[
-            '"tag": "tlcpack/ci-arm:456-456-abc"',
+            "ci_arm: tlcpack/ci-arm:456-456-abc",
         ],
     ),
     tlcpack_update=dict(
@@ -1218,7 +1220,7 @@ def test_github_tag_teams(tmpdir_factory, source_type, data, check):
         },
         expected="Found newer image, using: tlcpack",
         expected_images=[
-            '"tag": "tlcpack/ci-arm:234-234-abc",',
+            "ci_arm: tlcpack/ci-arm:234-234-abc",
         ],
     ),
 )
@@ -1236,9 +1238,6 @@ def test_open_docker_update_pr(
         "ci_cortexm",
         "ci_cpu",
         "ci_gpu",
-        "ci_hexagon",
-        "ci_i386",
-        "ci_lint",
         "ci_minimal",
         "ci_riscv",
         "ci_wasm",
@@ -1270,10 +1269,10 @@ def test_open_docker_update_pr(
 
 @parameterize_named(
     use_tlcpack=dict(
-        images=["ci_arm", "ci_lint"],
+        images=["ci_arm", "ci_cpu"],
         expected={
             "ci_arm": "tlcpack/ci-arm:abc-abc-123",
-            "ci_lint": "tlcpack/ci-lint:abc-abc-234",
+            "ci_cpu": "tlcpack/ci-cpu:abc-abc-234",
         },
     ),
     use_staging=dict(
@@ -1291,12 +1290,12 @@ def test_determine_docker_images(tmpdir_factory, images, expected):
 
     docker_data = {
         "repositories/tlcpack/ci-arm/tags/abc-abc-123": {},
-        "repositories/tlcpack/ci-lint/tags/abc-abc-234": {},
+        "repositories/tlcpack/ci-cpu/tags/abc-abc-234": {},
     }
 
     images_data = {
         "ci_arm": "tlcpack/ci-arm:abc-abc-123",
-        "ci_lint": "tlcpack/ci-lint:abc-abc-234",
+        "ci_cpu": "tlcpack/ci-cpu:abc-abc-234",
         "ci_arm2": "tlcpack/ci-arm2:abc-abc-123",
     }
 
@@ -1401,49 +1400,6 @@ def test_should_rebuild_docker(tmpdir_factory, changed_files, name, check, expec
 
     assert_in(check, proc.stdout)
     assert proc.returncode == expected_code
-
-
-@parameterize_named(
-    passing=dict(
-        title="[something] a change",
-        body="something",
-        expected="All checks passed",
-        expected_code=0,
-    ),
-    period=dict(
-        title="[something] a change.",
-        body="something",
-        expected="trailing_period: FAILED",
-        expected_code=1,
-    ),
-    empty_body=dict(
-        title="[something] a change",
-        body=None,
-        expected="non_empty: FAILED",
-        expected_code=1,
-    ),
-)
-def test_pr_linter(title, body, expected, expected_code):
-    """
-    Test the PR linter
-    """
-    tag_script = JENKINS_SCRIPT_ROOT / "check_pr.py"
-    pr_data = {
-        "title": title,
-        "body": body,
-    }
-    proc = run_script(
-        [
-            tag_script,
-            "--pr",
-            1234,
-            "--pr-data",
-            json.dumps(pr_data),
-        ],
-        check=False,
-    )
-    assert proc.returncode == expected_code
-    assert_in(expected, proc.stdout)
 
 
 if __name__ == "__main__":

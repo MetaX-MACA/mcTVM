@@ -15,16 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import pytest
+
 import tvm
 import tvm.testing
-from tvm.script import ir as I, relax as R, tir as T
+from tvm.script import ir as I
+from tvm.script import relax as R
+from tvm.script import tirx as T
 
 
-class BaseCompare(tvm.testing.CompareBeforeAfter):
-    transform = tvm.relax.transform.ComputePrimValue()
-
-
-class TestPrimValueInAssertCondition(BaseCompare):
+def test_prim_value_in_assert_condition():
     @I.ir_module
     class Before:
         @R.function(pure=False)
@@ -42,22 +42,25 @@ class TestPrimValueInAssertCondition(BaseCompare):
             _ = R.assert_op(condition)
             return A
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def compute_symbolic_expr(N: T.int64) -> T.bool:
-            T.func_attr({"tir.is_host_func": True})
+            T.func_attr({"tirx.is_host_func": True})
             T.ret(N % 16 == 0)
 
+    After = tvm.relax.transform.ComputePrimValue()(Before)
+    tvm.ir.assert_structural_equal(After, Expected)
 
-class TestPrimValueInBranchCondition(BaseCompare):
+
+def test_prim_value_in_branch_condition():
     @I.ir_module
     class Before:
         @R.function(pure=False)
         def main(A: R.Tensor(["N"])):
             N = T.int64()
             if R.prim_value(N % 16 == 0):
-                out = R.call_packed("fast_vectorized_impl", A, sinfo_args=[A.struct_info])
+                out = R.call_packed("fast_vectorized_impl", A, ty_args=[A.ty])
             else:
-                out = R.call_packed("slow_non_vectorized_impl", A, sinfo_args=[A.struct_info])
+                out = R.call_packed("slow_non_vectorized_impl", A, ty_args=[A.ty])
             return out
 
     @I.ir_module
@@ -67,18 +70,22 @@ class TestPrimValueInBranchCondition(BaseCompare):
             N = T.int64()
             condition: R.Prim("bool") = Expected.compute_symbolic_expr(R.prim_value(N))
             if condition:
-                out = R.call_packed("fast_vectorized_impl", A, sinfo_args=[A.struct_info])
+                out = R.call_packed("fast_vectorized_impl", A, ty_args=[A.ty])
             else:
-                out = R.call_packed("slow_non_vectorized_impl", A, sinfo_args=[A.struct_info])
+                out = R.call_packed("slow_non_vectorized_impl", A, ty_args=[A.ty])
             return out
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def compute_symbolic_expr(N: T.int64) -> T.bool:
-            T.func_attr({"tir.is_host_func": True})
+            T.func_attr({"tirx.is_host_func": True})
             T.ret(N % 16 == 0)
 
+    After = tvm.relax.transform.ComputePrimValue()(Before)
+    tvm.ir.assert_structural_equal(After, Expected)
 
-class TestPrimValueInPureFunction(BaseCompare):
+
+@pytest.mark.xfail(reason="value-bearing R.Prim annotations were removed")
+def test_prim_value_in_pure_function():
     @I.ir_module
     class Before:
         @R.function
@@ -97,10 +104,13 @@ class TestPrimValueInPureFunction(BaseCompare):
             out = Expected.compute_symbolic_expr(R.prim_value(N), R.prim_value(M))
             return out
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def compute_symbolic_expr(N: T.int64, M: T.int64) -> T.int64:
-            T.func_attr({"tir.is_host_func": True})
+            T.func_attr({"tirx.is_host_func": True})
             T.ret(N * M)
+
+    After = tvm.relax.transform.ComputePrimValue()(Before)
+    tvm.ir.assert_structural_equal(After, Expected)
 
 
 if __name__ == "__main__":

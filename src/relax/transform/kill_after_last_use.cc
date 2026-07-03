@@ -21,12 +21,13 @@
  * \brief Kill storage/tensor objects after last use, if not already killed
  */
 #include <tvm/arith/analyzer.h>
+#include <tvm/ffi/cast.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/analysis.h>
 #include <tvm/relax/expr_functor.h>
 #include <tvm/relax/nested_msg.h>
 #include <tvm/relax/transform.h>
-#include <tvm/tir/stmt_functor.h>
+#include <tvm/tirx/stmt_functor.h>
 
 #include <map>
 #include <set>
@@ -52,7 +53,7 @@ class UnusedTrivialBindingRemover : public ExprMutator {
       }
       void VisitBinding_(const MatchCastNode* binding) override {
         if (binding->value.as<VarNode>() &&
-            StructuralEqual()(GetStructInfo(binding->var), GetStructInfo(binding->value))) {
+            ffi::StructuralEqual()(GetType(binding->var), GetType(binding->value))) {
           has_trivial_binding.insert(binding->var.get());
         }
         ExprVisitor::VisitBinding_(binding);
@@ -117,14 +118,13 @@ class CollectLastUsage : public ExprVisitor {
         // In the future, this may be handled more easily at the
         // CodeGenVM level.
         bool stored_in_vm_register =
-            !(visitor.constant_tensors_.count(var) || var->struct_info_.as<FuncStructInfoNode>() ||
-              var->struct_info_.as<ShapeStructInfoNode>() ||
-              var->struct_info_.as<PrimStructInfoNode>());
+            !(visitor.constant_tensors_.count(var) || var->ty.as<FuncTypeNode>() ||
+              var->ty.as<ShapeTypeNode>() || var->ty.as<PrimTypeNode>());
 
         if (!is_output && !already_killed) {
           if (visitor.storage_objects_.count(var)) {
             output[last_usage_point].storage.push_back(var);
-          } else if (var->struct_info_.as<TensorStructInfoNode>() && stored_in_vm_register) {
+          } else if (var->ty.as<TensorTypeNode>() && stored_in_vm_register) {
             output[last_usage_point].tensors.push_back(var);
           } else if (stored_in_vm_register) {
             output[last_usage_point].objects.push_back(var);
@@ -165,12 +165,12 @@ class CollectLastUsage : public ExprVisitor {
       storage_objects_.insert(binding->var.get());
     } else if (val->op.same_as(mem_kill_tensor) || val->op.same_as(mem_kill_storage) ||
                val->op.same_as(vm_kill_object)) {
-      CHECK_EQ(val->args.size(), 1)
+      TVM_FFI_ICHECK_EQ(val->args.size(), 1)
           << "Operator " << val->op << " should have one argument, "
           << "but instead found " << val->args.size() << " arguments: " << val->args;
       auto killed_object = val->args[0].as<VarNode>();
-      ICHECK(killed_object) << "Internal error: non-normalized expression "
-                            << ffi::GetRef<Call>(val);
+      TVM_FFI_ICHECK(killed_object)
+          << "Internal error: non-normalized expression " << ffi::GetRef<Call>(val);
       killed_objects_.insert(killed_object);
     } else {
       // Only recursively visit if it isn't one of the special cases.
@@ -196,8 +196,8 @@ class CollectLastUsage : public ExprVisitor {
   std::unordered_map<const VarNode*, const VarNode*> last_usage_of_;
 
   // Storage objects, eligible for R.vm.kill_object.  This cannot be
-  // determined solely from the StructInfo, because the
-  // `R.*.alloc_storage` operators return ObjectStructInfo
+  // determined solely from the Type, because the
+  // `R.*.alloc_storage` operators return AnyType
   std::unordered_set<const VarNode*> storage_objects_;
 
   // Constants, which do not have a VM register, and may *not* have
@@ -262,7 +262,7 @@ namespace transform {
 
 Pass KillAfterLastUse() {
   auto pass_func = [=](Function func, IRModule m, PassContext pc) {
-    return Downcast<Function>(relax::KillAfterLastUse(std::move(func)));
+    return relax::KillAfterLastUse(std::move(func)).as_or_throw<Function>();
   };
   return CreateFunctionPass(pass_func, /*opt_level=*/0, "KillAfterLastUse", {});
 }

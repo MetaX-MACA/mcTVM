@@ -26,11 +26,12 @@
 #include <tvm/arith/int_set.h>
 #include <tvm/arith/int_solver.h>
 #include <tvm/arith/pattern.h>
+#include <tvm/ffi/cast.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
-#include <tvm/tir/expr.h>
-#include <tvm/tir/expr_functor.h>
-#include <tvm/tir/stmt_functor.h>
+#include <tvm/tirx/expr.h>
+#include <tvm/tirx/expr_functor.h>
+#include <tvm/tirx/stmt_functor.h>
 
 #include <algorithm>
 #include <unordered_map>
@@ -46,7 +47,7 @@ namespace arith {
 #if defined(TVM_MLIR_VERSION) && TVM_MLIR_VERSION >= 150
 
 TVM_FFI_STATIC_INIT_BLOCK() { PresburgerSetNode::RegisterReflection(); }
-using namespace tir;
+using namespace tirx;
 
 static void Update(const PrimExpr& constraint, PresburgerSetNode* intset) {
   auto& space = intset->space;
@@ -83,7 +84,8 @@ static void Update(const PrimExpr& constraint, PresburgerSetNode* intset) {
         }
         disjunct.addEquality(int_coeffs);
       } else {
-        LOG(FATAL) << "Unsupported constraint expression: " << entry->GetTypeKey();
+        TVM_FFI_THROW(InternalError)
+            << "Unsupported constraint expression: " << entry->GetTypeKey();
       }
     }
     intset->unionInPlace(disjunct);
@@ -92,7 +94,7 @@ static void Update(const PrimExpr& constraint, PresburgerSetNode* intset) {
 
 PresburgerSet::PresburgerSet(const PrimExpr& constraint) {
   ffi::Array<Var> vars;
-  PostOrderVisit(constraint, [&vars](const ObjectRef& obj) {
+  PostOrderVisit(constraint, [&vars](const ffi::ObjectRef& obj) {
     if (const VarNode* new_var = obj.as<VarNode>()) {
       auto var = ffi::GetRef<Var>(new_var);
       if (!std::any_of(vars.begin(), vars.end(), [&var](const Var& v) { return v.same_as(var); })) {
@@ -102,7 +104,7 @@ PresburgerSet::PresburgerSet(const PrimExpr& constraint) {
   });
   auto constraints_union = ExtractComponents(constraint);
   Analyzer analyzer;
-  PrimExpr simplified_constraint = analyzer.Simplify(constraint, kSimplifyRewriteCanonicalRewrite);
+  PrimExpr simplified_constraint = analyzer->Simplify(constraint, kSimplifyRewriteCanonicalRewrite);
   auto space = PresburgerSpace::getRelationSpace(vars.size(), 0, 0, 0);
   auto node = ffi::make_object<PresburgerSetNode>(std::move(space), vars);
   node->SetVars(vars);
@@ -118,17 +120,17 @@ PresburgerSet::PresburgerSet(const std::vector<IntegerRelation>& disjuncts,
 
 void PresburgerSetNode::UpdateConstraint(const PrimExpr& constraint, const ffi::Array<Var>& vars) {
   Analyzer analyzer;
-  PrimExpr simplified_constraint = analyzer.Simplify(constraint, kSimplifyRewriteCanonicalRewrite);
+  PrimExpr simplified_constraint = analyzer->Simplify(constraint, kSimplifyRewriteCanonicalRewrite);
   Update(simplified_constraint, this);
   SetVars(vars);
 }
 
 PrimExpr PresburgerSetNode::GenerateConstraint() const {
-  PrimExpr constraint = Bool(0);
+  PrimExpr constraint = IntImm::Bool(false);
   for (const IntegerRelation& disjunct : disjuncts) {
-    PrimExpr union_entry = Bool(1);
+    PrimExpr union_entry = IntImm::Bool(true);
     for (unsigned i = 0, e = disjunct.getNumEqualities(); i < e; ++i) {
-      PrimExpr linear_eq = IntImm(DataType::Int(64), 0);
+      PrimExpr linear_eq = IntImm::Int64(0);
       if (disjunct.getNumCols() > 1) {
         for (unsigned j = 0, f = disjunct.getNumCols() - 1; j < f; ++j) {
 #if TVM_MLIR_VERSION >= 160
@@ -137,9 +139,9 @@ PrimExpr PresburgerSetNode::GenerateConstraint() const {
           auto coeff = disjunct.atEq(i, j);
 #endif
           if (coeff >= 0 || is_zero(linear_eq)) {
-            linear_eq = linear_eq + IntImm(DataType::Int(64), coeff) * vars[j];
+            linear_eq = linear_eq + IntImm::Int64(coeff) * vars[j];
           } else {
-            linear_eq = linear_eq - IntImm(DataType::Int(64), -coeff) * vars[j];
+            linear_eq = linear_eq - IntImm::Int64(-coeff) * vars[j];
           }
         }
       }
@@ -148,11 +150,11 @@ PrimExpr PresburgerSetNode::GenerateConstraint() const {
 #else
       auto c0 = disjunct.atEq(i, disjunct.getNumCols() - 1);
 #endif
-      linear_eq = linear_eq + IntImm(DataType::Int(64), c0);
+      linear_eq = linear_eq + IntImm::Int64(c0);
       union_entry = (union_entry && (linear_eq == 0));
     }
     for (unsigned i = 0, e = disjunct.getNumInequalities(); i < e; ++i) {
-      PrimExpr linear_eq = IntImm(DataType::Int(64), 0);
+      PrimExpr linear_eq = IntImm::Int64(0);
       if (disjunct.getNumCols() > 1) {
         for (unsigned j = 0, f = disjunct.getNumCols() - 1; j < f; ++j) {
 #if TVM_MLIR_VERSION >= 160
@@ -161,9 +163,9 @@ PrimExpr PresburgerSetNode::GenerateConstraint() const {
           auto coeff = disjunct.atIneq(i, j);
 #endif
           if (coeff >= 0 || is_zero(linear_eq)) {
-            linear_eq = linear_eq + IntImm(DataType::Int(64), coeff) * vars[j];
+            linear_eq = linear_eq + IntImm::Int64(coeff) * vars[j];
           } else {
-            linear_eq = linear_eq - IntImm(DataType::Int(64), -coeff) * vars[j];
+            linear_eq = linear_eq - IntImm::Int64(-coeff) * vars[j];
           }
         }
       }
@@ -173,9 +175,9 @@ PrimExpr PresburgerSetNode::GenerateConstraint() const {
       auto c0 = disjunct.atIneq(i, disjunct.getNumCols() - 1);
 #endif
       if (c0 >= 0) {
-        linear_eq = linear_eq + IntImm(DataType::Int(64), c0);
+        linear_eq = linear_eq + IntImm::Int64(c0);
       } else {
-        linear_eq = linear_eq - IntImm(DataType::Int(64), -c0);
+        linear_eq = linear_eq - IntImm::Int64(-c0);
       }
       union_entry = (union_entry && (linear_eq >= 0));
     }
@@ -186,7 +188,7 @@ PrimExpr PresburgerSetNode::GenerateConstraint() const {
 }
 
 PresburgerSet Union(const ffi::Array<PresburgerSet>& sets) {
-  CHECK_GT(sets.size(), 0);
+  TVM_FFI_ICHECK_GT(sets.size(), 0);
   if (sets.size() == 1) return sets[0];
   auto relations = sets[0]->disjuncts;
   for (size_t i = 1; i < sets.size(); ++i) {
@@ -198,13 +200,13 @@ PresburgerSet Union(const ffi::Array<PresburgerSet>& sets) {
 }
 
 PresburgerSet Intersect(const ffi::Array<PresburgerSet>& sets) {
-  CHECK_GT(sets.size(), 0);
+  TVM_FFI_ICHECK_GT(sets.size(), 0);
   if (sets.size() == 1) return sets[0];
   auto relations = sets[0]->disjuncts;
   const auto& space = sets[0]->space;
 
   for (size_t i = 1; i < sets.size(); ++i) {
-    ICHECK(space.isCompatible(sets[i]->space)) << "Spaces should match";
+    TVM_FFI_ICHECK(space.isCompatible(sets[i]->space)) << "Spaces should match";
     for (const IntegerRelation& relA : sets[i]->disjuncts) {
       for (const IntegerRelation& relB : relations) {
         IntegerRelation intersection = relA.intersect(relB);
@@ -243,15 +245,15 @@ IntSet EvalSet(const PrimExpr& e, const PresburgerSet& set) {
     auto maxRoundedDown(simplex.computeOptimum(Simplex::Direction::Up, coeffs));
     auto opt = range.first.getOptimumIfBounded();
 #if TVM_MLIR_VERSION >= 160
-    auto min = opt.has_value() ? IntImm(DataType::Int(64), int64_t(opt.value())) : neg_inf();
+    auto min = opt.has_value() ? IntImm::Int64(int64_t(opt.value())) : neg_inf();
 #else
-    auto min = opt.hasValue() ? IntImm(DataType::Int(64), opt.getValue()) : neg_inf();
+    auto min = opt.hasValue() ? IntImm::Int64(opt.getValue()) : neg_inf();
 #endif
     opt = range.second.getOptimumIfBounded();
 #if TVM_MLIR_VERSION >= 160
-    auto max = opt.has_value() ? IntImm(DataType::Int(64), int64_t(opt.value())) : pos_inf();
+    auto max = opt.has_value() ? IntImm::Int64(int64_t(opt.value())) : pos_inf();
 #else
-    auto max = opt.hasValue() ? IntImm(DataType::Int(64), opt.getValue()) : pos_inf();
+    auto max = opt.hasValue() ? IntImm::Int64(opt.getValue()) : pos_inf();
 #endif
     auto interval = IntervalSet(min, max);
     result = Union({result, interval});
@@ -259,15 +261,7 @@ IntSet EvalSet(const PrimExpr& e, const PresburgerSet& set) {
   return result;
 }
 
-TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
-    .set_dispatch<PresburgerSetNode>([](const ObjectRef& node, ReprPrinter* p) {
-      auto set = node.as<PresburgerSetNode>();
-      ICHECK(ret) << "Unknown type:" << node->GetTypeKey();
-      p->stream << "{";
-      p->stream << set->GetVars() << ": ";
-      p->stream << node.as<PresburgerSetNode>()->GenerateConstraint();
-      p->stream << "}";
-    });
+// Pattern A (RM): auto-default repr from reflection.
 
 #else  // defined(TVM_MLIR_VERSION) && TVM_MLIR_VERSION >= 150
 

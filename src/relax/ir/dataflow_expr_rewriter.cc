@@ -22,16 +22,17 @@
  * \brief A transform to match a Relax Expr and rewrite
  */
 
+#include <tvm/ffi/cast.h>
+#include <tvm/ffi/extra/structural_equal.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/transform.h>
-#include <tvm/node/structural_equal.h>
 #include <tvm/relax/analysis.h>
 #include <tvm/relax/dataflow_matcher.h>
 #include <tvm/relax/dataflow_pattern.h>
 #include <tvm/relax/expr.h>
 #include <tvm/relax/expr_functor.h>
-#include <tvm/relax/struct_info.h>
-#include <tvm/tir/op.h>
+#include <tvm/relax/type.h>
+#include <tvm/tirx/op.h>
 
 #include <algorithm>
 
@@ -134,8 +135,7 @@ ffi::Array<Binding> TopologicalSort(const ffi::Array<Binding>& bindings) {
   // All bindings should be emitted by this point.  If any remain,
   // then there exists a circular dependency somewhere in the
   // remaining bindings.
-  CHECK(delayed_bindings.empty()) << "ValueError: "
-                                  << "Bindings contain circular dependency";
+  TVM_FFI_CHECK(delayed_bindings.empty(), ValueError) << "Bindings contain circular dependency";
 
   if (required_sorting) {
     return sorted_bindings;
@@ -154,7 +154,7 @@ void RewriteSpec::Append(RewriteSpec other) {
     return;
   }
 
-  NameSupply gvar_name_supply("");
+  UniqueNameSupply gvar_name_supply("");
   for (const auto& [gvar, func] : new_subroutines) {
     gvar_name_supply->ReserveName(gvar->name_hint);
   }
@@ -165,7 +165,7 @@ void RewriteSpec::Append(RewriteSpec other) {
       // The two rewrites provide the same GlobalVar.
       // (e.g. Multiple rewrites of the same pattern.)  Ensure that
       // they are referring to the same underlying BaseFunc.
-      CHECK(func.same_as((*it).second));
+      TVM_FFI_ICHECK(func.same_as((*it).second));
     } else if (auto new_name = gvar_name_supply->FreshName(gvar->name_hint);
                new_name != gvar->name_hint) {
       // The two rewrites provide distinct GlobalVar subroutines,
@@ -210,7 +210,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              } else if (auto mod = obj.as<IRModule>()) {
                return rewriter(mod.value());
              } else {
-               LOG(FATAL) << "Unreachable: object does not contain either variant type";
+               TVM_FFI_THROW(InternalError)
+                   << "Unreachable: object does not contain either variant type";
              }
            });
 }
@@ -326,9 +327,10 @@ OrRewriter::OrRewriter(PatternMatchingRewriter lhs, PatternMatchingRewriter rhs)
 }
 
 RewriteSpec TupleRewriterNode::RewriteBindings(const ffi::Array<Binding>& bindings) const {
-  CHECK_LE(patterns.size(), 3) << "For performance reasons, "
-                               << "matching of implicit tuple patterns is currently limited"
-                               << " to tuples with 3 elements or fewer.";
+  TVM_FFI_ICHECK_LE(patterns.size(), 3)
+      << "For performance reasons, "
+      << "matching of implicit tuple patterns is currently limited"
+      << " to tuples with 3 elements or fewer.";
   ffi::Map<Var, Expr> variable_rewrites = GenerateVariableRewrites(bindings);
 
   if (variable_rewrites.size()) {
@@ -404,7 +406,7 @@ ffi::Map<Var, Expr> TupleRewriterNode::GenerateVariableRewrites(
   };
 
   auto decrement_indices = [&](std::vector<size_t>& indices) -> bool {
-    ICHECK_EQ(indices.size(), patterns.size());
+    TVM_FFI_ICHECK_EQ(indices.size(), patterns.size());
 
     // Step 1, find the first index that can be decremented, while
     // still generating a valid set of indices.
@@ -500,13 +502,13 @@ ffi::Map<Var, Expr> TupleRewriterNode::GenerateVariableRewrites(
 
     if (new_match) {
       const auto& [indices, exprs] = new_match.value();
-      ICHECK_EQ(indices.size(), exprs.size());
+      TVM_FFI_ICHECK_EQ(indices.size(), exprs.size());
       for (size_t i = 0; i < indices.size(); i++) {
-        ICHECK_LT(indices[i], info_vec.size());
+        TVM_FFI_ICHECK_LT(indices[i], info_vec.size());
         auto& info = info_vec[indices[i]];
 
-        ICHECK(!info.used) << "InternalError: "
-                           << "Produced multiple replacements for variable " << info.var;
+        TVM_FFI_CHECK(!info.used, InternalError)
+            << "Produced multiple replacements for variable " << info.var;
 
         rewrites.Set(info.var, exprs[i]);
         binding_lookup.erase(info.var);
@@ -528,9 +530,9 @@ ffi::Map<Var, Expr> TupleRewriterNode::GenerateVariableRewrites(
 
 std::optional<std::vector<Expr>> TupleRewriterNode::TryMatchByBindingIndex(
     const std::vector<VarInfo>& info_vec, const std::vector<size_t>& indices) const {
-  ICHECK_GE(indices.size(), 1);
+  TVM_FFI_ICHECK_GE(indices.size(), 1);
 
-  ICHECK_EQ(indices.size(), patterns.size());
+  TVM_FFI_ICHECK_EQ(indices.size(), patterns.size());
   for (size_t i = 0; i < indices.size(); i++) {
     const auto& info = info_vec[indices[i]];
     if (info.used || !info.matches[i]) {
@@ -542,7 +544,7 @@ std::optional<std::vector<Expr>> TupleRewriterNode::TryMatchByBindingIndex(
   for (size_t i = 1; i < indices.size(); i++) {
     for (const auto& [pat, expr] : info_vec[indices[i]].matches[i].value()) {
       if (auto it = merged_matches.find(pat); it != merged_matches.end()) {
-        if (!StructuralEqual()(expr, (*it).second)) {
+        if (!ffi::StructuralEqual()(expr, (*it).second)) {
           return std::nullopt;
         }
       } else {
@@ -596,7 +598,7 @@ std::optional<std::vector<Expr>> TupleRewriterNode::TryMatchByBindingIndex(
   std::vector<Expr> rewrites;
   if (auto inline_tuple = rewritten.as<TupleNode>()) {
     const auto& fields = inline_tuple->fields;
-    CHECK_EQ(fields.size(), indices.size())
+    TVM_FFI_ICHECK_EQ(fields.size(), indices.size())
         << "Expected to receive " << indices.size() << " values to replace TuplePattern with "
         << indices.size() << " fields, but received " << fields.size() << " values";
     rewrites = {fields.begin(), fields.end()};
@@ -658,61 +660,56 @@ PatternMatchingRewriter PatternMatchingRewriter::FromPattern(
 
 PatternMatchingRewriter PatternMatchingRewriter::FromModule(IRModule mod) {
   Function func_pattern = [&]() {
-    CHECK(mod->ContainGlobalVar("pattern"))
-        << "KeyError: "
+    TVM_FFI_CHECK(mod->ContainGlobalVar("pattern"), KeyError)
         << "Expected module to contain 'pattern', "
         << "a Relax function defining the pattern to be matched, "
         << "but the module did not contain a 'pattern' function.";
     auto base_func = mod->Lookup("pattern");
-    CHECK(base_func->IsInstance<FunctionNode>())
-        << "TypeError: "
+    TVM_FFI_CHECK(base_func->IsInstance<FunctionNode>(), TypeError)
         << "Expected module to contain 'pattern', "
         << "a Relax function defining the pattern to be matched, "
         << "but the 'pattern' function was of type " << base_func->GetTypeKey() << ".";
-    return Downcast<Function>(base_func);
+    return base_func.as_or_throw<Function>();
   }();
   Function func_replacement = [&]() {
-    CHECK(mod->ContainGlobalVar("replacement"))
-        << "KeyError: "
+    TVM_FFI_CHECK(mod->ContainGlobalVar("replacement"), KeyError)
         << "Expected module to contain 'replacement', "
         << "a Relax function defining the replacement to be matched, "
         << "but the module did not contain a 'replacement' function.";
     auto base_func = mod->Lookup("replacement");
-    CHECK(base_func->IsInstance<FunctionNode>())
-        << "TypeError: "
+    TVM_FFI_CHECK(base_func->IsInstance<FunctionNode>(), TypeError)
         << "Expected module to contain 'replacement', "
         << "a Relax function defining the replacement to be made on a successful match, "
         << "but the 'replacement' function was of type " << base_func->GetTypeKey() << ".";
-    return Downcast<Function>(base_func);
+    return base_func.as_or_throw<Function>();
   }();
 
   ffi::Map<GlobalVar, BaseFunc> new_subroutines;
   for (const auto& [gvar, func] : mod->functions) {
     if (gvar->name_hint != "pattern" && gvar->name_hint != "replacement") {
       bool is_public = func->GetAttr<ffi::String>(tvm::attr::kGlobalSymbol).has_value();
-      CHECK(!is_public) << "ValueError: "
-                        << "Expected module to have no publicly-exposed functions "
-                        << "other than 'pattern' and 'replacement'.  "
-                        << "However, function '" << gvar->name_hint << "' of type "
-                        << func->GetTypeKey() << " is publicly exposed.";
+      TVM_FFI_CHECK(!is_public, ValueError)
+          << "Expected module to have no publicly-exposed functions "
+          << "other than 'pattern' and 'replacement'.  "
+          << "However, function '" << gvar->name_hint << "' of type " << func->GetTypeKey()
+          << " is publicly exposed.";
       new_subroutines.Set(gvar, func);
     }
   }
 
-  auto sinfo_pattern = GetStructInfo(func_pattern);
-  auto sinfo_replacement = GetStructInfo(func_replacement);
-  CHECK(StructuralEqual()(sinfo_pattern, sinfo_replacement))
-      << "ValueError: "
+  auto ty_pattern = GetType(func_pattern);
+  auto ty_replacement = GetType(func_replacement);
+  TVM_FFI_CHECK(ffi::StructuralEqual()(ty_pattern, ty_replacement), ValueError)
       << "The pattern and replacement must have the same signature, "
-      << "but the pattern has struct info " << sinfo_pattern
-      << ", while the replacement has struct info " << sinfo_replacement;
+      << "but the pattern has type " << ty_pattern << ", while the replacement has type "
+      << ty_replacement;
 
   ffi::Array<DFPattern> param_wildcards;
   ffi::Map<Var, DFPattern> pattern_lookup;
   for (const auto& param : func_pattern->params) {
     WildcardPattern wildcard;
     param_wildcards.push_back(wildcard);
-    pattern_lookup.Set(param, StructInfoPattern(wildcard, GetStructInfo(param)));
+    pattern_lookup.Set(param, TypePattern(wildcard, GetType(param)));
   }
 
   std::function<DFPattern(Expr)> make_pattern = [&](Expr expr) -> DFPattern {
@@ -738,13 +735,12 @@ PatternMatchingRewriter PatternMatchingRewriter::FromModule(IRModule mod) {
     } else if (auto func = expr.as<ExternFuncNode>()) {
       return ExternFuncPattern(func->global_symbol);
 
-    } else if (auto prim = expr.as<PrimValueNode>()) {
-      return StructInfoPattern(WildcardPattern(), PrimStructInfo(prim->value));
+    } else if (auto prim = expr.as<PrimExprNode>()) {
+      return TypePattern(WildcardPattern(), prim->ty());
 
     } else {
-      LOG(FATAL) << "TypeError: "
-                 << "Cannot convert Relax expression of type " << expr->GetTypeKey()
-                 << " into pattern-matching rule.";
+      TVM_FFI_THROW(TypeError) << "Cannot convert Relax expression of type " << expr->GetTypeKey()
+                               << " into pattern-matching rule.";
     }
   };
 
@@ -752,7 +748,7 @@ PatternMatchingRewriter PatternMatchingRewriter::FromModule(IRModule mod) {
     for (const auto& binding : block->bindings) {
       auto value_pattern = make_pattern(GetBoundValue(binding));
       if (auto match_cast = binding.as<MatchCastNode>()) {
-        value_pattern = StructInfoPattern(value_pattern, match_cast->struct_info);
+        value_pattern = TypePattern(value_pattern, match_cast->ty);
       }
       pattern_lookup.Set(binding->var, value_pattern);
     }
@@ -769,17 +765,17 @@ PatternMatchingRewriter PatternMatchingRewriter::FromModule(IRModule mod) {
     ffi::Array<BindingBlock> new_blocks;
 
     ffi::Array<Binding> wildcard_bindings;
-    ICHECK_EQ(param_wildcards.size(), func_replacement->params.size());
+    TVM_FFI_ICHECK_EQ(param_wildcards.size(), func_replacement->params.size());
     for (size_t i = 0; i < param_wildcards.size(); i++) {
       Expr matched_expr = matches[param_wildcards[i]];
 
       // Introduce an intermediate variable, to ensure that the
       // MatchCast's target will be a Var, even for expressions that
       // wouldn't normally be normalized into a variable.
-      Var intermediate_var("intermediate_var", GetStructInfo(matched_expr));
+      Var intermediate_var("intermediate_var", GetType(matched_expr));
       wildcard_bindings.push_back(VarBinding(intermediate_var, matched_expr));
       wildcard_bindings.push_back(
-          MatchCast(func_replacement->params[i], intermediate_var, GetStructInfo(matched_expr)));
+          MatchCast(func_replacement->params[i], intermediate_var, GetType(matched_expr)));
     }
 
     new_blocks.push_back(DataflowBlock(wildcard_bindings));
@@ -835,12 +831,12 @@ class PatternMatchingMutator : public ExprMutator {
   ffi::Map<GlobalVar, BaseFunc> GetNewSubroutines() const { return new_subroutines_; }
 
   Expr VisitExpr_(const SeqExprNode* seq) override {
-    SeqExpr prev = Downcast<SeqExpr>(ExprMutator::VisitExpr_(seq));
+    SeqExpr prev = ExprMutator::VisitExpr_(seq).as_or_throw<SeqExpr>();
 
-    StructuralEqual struct_equal;
+    ffi::StructuralEqual struct_equal;
 
     while (auto opt = TryRewriteSeqExpr(prev)) {
-      SeqExpr next = Downcast<SeqExpr>(builder_->Normalize(opt.value()));
+      SeqExpr next = builder_->Normalize(opt.value()).as_or_throw<SeqExpr>();
       if (struct_equal(prev, next)) {
         break;
       }
@@ -852,9 +848,9 @@ class PatternMatchingMutator : public ExprMutator {
       // simplification steps until converged.
       while (true) {
         auto start_of_loop = next;
-        next = Downcast<SeqExpr>(CanonicalizeBindings(next));
-        next = Downcast<SeqExpr>(EliminateCommonSubexpr(next));
-        next = Downcast<SeqExpr>(RemoveAllUnused(next));
+        next = CanonicalizeBindings(next).as_or_throw<SeqExpr>();
+        next = EliminateCommonSubexpr(next).as_or_throw<SeqExpr>();
+        next = RemoveAllUnused(next).as_or_throw<SeqExpr>();
         if (struct_equal(start_of_loop, next)) {
           break;
         }
@@ -878,7 +874,7 @@ class PatternMatchingMutator : public ExprMutator {
     // simplifies the special handling of the SeqExpr's body.
     ffi::Optional<Var> dummy_output_var = std::nullopt;
     if (!seq->body->IsInstance<VarNode>()) {
-      dummy_output_var = Var("dummy_output_var", GetStructInfo(seq->body));
+      dummy_output_var = Var("dummy_output_var", GetType(seq->body));
       VarBinding dummy_binding(dummy_output_var.value(), seq->body);
 
       auto last_block = [&]() {
@@ -906,7 +902,7 @@ class PatternMatchingMutator : public ExprMutator {
       auto bindings = orig_bindings.Map([&](Binding binding) -> Binding {
         if (auto new_expr = rewrites.variable_rewrites.Get(binding->var)) {
           if (auto match_cast = binding.as<MatchCastNode>()) {
-            return MatchCast(binding->var, new_expr.value(), match_cast->struct_info);
+            return MatchCast(binding->var, new_expr.value(), match_cast->ty);
           } else {
             return VarBinding(binding->var, new_expr.value());
           }
@@ -960,7 +956,7 @@ class PatternMatchingMutator : public ExprMutator {
       for (const auto& binding : block->bindings) {
         auto value = GetBoundValue(binding);
         bool is_dataflow = (!value.as<IfNode>()) &&
-                           (!(value.as<CallNode>() && IsImpureCall(Downcast<Call>(value))));
+                           (!(value.as<CallNode>() && IsImpureCall(value.as_or_throw<Call>())));
         if (is_dataflow) {
           // This binding satisfies the dataflow constraints.
           collected_bindings.push_back(binding);
@@ -1000,9 +996,9 @@ class PatternMatchingMutator : public ExprMutator {
         if (binding.as<VarBindingNode>()) {
           builder_->EmitNormalized(VarBinding(binding->var, value));
         } else if (auto match_cast = binding.as<MatchCastNode>()) {
-          builder_->EmitNormalized(MatchCast(binding->var, value, match_cast->struct_info));
+          builder_->EmitNormalized(MatchCast(binding->var, value, match_cast->ty));
         } else {
-          LOG(FATAL) << "Binding must be either VarBinding or MatchCast";
+          TVM_FFI_THROW(InternalError) << "Binding must be either VarBinding or MatchCast";
         }
       }
       return builder_->EndBlock();
@@ -1021,7 +1017,7 @@ class PatternMatchingMutator : public ExprMutator {
 
         auto last_binding = last_block->bindings.back();
         last_block.CopyOnWrite()->bindings.pop_back();
-        ICHECK(last_binding->var.same_as(dummy_output_var));
+        TVM_FFI_ICHECK(last_binding->var.same_as(dummy_output_var));
 
         if (last_block->bindings.size()) {
           new_blocks.push_back(last_block);
@@ -1045,10 +1041,11 @@ Expr PatternMatchingRewriter::operator()(Expr expr) {
   PatternMatchingMutator mutator(get());
   auto new_expr = mutator(expr);
   auto new_subroutines = mutator.GetNewSubroutines();
-  CHECK_EQ(new_subroutines.size(), 0) << "If PatternMatchingRewriter provides subroutines, "
-                                      << "then it must be applied to an entire IRModule.  "
-                                      << "However, PatternMatchingRewriter produced subroutines "
-                                      << [&]() -> ffi::Array<GlobalVar> {
+  TVM_FFI_ICHECK_EQ(new_subroutines.size(), 0)
+      << "If PatternMatchingRewriter provides subroutines, "
+      << "then it must be applied to an entire IRModule.  "
+      << "However, PatternMatchingRewriter produced subroutines "
+      << [&]() -> ffi::Array<GlobalVar> {
     std::vector<GlobalVar> vec;
     for (const auto& [gvar, func] : new_subroutines) {
       vec.push_back(gvar);
@@ -1068,7 +1065,7 @@ IRModule PatternMatchingRewriterNode::operator()(
   IRModule updates;
   for (const auto& [gvar, base_func] : mod->functions) {
     if (auto func = base_func.as<Function>()) {
-      auto rewritten = Downcast<Function>(mutator(func.value()));
+      auto rewritten = mutator(func.value()).as_or_throw<Function>();
       if (!rewritten.same_as(base_func)) {
         updates->Add(gvar, rewritten);
       }
@@ -1090,7 +1087,7 @@ tvm::transform::PassInfo PatternMatchingRewriterNode::Info() const {
 Function RewriteCall(const DFPattern& pat,
                      ffi::TypedFunction<Expr(Expr, ffi::Map<DFPattern, Expr>)> rewriter,
                      Function func) {
-  return Downcast<Function>(PatternMatchingRewriter::FromPattern(pat, rewriter)(func));
+  return PatternMatchingRewriter::FromPattern(pat, rewriter)(func).as_or_throw<Function>();
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {

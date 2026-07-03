@@ -14,15 +14,19 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: E722
 """Configure pytest"""
+
 # pylint: disable=invalid-name
 import threading
+
 import numpy as np
+import pytest
+
 import tvm
-from tvm import te
-from tvm.contrib import random
-from tvm import rpc
 import tvm.testing
+from tvm import rpc, te
+from tvm.contrib import random
 
 
 def test_randint():
@@ -33,7 +37,7 @@ def test_randint():
 
     def verify(target="llvm"):
         if not tvm.testing.device_enabled(target):
-            print("skip because %s is not enabled..." % target)
+            print(f"skip because {target} is not enabled...")
             return
         if not tvm.get_global_func("tvm.contrib.random.randint", True):
             print("skip because extern function is not available")
@@ -58,7 +62,7 @@ def test_uniform():
 
     def verify(target="llvm"):
         if not tvm.testing.device_enabled(target):
-            print("skip because %s is not enabled..." % target)
+            print(f"skip because {target} is not enabled...")
             return
         if not tvm.get_global_func("tvm.contrib.random.uniform", True):
             print("skip because extern function is not available")
@@ -83,7 +87,7 @@ def test_normal():
 
     def verify(target="llvm"):
         if not tvm.testing.device_enabled(target):
-            print("skip because %s is not enabled..." % target)
+            print(f"skip because {target} is not enabled...")
             return
         if not tvm.get_global_func("tvm.contrib.random.normal", True):
             print("skip because extern function is not available")
@@ -99,7 +103,7 @@ def test_normal():
     verify()
 
 
-@tvm.testing.uses_gpu
+@pytest.mark.gpu
 def test_random_fill():
     """Tests random_fill function"""
 
@@ -138,9 +142,10 @@ def test_random_fill():
 
         check_remote(rpc.Server("127.0.0.1"))
 
+    # Packed sub-byte dtypes (e.g. int4) are intentionally unsupported by
+    # random_fill since #19714 and raise an error instead.
     for dtype in [
         "bool",
-        "int4",
         "int8",
         "uint8",
         "int16",

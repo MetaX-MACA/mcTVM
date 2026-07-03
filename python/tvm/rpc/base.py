@@ -17,15 +17,13 @@
 """Base definitions for RPC."""
 # pylint: disable=invalid-name
 
-import socket
-import time
-import json
 import errno
-import struct
-import random
+import json
 import logging
-
-from ..base import py_str
+import random
+import socket
+import struct
+import time
 
 # Magic header for RPC data plane
 RPC_MAGIC = 0xFF271
@@ -41,7 +39,7 @@ RPC_CODE_MISMATCH = RPC_MAGIC + 2
 logger = logging.getLogger("RPCServer")
 
 
-class TrackerCode(object):
+class TrackerCode:
     """Enumeration code for the RPC tracker"""
 
     FAIL = -1
@@ -81,7 +79,7 @@ def recvall(sock, nbytes):
     while nread < nbytes:
         chunk = sock.recv(min(nbytes - nread, 1024))
         if not chunk:
-            raise IOError("connection reset")
+            raise OSError("connection reset")
         nread += len(chunk)
         res.append(chunk)
     return b"".join(res)
@@ -117,7 +115,7 @@ def recvjson(sock):
         The value received.
     """
     size = struct.unpack("<i", recvall(sock, 4))[0]
-    data = json.loads(py_str(recvall(sock, size)))
+    data = json.loads((recvall(sock, size)).decode("utf-8"))
     return data
 
 
@@ -188,13 +186,11 @@ def connect_with_retry(addr, timeout=60, retry_period=5):
             sock = socket.socket(get_addr_family(addr), socket.SOCK_STREAM)
             sock.connect(addr)
             return sock
-        except socket.error as sock_err:
+        except OSError as sock_err:
             if sock_err.args[0] not in (errno.ECONNREFUSED,):
                 raise sock_err
             period = time.time() - tstart
             if period > timeout:
-                raise RuntimeError(f"Failed to connect to server {str(addr)}")
-            logger.warning(
-                f"Cannot connect to tracker {str(addr)}, retry in {retry_period:g} secs..."
-            )
+                raise RuntimeError(f"Failed to connect to server {addr!s}")
+            logger.warning(f"Cannot connect to tracker {addr!s}, retry in {retry_period:g} secs...")
             time.sleep(retry_period)

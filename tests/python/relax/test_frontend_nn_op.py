@@ -15,14 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=missing-docstring, invalid-name
+# ruff: noqa: E501, F841
 import numpy as np
+import pytest
+
 import tvm
 import tvm.testing
-from tvm import relax, tir
+from tvm import relax, s_tir, tirx
 from tvm.relax.frontend.nn import Module, Tensor, op, spec
 from tvm.script import ir as I
 from tvm.script import relax as R
-from tvm.script import tir as T
+from tvm.script import tirx as T
+from tvm.testing import env
 
 # mypy: disable-error-code="attr-defined,valid-type,name-defined"
 
@@ -36,7 +40,7 @@ def test_unary():
 
     # fmt: off
     @R.function
-    def test(x: R.Tensor((1, 10), dtype="float32"), _io: R.Object):
+    def test(x: R.Tensor((1, 10), dtype="float32"), _io: R.Any):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             square: R.Tensor((1, 10), dtype="float32") = R.square(x)
@@ -75,13 +79,13 @@ def test_binary():
 
     # fmt: off
     @R.function
-    def test(x: R.Tensor((1, 10), dtype="float32"), y: R.Tensor((10, 1), dtype="float32"), _io: R.Object):
+    def test(x: R.Tensor((1, 10), dtype="float32"), y: R.Tensor((10, 1), dtype="float32"), _io: R.Any):
         R.func_attr({"num_input": 3})
         with R.dataflow():
             add: R.Tensor((10, 10), dtype="float32") = R.add(x, y)
             mul: R.Tensor((10, 10), dtype="float32") = R.multiply(x, y)
             divide: R.Tensor((10, 10), dtype="float32") = R.divide(x, y)
-            matmul: R.Tensor((1, 1), dtype="float32") = R.matmul(x, y, out_dtype="void")
+            matmul: R.Tensor((1, 1), dtype="float32") = R.matmul(x, y, out_dtype=None)
             maximum: R.Tensor((10, 10), dtype="float32") = R.maximum(x, y)
             minimum: R.Tensor((10, 10), dtype="float32") = R.minimum(x, y)
             subtract: R.Tensor((10, 10), dtype="float32") = R.subtract(x, y)
@@ -112,11 +116,11 @@ def test_sum():
 
     # fmt: off
     @R.function
-    def test(x: R.Tensor((3, 5, 2, 4), dtype="float32"), _io: R.Object) -> R.Tuple(R.Tensor((3, 1, 1, 4), dtype="float32"), R.Tuple(R.Object)):
+    def test(x: R.Tensor((3, 5, 2, 4), dtype="float32"), _io: R.Any) -> R.Tuple(R.Tensor((3, 1, 1, 4), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             sum: R.Tensor((3, 1, 1, 4), dtype="float32") = R.sum(x, axis=[1, 2], keepdims=True)
-            gv1: R.Tuple(R.Tensor((3, 1, 1, 4), dtype="float32"), R.Tuple(R.Object)) = sum, (_io,)
+            gv1: R.Tuple(R.Tensor((3, 1, 1, 4), dtype="float32"), R.Tuple(R.Any)) = sum, (_io,)
             R.output(gv1)
         return gv1
     # fmt: on
@@ -136,11 +140,11 @@ def test_max():
 
     # fmt: off
     @R.function
-    def test(x: R.Tensor((3, 5, 2, 4), dtype="float32"), _io: R.Object) -> R.Tuple(R.Tensor((3, 1, 1, 4), dtype="float32"), R.Tuple(R.Object)):
+    def test(x: R.Tensor((3, 5, 2, 4), dtype="float32"), _io: R.Any) -> R.Tuple(R.Tensor((3, 1, 1, 4), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             max: R.Tensor((3, 1, 1, 4), dtype="float32") = R.max(x, axis=[1, 2], keepdims=True)
-            gv1: R.Tuple(R.Tensor((3, 1, 1, 4), dtype="float32"), R.Tuple(R.Object)) = max, (_io,)
+            gv1: R.Tuple(R.Tensor((3, 1, 1, 4), dtype="float32"), R.Tuple(R.Any)) = max, (_io,)
             R.output(gv1)
         return gv1
     # fmt: on
@@ -160,11 +164,11 @@ def test_min():
 
     # fmt: off
     @R.function
-    def test(x: R.Tensor((3, 5, 2, 4), dtype="float32"), _io: R.Object) -> R.Tuple(R.Tensor((3, 1, 1, 4), dtype="float32"), R.Tuple(R.Object)):
+    def test(x: R.Tensor((3, 5, 2, 4), dtype="float32"), _io: R.Any) -> R.Tuple(R.Tensor((3, 1, 1, 4), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             min: R.Tensor((3, 1, 1, 4), dtype="float32") = R.min(x, axis=[1, 2], keepdims=True)
-            gv1: R.Tuple(R.Tensor((3, 1, 1, 4), dtype="float32"), R.Tuple(R.Object)) = min, (_io,)
+            gv1: R.Tuple(R.Tensor((3, 1, 1, 4), dtype="float32"), R.Tuple(R.Any)) = min, (_io,)
             R.output(gv1)
         return gv1
     # fmt: on
@@ -190,7 +194,7 @@ def test_manipulate():
 
     # fmt: off
     @R.function
-    def test(x: R.Tensor((1, 5, 2), dtype="float32"), _io: R.Object) -> R.Tuple(R.Tuple(R.Tensor((2, 5, 2), dtype="float32"), R.Tensor((2, 5, 1), dtype="float32"), R.Tensor((1, 10), dtype="float32"), R.Tensor((1, 10, 2), dtype="float32"), R.Tensor((5, 2), dtype="float32"), R.Tensor((1, 1, 5, 2), dtype="float32"), R.Tensor((2, 5, 2), dtype="float32")), R.Tuple(R.Object)):
+    def test(x: R.Tensor((1, 5, 2), dtype="float32"), _io: R.Any) -> R.Tuple(R.Tuple(R.Tensor((2, 5, 2), dtype="float32"), R.Tensor((2, 5, 1), dtype="float32"), R.Tensor((1, 10), dtype="float32"), R.Tensor((1, 10, 2), dtype="float32"), R.Tensor((5, 2), dtype="float32"), R.Tensor((1, 1, 5, 2), dtype="float32"), R.Tensor((2, 5, 2), dtype="float32")), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             broadcast_to: R.Tensor((2, 5, 2), dtype="float32") = R.broadcast_to(x, R.shape([2, 5, 2]))
@@ -200,7 +204,7 @@ def test_manipulate():
             squeeze: R.Tensor((5, 2), dtype="float32") = R.squeeze(x, axis=[0])
             unsqueeze: R.Tensor((1, 1, 5, 2), dtype="float32") = R.expand_dims(x, axis=0)
             concat: R.Tensor((2, 5, 2), dtype="float32") = R.concat([x, x], axis=0)
-            gv1: R.Tuple(R.Tuple(R.Tensor((2, 5, 2), dtype="float32"), R.Tensor((2, 5, 1), dtype="float32"), R.Tensor((1, 10), dtype="float32"), R.Tensor((1, 10, 2), dtype="float32"), R.Tensor((5, 2), dtype="float32"), R.Tensor((1, 1, 5, 2), dtype="float32"), R.Tensor((2, 5, 2), dtype="float32")), R.Tuple(R.Object)) = (broadcast_to, permute_dims, reshape, repeat, squeeze, unsqueeze, concat), (_io,)
+            gv1: R.Tuple(R.Tuple(R.Tensor((2, 5, 2), dtype="float32"), R.Tensor((2, 5, 1), dtype="float32"), R.Tensor((1, 10), dtype="float32"), R.Tensor((1, 10, 2), dtype="float32"), R.Tensor((5, 2), dtype="float32"), R.Tensor((1, 1, 5, 2), dtype="float32"), R.Tensor((2, 5, 2), dtype="float32")), R.Tuple(R.Any)) = (broadcast_to, permute_dims, reshape, repeat, squeeze, unsqueeze, concat), (_io,)
             R.output(gv1)
         return gv1
     # fmt: on
@@ -219,11 +223,11 @@ def test_index():
 
     # fmt: off
     @R.function
-    def test(x: R.Tensor((2, 1, 10), dtype="float32"), y: R.Tensor((5,), dtype="int32"), _io: R.Object) -> R.Tuple(R.Tensor((2, 1, 5), dtype="float32"), R.Tuple(R.Object)):
+    def test(x: R.Tensor((2, 1, 10), dtype="float32"), y: R.Tensor((5,), dtype="int32"), _io: R.Any) -> R.Tuple(R.Tensor((2, 1, 5), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 3})
         with R.dataflow():
             take: R.Tensor((2, 1, 5), dtype="float32") = R.take(x, y, axis=2)
-            gv1: R.Tuple(R.Tensor((2, 1, 5), dtype="float32"), R.Tuple(R.Object)) = take, (_io,)
+            gv1: R.Tuple(R.Tensor((2, 1, 5), dtype="float32"), R.Tuple(R.Any)) = take, (_io,)
             R.output(gv1)
         return gv1
     # fmt: on
@@ -245,11 +249,11 @@ def test_datatype():
 
     # fmt: off
     @R.function
-    def test(x: R.Tensor((2, 1, 10), dtype="float32"), _io: R.Object) -> R.Tuple(R.Tensor((2, 1, 10), dtype="float16"), R.Tuple(R.Object)):
+    def test(x: R.Tensor((2, 1, 10), dtype="float32"), _io: R.Any) -> R.Tuple(R.Tensor((2, 1, 10), dtype="float16"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             astype: R.Tensor((2, 1, 10), dtype="float16") = R.astype(x, dtype="float16")
-            gv1: R.Tuple(R.Tensor((2, 1, 10), dtype="float16"), R.Tuple(R.Object)) = astype, (_io,)
+            gv1: R.Tuple(R.Tensor((2, 1, 10), dtype="float16"), R.Tuple(R.Any)) = astype, (_io,)
             R.output(gv1)
         return gv1
     # fmt: on
@@ -273,12 +277,12 @@ def test_image():
         x: R.Tensor((1, 3, 32, 32), dtype="float32"),
         weight: R.Tensor((32, 3, 3, 3), dtype="float32"),
         bias: R.Tensor((32,), dtype="float32"),
-        _io: R.Object,
+        _io: R.Any,
     ) -> R.Tuple(
         R.Tuple(
             R.Tensor((1, 32, 32, 32), dtype="float32"), R.Tensor((1, 3, 40, 40), dtype="float32")
         ),
-        R.Tuple(R.Object),
+        R.Tuple(R.Any),
     ):
         R.func_attr({"num_input": 4})
         with R.dataflow():
@@ -293,7 +297,7 @@ def test_image():
                 data_layout="NCHW",
                 kernel_layout="OIHW",
                 out_layout="NCHW",
-                out_dtype="void",
+                out_dtype=None,
             )
             lv2: R.Tensor((1, 32, 1, 1), dtype="float32") = R.reshape(bias, R.shape([1, 32, 1, 1]))
             conv2d: R.Tensor((1, 32, 32, 32), dtype="float32") = R.add(lv1, lv2)
@@ -308,14 +312,14 @@ def test_image():
                 cubic_alpha=-0.75,
                 cubic_exclude=0,
                 extrapolation_value=0,
-                out_dtype="void",
+                out_dtype=None,
             )
             gv1: R.Tuple(
                 R.Tuple(
                     R.Tensor((1, 32, 32, 32), dtype="float32"),
                     R.Tensor((1, 3, 40, 40), dtype="float32"),
                 ),
-                R.Tuple(R.Object),
+                R.Tuple(R.Any),
             ) = (conv2d, interpolate), (_io,)
             R.output(gv1)
         return gv1
@@ -341,16 +345,14 @@ def test_chunk():
             return chunk
 
     @R.function
-    def test(
-        x: R.Tensor((8,), dtype="float32"), _io: R.Object
-    ) -> R.Tuple(
+    def test(x: R.Tensor((8,), dtype="float32"), _io: R.Any) -> R.Tuple(
         R.Tuple(
             R.Tensor((2,), dtype="float32"),
             R.Tensor((2,), dtype="float32"),
             R.Tensor((2,), dtype="float32"),
             R.Tensor((2,), dtype="float32"),
         ),
-        R.Tuple(R.Object),
+        R.Tuple(R.Any),
     ):
         R.func_attr({"num_input": 2})
         with R.dataflow():
@@ -371,7 +373,7 @@ def test_chunk():
                     R.Tensor((2,), dtype="float32"),
                     R.Tensor((2,), dtype="float32"),
                 ),
-                R.Tuple(R.Object),
+                R.Tuple(R.Any),
             ) = (chunk_0, chunk_1, chunk_2, chunk_3), (_io,)
             R.output(gv1)
         return gv1
@@ -407,8 +409,8 @@ def test_nn():
         x: R.Tensor((2, 3, 4, 5), dtype="float32"),
         weight: R.Tensor((4, 5), dtype="float32"),
         bias: R.Tensor((3,), dtype="float32"),
-        _io: R.Object,
-    ) -> R.Tuple(R.Tensor((2, 3, 4, 5), dtype="float32"), R.Tuple(R.Object)):
+        _io: R.Any,
+    ) -> R.Tuple(R.Tensor((2, 3, 4, 5), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 4})
         with R.dataflow():
             log: R.Tensor((2, 3, 4, 5), dtype="float32") = R.log(x)
@@ -435,7 +437,7 @@ def test_nn():
             group_norm: R.Tensor((2, 3, 4, 5), dtype="float32") = R.nn.group_norm(
                 x, bias, bias, num_groups=1, channel_axis=1, axes=[2, 3]
             )
-            gv1: R.Tuple(R.Tensor((2, 3, 4, 5), dtype="float32"), R.Tuple(R.Object)) = x, (_io,)
+            gv1: R.Tuple(R.Tensor((2, 3, 4, 5), dtype="float32"), R.Tuple(R.Any)) = x, (_io,)
             R.output(gv1)
         return gv1
 
@@ -460,7 +462,7 @@ def test_create():
             triu_out = op.triu(x)
             full_with_scalar_out = op.full([10, 10], fill_value=10)  # type: ignore
             full_with_FloatImm_out = op.full(
-                [10, 10], fill_value=tir.FloatImm(dtype="float32", value=10)
+                [10, 10], fill_value=tirx.FloatImm(dtype="float32", value=10)
             )
             full_with_Tensor_out = op.full(
                 [10, 10], fill_value=Tensor.from_scalar(10, dtype="float32")
@@ -473,7 +475,7 @@ def test_create():
 
     # fmt: off
     @R.function
-    def test(x: R.Tensor((10, 10), dtype="float32"), _io: R.Object) -> R.Tuple(R.Tensor((10, 10), dtype="float32"), R.Tuple(R.Object)):
+    def test(x: R.Tensor((10, 10), dtype="float32"), _io: R.Any) -> R.Tuple(R.Tensor((10, 10), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             triu: R.Tensor((10, 10), dtype="float32") = R.triu(x, k=0)
@@ -483,7 +485,7 @@ def test_create():
             zeros: R.Tensor((10, 10), dtype="float32") = R.zeros(R.shape([10, 10]), dtype="float32")
             zeros1: R.Tensor((10, 10), dtype="float16") = R.zeros(R.shape([10, 10]), dtype="float16")
             arange: R.Tensor((10,), dtype="float32") = R.arange(T.int64(0), T.int64(10), T.int64(1), dtype="float32")
-            gv1: R.Tuple(R.Tensor((10, 10), dtype="float32"), R.Tuple(R.Object)) = x, (_io,)
+            gv1: R.Tuple(R.Tensor((10, 10), dtype="float32"), R.Tuple(R.Any)) = x, (_io,)
             R.output(gv1)
         return gv1
     # fmt: on
@@ -503,9 +505,9 @@ def test_timestep_embedding():
             return get_timestep_out
 
     @R.function
-    def test(
-        x: R.Tensor((3,), dtype="float32"), _io: R.Object
-    ) -> R.Tuple(R.Tensor((3, 10), dtype="float32"), R.Tuple(R.Object)):
+    def test(x: R.Tensor((3,), dtype="float32"), _io: R.Any) -> R.Tuple(
+        R.Tensor((3, 10), dtype="float32"), R.Tuple(R.Any)
+    ):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             lv1: R.Tensor((3,), dtype="float32") = R.astype(x, dtype="float32")
@@ -529,7 +531,7 @@ def test_timestep_embedding():
             get_timestep_embedding: R.Tensor((3, 10), dtype="float32") = R.astype(
                 lv11, dtype="float32"
             )
-            gv1: R.Tuple(R.Tensor((3, 10), dtype="float32"), R.Tuple(R.Object)) = (
+            gv1: R.Tuple(R.Tensor((3, 10), dtype="float32"), R.Tuple(R.Any)) = (
                 get_timestep_embedding,
                 (_io,),
             )
@@ -552,14 +554,14 @@ def test_scaled_dot_product_attention():
         query: R.Tensor((1, 32, 32, 32), dtype="float32"),
         key: R.Tensor((1, 32, 32, 32), dtype="float32"),
         value: R.Tensor((1, 32, 32, 32), dtype="float32"),
-        _io: R.Object,
-    ) -> R.Tuple(R.Tensor((1, 32, 32, 32), dtype="float32"), R.Tuple(R.Object)):
+        _io: R.Any,
+    ) -> R.Tuple(R.Tensor((1, 32, 32, 32), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 4})
         with R.dataflow():
-            scaled_dot_product_attention: R.Tensor(
-                (1, 32, 32, 32), dtype="float32"
-            ) = R.nn.attention(query, key, value, scale=None, causal_mask=None)
-            gv1: R.Tuple(R.Tensor((1, 32, 32, 32), dtype="float32"), R.Tuple(R.Object)) = (
+            scaled_dot_product_attention: R.Tensor((1, 32, 32, 32), dtype="float32") = (
+                R.nn.attention(query, key, value, scale=None, causal_mask=None)
+            )
+            gv1: R.Tuple(R.Tensor((1, 32, 32, 32), dtype="float32"), R.Tuple(R.Any)) = (
                 scaled_dot_product_attention,
                 (_io,),
             )
@@ -589,35 +591,35 @@ def test_tensor_expr_op():
             return tensor_expr_op_out
 
     # fmt: off
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def add_one(A: T.Buffer((T.int64(10), T.int64(10)), "float32"), T_add: T.Buffer((T.int64(10), T.int64(10)), "float32")):
-            T.func_attr({"tir.noalias": True})
-            # with T.block("root"):
+            T.func_attr({"tirx.noalias": True})
+            # with T.sblock("root"):
             for ax0, ax1 in T.grid(T.int64(10), T.int64(10)):
-                with T.block("T_add"):
+                with T.sblock("T_add"):
                     v_ax0, v_ax1 = T.axis.remap("SS", [ax0, ax1])
                     T.reads(A[v_ax0, v_ax1])
                     T.writes(T_add[v_ax0, v_ax1])
                     T_add[v_ax0, v_ax1] = A[v_ax0, v_ax1] + T.float32(1)
 
         @R.function
-        def _initialize_effect() -> R.Tuple(R.Object):
+        def _initialize_effect() -> R.Tuple(R.Any):
             with R.dataflow():
-                _io: R.Object = R.null_value()
-                lv: R.Tuple(R.Object) = (_io,)
-                gv: R.Tuple(R.Object) = lv
+                _io: R.Any = R.null_value()
+                lv: R.Tuple(R.Any) = (_io,)
+                gv: R.Tuple(R.Any) = lv
                 R.output(gv)
             return gv
 
         @R.function
-        def test(x: R.Tensor((10, 10), dtype="float32"), _io: R.Object) -> R.Tuple(R.Tensor((10, 10), dtype="float32"), R.Tuple(R.Object)):
+        def test(x: R.Tensor((10, 10), dtype="float32"), _io: R.Any) -> R.Tuple(R.Tensor((10, 10), dtype="float32"), R.Tuple(R.Any)):
             cls = Expected
             R.func_attr({"num_input": 2})
             with R.dataflow():
-                lv1 = R.call_tir(cls.add_one, (x,), out_sinfo=R.Tensor((10, 10), dtype="float32"))
-                gv1: R.Tuple(R.Tensor((10, 10), dtype="float32"), R.Tuple(R.Object)) = lv1, (_io,)
+                lv1 = R.call_tir(cls.add_one, (x,), out_ty=R.Tensor((10, 10), dtype="float32"))
+                gv1: R.Tuple(R.Tensor((10, 10), dtype="float32"), R.Tuple(R.Any)) = lv1, (_io,)
                 R.output(gv1)
             return gv1
     # fmt: on
@@ -633,7 +635,7 @@ def test_tensor_ir_op():
     fused_heads = num_q_heads + num_kv_heads * 2
     dtype = "float16"
 
-    @T.prim_func(private=True)
+    @T.prim_func(private=True, s_tir=True)
     def fused_rope(  # pylint: disable=too-many-locals
         var_qkv: T.handle,
         var_q: T.handle,
@@ -643,7 +645,7 @@ def test_tensor_ir_op():
         # including the output tensor arguments
         #
         # TODO(Lunderberg): Update
-        # `tvm.relax.frontend.nn.op.tensor_ir_op` to use `PrimValue`
+        # `tvm.relax.frontend.nn.op.tensor_ir_op` to use `PrimExpr`
         # instead of `tir_vars`, so that the order can be consistent
         # between the function definition and the arguments in
         # `op.tensor_ir_op`.
@@ -658,7 +660,7 @@ def test_tensor_ir_op():
         T.evaluate(offset)
 
     class Model(Module):
-        def test(self, qkv: Tensor, offset: tir.Var):
+        def test(self, qkv: Tensor, offset: tirx.Var):
             tensor_expr_op_out = op.tensor_ir_op(
                 fused_rope,
                 "llama_fused_rope",
@@ -672,9 +674,9 @@ def test_tensor_ir_op():
             return tensor_expr_op_out
 
     # fmt: off
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def llama_fused_rope(var_qkv: T.handle, var_q: T.handle, var_k: T.handle, var_v: T.handle, offset: T.int64):
             batch_size, seq_len = T.int64(), T.int64()
             qkv = T.match_buffer(var_qkv, (batch_size, seq_len, 24, 16), "float16")
@@ -684,25 +686,25 @@ def test_tensor_ir_op():
             T.evaluate(offset)
 
         @R.function
-        def _initialize_effect() -> R.Tuple(R.Object):
+        def _initialize_effect() -> R.Tuple(R.Any):
             with R.dataflow():
-                _io: R.Object = R.null_value()
-                lv: R.Tuple(R.Object) = (_io,)
-                gv: R.Tuple(R.Object) = lv
+                _io: R.Any = R.null_value()
+                lv: R.Tuple(R.Any) = (_io,)
+                gv: R.Tuple(R.Any) = lv
                 R.output(gv)
             return gv
 
         @R.function
-        def test(qkv: R.Tensor((1, 1, 24, 16), dtype="float16"), offset: R.Shape(["offset_1"]), _io: R.Object) -> R.Tuple(R.Tuple(R.Tensor((1, 1, 8, 16), dtype="float16"), R.Tensor((1, 1, 8, 16), dtype="float16"), R.Tensor((1, 1, 8, 16), dtype="float16")), R.Tuple(R.Object)):
+        def test(qkv: R.Tensor((1, 1, 24, 16), dtype="float16"), offset: R.Shape(["offset_1"]), _io: R.Any) -> R.Tuple(R.Tuple(R.Tensor((1, 1, 8, 16), dtype="float16"), R.Tensor((1, 1, 8, 16), dtype="float16"), R.Tensor((1, 1, 8, 16), dtype="float16")), R.Tuple(R.Any)):
             offset_1 = T.int64()
             R.func_attr({"num_input": 3})
             cls = Expected
             with R.dataflow():
-                lv1 = R.call_tir(cls.llama_fused_rope, (qkv,), out_sinfo=[R.Tensor((1, 1, 8, 16), dtype="float16"), R.Tensor((1, 1, 8, 16), dtype="float16"), R.Tensor((1, 1, 8, 16), dtype="float16")], tir_vars=R.shape([offset_1]))
+                lv1 = R.call_tir(cls.llama_fused_rope, (qkv,), out_ty=[R.Tensor((1, 1, 8, 16), dtype="float16"), R.Tensor((1, 1, 8, 16), dtype="float16"), R.Tensor((1, 1, 8, 16), dtype="float16")], tir_vars=R.shape([offset_1]))
                 llama_fused_rope_0: R.Tensor((1, 1, 8, 16), dtype="float16") = lv1[0]
                 llama_fused_rope_1: R.Tensor((1, 1, 8, 16), dtype="float16") = lv1[1]
                 llama_fused_rope_2: R.Tensor((1, 1, 8, 16), dtype="float16") = lv1[2]
-                gv1: R.Tuple(R.Tuple(R.Tensor((1, 1, 8, 16), dtype="float16"), R.Tensor((1, 1, 8, 16), dtype="float16"), R.Tensor((1, 1, 8, 16), dtype="float16")), R.Tuple(R.Object)) = (llama_fused_rope_0, llama_fused_rope_1, llama_fused_rope_2), (_io,)
+                gv1: R.Tuple(R.Tuple(R.Tensor((1, 1, 8, 16), dtype="float16"), R.Tensor((1, 1, 8, 16), dtype="float16"), R.Tensor((1, 1, 8, 16), dtype="float16")), R.Tuple(R.Any)) = (llama_fused_rope_0, llama_fused_rope_1, llama_fused_rope_2), (_io,)
                 R.output(gv1)
             return gv1
     # fmt: on
@@ -721,11 +723,11 @@ def test_tensor_ir_inplace_op():
     hidden_size = 4096
     dtype = "float16"
 
-    @T.prim_func
+    @T.prim_func(s_tir=True)
     def inplace_take(
         var_weight: T.handle, var_pos: T.handle, var_embeddings: T.handle, offset: T.int64
     ):
-        T.func_attr({"tir.noalias": True})
+        T.func_attr({"tirx.noalias": True})
         vocab_size = T.int64()
         weight = T.match_buffer(var_weight, (vocab_size, hidden_size), dtype)
         seq_len = T.int64()
@@ -733,7 +735,7 @@ def test_tensor_ir_inplace_op():
         pos = T.match_buffer(var_pos, (seq_len,), "int32")
         embeddings = T.match_buffer(var_embeddings, (total_seq_len, hidden_size), dtype)
         for ax0, ax1 in T.grid(seq_len, hidden_size):
-            with T.block("T_take"):
+            with T.sblock("T_take"):
                 v0, v1 = T.axis.remap("SS", [ax0, ax1])
                 T.reads(weight[pos[v0], v1], pos[v0])
                 T.writes(embeddings[v0, v1])
@@ -752,13 +754,13 @@ def test_tensor_ir_inplace_op():
             )
             return tensor_expr_op_out
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
-        @T.prim_func
+        @T.prim_func(s_tir=True)
         def inplace_take(
             var_weight: T.handle, var_pos: T.handle, var_embeddings: T.handle, offset: T.int64
         ):
-            T.func_attr({"tir.noalias": True})
+            T.func_attr({"tirx.noalias": True})
             vocab_size = T.int64()
             weight = T.match_buffer(var_weight, (vocab_size, hidden_size), dtype)
             seq_len = T.int64()
@@ -766,18 +768,18 @@ def test_tensor_ir_inplace_op():
             pos = T.match_buffer(var_pos, (seq_len,), "int32")
             embeddings = T.match_buffer(var_embeddings, (total_seq_len, hidden_size), dtype)
             for ax0, ax1 in T.grid(seq_len, hidden_size):
-                with T.block("T_take"):
+                with T.sblock("T_take"):
                     v0, v1 = T.axis.remap("SS", [ax0, ax1])
                     T.reads(weight[pos[v0], v1], pos[v0])
                     T.writes(embeddings[v0, v1])
                     embeddings[v0 + offset, v1] = weight[pos[v0], v1]
 
         @R.function
-        def _initialize_effect() -> R.Tuple(R.Object):
+        def _initialize_effect() -> R.Tuple(R.Any):
             with R.dataflow():
-                _io: R.Object = R.null_value()
-                lv: R.Tuple(R.Object) = (_io,)
-                gv: R.Tuple(R.Object) = lv
+                _io: R.Any = R.null_value()
+                lv: R.Tuple(R.Any) = (_io,)
+                gv: R.Tuple(R.Any) = lv
                 R.output(gv)
             return gv
 
@@ -797,7 +799,7 @@ def test_tensor_ir_inplace_op():
                 lv1 = R.call_tir_inplace(
                     cls.inplace_take,
                     (embedding_table, input_ids, embedding_dst),
-                    out_sinfo=R.Tensor((total_seq_len, hidden_size), dtype),
+                    out_ty=R.Tensor((total_seq_len, hidden_size), dtype),
                     inplace_indices=[2],
                     tir_vars=R.shape([offset_1]),
                 )
@@ -825,7 +827,7 @@ def test_tensor_ir_inplace_op():
 
 
 def test_tensor_ir_op_no_tir_var():
-    @T.prim_func(private=True)
+    @T.prim_func(private=True, s_tir=True)
     def tir_func(A: T.Buffer((16, 16), "float32"), B: T.Buffer((16, 16), "float32")):
         T.evaluate(0)
 
@@ -839,9 +841,9 @@ def test_tensor_ir_op_no_tir_var():
             )
             return tensor_expr_op_out
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def tir_func(A: T.Buffer((16, 16), "float32"), B: T.Buffer((16, 16), "float32")):
             T.evaluate(0)
 
@@ -850,7 +852,7 @@ def test_tensor_ir_op_no_tir_var():
             R.func_attr({"num_input": 1})
             cls = Expected
             with R.dataflow():
-                lv = R.call_tir(cls.tir_func, (A,), out_sinfo=R.Tensor((16, 16), dtype="float32"))
+                lv = R.call_tir(cls.tir_func, (A,), out_ty=R.Tensor((16, 16), dtype="float32"))
                 gv: R.Tensor((16, 16), dtype="float32") = lv
                 R.output(gv)
             return gv
@@ -872,23 +874,23 @@ def test_extern():
             return tensor_expr_op_out
 
     # fmt: off
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
         @R.function
-        def _initialize_effect() -> R.Tuple(R.Object):
+        def _initialize_effect() -> R.Tuple(R.Any):
             with R.dataflow():
-                _io: R.Object = R.null_value()
-                lv: R.Tuple(R.Object) = (_io,)
-                gv: R.Tuple(R.Object) = lv
+                _io: R.Any = R.null_value()
+                lv: R.Tuple(R.Any) = (_io,)
+                gv: R.Tuple(R.Any) = lv
                 R.output(gv)
             return gv
 
         @R.function
-        def test(q: R.Tensor((1, 1, 16, 8), dtype="float32"), k: R.Tensor((64, 16, 8), dtype="float32"), v: R.Tensor((64, 16, 8), dtype="float32"), _io: R.Object) -> R.Tuple(R.Tensor((1, 1, 128), dtype="float16"), R.Tuple(R.Object)):
+        def test(q: R.Tensor((1, 1, 16, 8), dtype="float32"), k: R.Tensor((64, 16, 8), dtype="float32"), v: R.Tensor((64, 16, 8), dtype="float32"), _io: R.Any) -> R.Tuple(R.Tensor((1, 1, 128), dtype="float16"), R.Tuple(R.Any)):
             R.func_attr({"num_input": 4})
             with R.dataflow():
-                flashinfer_single_decode = R.call_dps_packed("flashinfer.single_decode", (q, k, v, R.prim_value(0), R.prim_value(0), R.prim_value(T.float64(1)), R.prim_value(T.float64(10000))), out_sinfo=R.Tensor((1, 1, 128), dtype="float16"))
-                gv1: R.Tuple(R.Tensor((1, 1, 128), dtype="float16"), R.Tuple(R.Object)) = flashinfer_single_decode, (_io,)
+                flashinfer_single_decode = R.call_dps_packed("flashinfer.single_decode", (q, k, v, R.prim_value(0), R.prim_value(0), R.prim_value(T.float64(1)), R.prim_value(T.float64(10000))), out_ty=R.Tensor((1, 1, 128), dtype="float16"))
+                gv1: R.Tuple(R.Tensor((1, 1, 128), dtype="float16"), R.Tuple(R.Any)) = flashinfer_single_decode, (_io,)
                 R.output(gv1)
             return gv1
     # fmt: on
@@ -927,7 +929,8 @@ def test_empty():
     vm["test"](*effects)
 
 
-@tvm.testing.requires_cuda
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_multinomial_from_uniform():
     prob_shape = (3, 5)
     sample_shape = (6, 1)
@@ -938,23 +941,23 @@ def test_multinomial_from_uniform():
             return z0
 
     # fmt: off
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
         @R.function
-        def _initialize_effect() -> R.Tuple(R.Object):
+        def _initialize_effect() -> R.Tuple(R.Any):
             with R.dataflow():
-                _io: R.Object = R.null_value()
-                lv: R.Tuple(R.Object) = (_io,)
-                gv: R.Tuple(R.Object) = lv
+                _io: R.Any = R.null_value()
+                lv: R.Tuple(R.Any) = (_io,)
+                gv: R.Tuple(R.Any) = lv
                 R.output(gv)
             return gv
 
         @R.function
-        def foo(prob: R.Tensor((3, 5), dtype="float32"), uniform_sample: R.Tensor((6, 1), dtype="float32"), sample_indices: R.Tensor((6, 1), dtype="int64"), _io: R.Object) -> R.Tuple(R.Tensor((6, 1), dtype="int64"), R.Tuple(R.Object)):
+        def foo(prob: R.Tensor((3, 5), dtype="float32"), uniform_sample: R.Tensor((6, 1), dtype="float32"), sample_indices: R.Tensor((6, 1), dtype="int64"), _io: R.Any) -> R.Tuple(R.Tensor((6, 1), dtype="int64"), R.Tuple(R.Any)):
             R.func_attr({"num_input": 4})
             with R.dataflow():
                 multinomial_from_uniform: R.Tensor((6, 1), dtype="int64") = R.multinomial_from_uniform(prob, uniform_sample, sample_indices, dtype="int64")
-                gv1: R.Tuple(R.Tensor((6, 1), dtype="int64"), R.Tuple(R.Object)) = multinomial_from_uniform, (_io,)
+                gv1: R.Tuple(R.Tensor((6, 1), dtype="int64"), R.Tuple(R.Any)) = multinomial_from_uniform, (_io,)
                 R.output(gv1)
             return gv1
     # fmt: on
@@ -976,9 +979,9 @@ def test_multinomial_from_uniform():
     target = tvm.target.Target("cuda", host="llvm")
     with target:
         mod = relax.backend.DispatchSampling()(mod)
-        mod = tir.transform.DefaultGPUSchedule()(mod)
+        mod = s_tir.transform.DefaultGPUSchedule()(mod)
     ex = tvm.compile(mod, target)
-    dev = tvm.device(str(target), 0)
+    dev = tvm.device(target.kind.name, 0)
     vm = relax.VirtualMachine(ex, dev)
 
     effects = vm["_initialize_effect"]()
@@ -999,7 +1002,8 @@ def test_multinomial_from_uniform():
     )
 
 
-@tvm.testing.requires_gpu
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_sample_top_p_top_k_from_sorted_prob():
     prob_shape = (2, 3)
     sample_shape = (3, 1)
@@ -1020,9 +1024,9 @@ def test_sample_top_p_top_k_from_sorted_prob():
             return z0
 
     # fmt: off
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def get_index_from_sorted(A: T.handle, B: T.handle, C: T.handle, D: T.handle, E: T.handle, F: T.handle):
             batch, vocab_size = T.int64(is_size_var=True), T.int64(is_size_var=True)
             cumsum_sorted = T.match_buffer(A, (batch, vocab_size))
@@ -1032,9 +1036,9 @@ def test_sample_top_p_top_k_from_sorted_prob():
             usample = T.match_buffer(D, (out_batch, 1))
             sample_indices = T.match_buffer(E, (out_batch, 1), "int64")
             output_index = T.match_buffer(F, (out_batch, 1), "int64")
-            # with T.block("root"):
+            # with T.sblock("root"):
             for ax0, ax1 in T.grid(out_batch, vocab_size):
-                with T.block("T_get_index_from_sorted"):
+                with T.sblock("T_get_index_from_sorted"):
                     v_ax0, v_ax1 = T.axis.remap("SS", [ax0, ax1])
                     T.reads(usample[v_ax0, T.int64(0)], cumsum_sorted[sample_indices[v_ax0, T.int64(0)], v_ax1 - T.int64(1):v_ax1 - T.int64(1) + T.int64(2)], sample_indices[v_ax0, T.int64(0)], renorm_prob[sample_indices[v_ax0, T.int64(0)], 0], indices[sample_indices[v_ax0, T.int64(0)], T.min(T.int64(0), v_ax1):T.min(T.int64(0), v_ax1) + (T.max(T.int64(0), v_ax1) + T.int64(1) - T.min(T.int64(0), v_ax1))])
                     T.writes(output_index[v_ax0, 0])
@@ -1045,16 +1049,16 @@ def test_sample_top_p_top_k_from_sorted_prob():
                             if usample[v_ax0, T.int64(0)] >= cumsum_sorted[sample_indices[v_ax0, T.int64(0)], v_ax1 - T.int64(1)] / renorm_prob[sample_indices[v_ax0, T.int64(0)], 0]:
                                 output_index[v_ax0, 0] = indices[sample_indices[v_ax0, T.int64(0)], v_ax1]
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def get_renorm_prob(A: T.handle, B: T.handle, C: T.handle, D: T.handle):
             batch, vocab_size = T.int64(is_size_var=True), T.int64(is_size_var=True)
             cumsum_sorted = T.match_buffer(A, (batch, vocab_size))
             top_p = T.match_buffer(B, (batch, 1))
             top_k = T.match_buffer(C, (batch, 1), "int64")
             renorm_prob = T.match_buffer(D, (batch, 1))
-            # with T.block("root"):
+            # with T.sblock("root"):
             for ax0, ax1 in T.grid(batch, vocab_size):
-                with T.block("T_get_renorm_prob"):
+                with T.sblock("T_get_renorm_prob"):
                     v_ax0, v_ax1 = T.axis.remap("SS", [ax0, ax1])
                     T.reads(cumsum_sorted[v_ax0, T.min(T.min(T.int64(0), v_ax1), v_ax1 + T.int64(1)):T.min(T.min(T.int64(0), v_ax1), v_ax1 + T.int64(1)) + (T.max(T.max(T.int64(0), v_ax1), v_ax1 + T.int64(1)) + T.int64(1) - T.min(T.min(T.int64(0), v_ax1), v_ax1 + T.int64(1)))], top_p[v_ax0, 0], top_k[v_ax0, 0])
                     T.writes(renorm_prob[v_ax0, 0])
@@ -1069,23 +1073,23 @@ def test_sample_top_p_top_k_from_sorted_prob():
                                     renorm_prob[v_ax0, 0] = cumsum_sorted[v_ax0, v_ax1 + T.int64(1)]
 
         @R.function
-        def _initialize_effect() -> R.Tuple(R.Object):
+        def _initialize_effect() -> R.Tuple(R.Any):
             with R.dataflow():
-                _io: R.Object = R.null_value()
-                lv: R.Tuple(R.Object) = (_io,)
-                gv: R.Tuple(R.Object) = lv
+                _io: R.Any = R.null_value()
+                lv: R.Tuple(R.Any) = (_io,)
+                gv: R.Tuple(R.Any) = lv
                 R.output(gv)
             return gv
 
         @R.function
-        def foo(prob: R.Tensor((2, 3), dtype="float32"), index: R.Tensor((2, 3), dtype="int64"), top_p: R.Tensor((2, 1), dtype="float32"), top_k: R.Tensor((2, 1), dtype="int64"), uniform_sample: R.Tensor((3, 1), dtype="float32"), sample_indices: R.Tensor((3, 1), dtype="int64"), _io: R.Object,) -> R.Tuple(R.Tensor((3, 1), dtype="int64"), R.Tuple(R.Object)):
+        def foo(prob: R.Tensor((2, 3), dtype="float32"), index: R.Tensor((2, 3), dtype="int64"), top_p: R.Tensor((2, 1), dtype="float32"), top_k: R.Tensor((2, 1), dtype="int64"), uniform_sample: R.Tensor((3, 1), dtype="float32"), sample_indices: R.Tensor((3, 1), dtype="int64"), _io: R.Any,) -> R.Tuple(R.Tensor((3, 1), dtype="int64"), R.Tuple(R.Any)):
             R.func_attr({"num_input": 7})
             cls = Expected
             with R.dataflow():
-                cumsum: R.Tensor((2, 3), dtype="float32") = R.cumsum(prob, axis=1, dtype="void", exclusive=None)
-                lv1 = R.call_tir(cls.get_renorm_prob, (cumsum, top_p, top_k), out_sinfo=R.Tensor((2, 1), dtype="float32"))
-                lv2 = R.call_tir(cls.get_index_from_sorted, (cumsum, index, lv1, uniform_sample, sample_indices), out_sinfo=R.Tensor((3, 1), dtype="int64"))
-                gv1: R.Tuple(R.Tensor((3, 1), dtype="int64"), R.Tuple(R.Object)) = lv2, (_io,)
+                cumsum: R.Tensor((2, 3), dtype="float32") = R.cumsum(prob, axis=1, dtype=None, exclusive=None)
+                lv1 = R.call_tir(cls.get_renorm_prob, (cumsum, top_p, top_k), out_ty=R.Tensor((2, 1), dtype="float32"))
+                lv2 = R.call_tir(cls.get_index_from_sorted, (cumsum, index, lv1, uniform_sample, sample_indices), out_ty=R.Tensor((3, 1), dtype="int64"))
+                gv1: R.Tuple(R.Tensor((3, 1), dtype="int64"), R.Tuple(R.Any)) = lv2, (_io,)
                 R.output(gv1)
             return gv1
     # fmt: on
@@ -1107,9 +1111,9 @@ def test_sample_top_p_top_k_from_sorted_prob():
 
     tvm.ir.assert_structural_equal(mod, Expected)
 
-    target = tvm.target.Target("cuda -libs=thrust", host="llvm")
+    target = tvm.target.Target({"kind": "cuda", "libs": ["thrust"]}, host="llvm")
     with target:
-        mod = tir.transform.DefaultGPUSchedule()(mod)
+        mod = s_tir.transform.DefaultGPUSchedule()(mod)
 
     ex = tvm.compile(mod, target)
     dev = tvm.cuda(0)
@@ -1131,7 +1135,8 @@ def test_sample_top_p_top_k_from_sorted_prob():
     tvm.testing.assert_allclose(res[0].numpy(), np.array([[2], [0], [0]]).astype(np.int64))
 
 
-@tvm.testing.requires_gpu
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_renormalize_top_p_top_k_prob():
     prob_shape = (2, 3)
     sample_shape = (2, 1)
@@ -1148,20 +1153,20 @@ def test_renormalize_top_p_top_k_prob():
             return z0
 
     # fmt: off
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def filter_with_top_p_top_k(A: T.Buffer((T.int64(2), T.int64(3)), "float32"), B: T.Buffer((T.int64(2), T.int64(1)), "float32"), filter_with_top_p_top_k: T.Buffer((T.int64(2), T.int64(3)), "float32")):
-            T.func_attr({"tir.noalias": True})
-            # with T.block("root"):
+            T.func_attr({"tirx.noalias": True})
+            # with T.sblock("root"):
             for i, j in T.grid(T.int64(2), T.int64(3)):
-                with T.block("filter_with_top_p_top_k"):
+                with T.sblock("filter_with_top_p_top_k"):
                     v_i, v_j = T.axis.remap("SS", [i, j])
                     T.reads(B[v_i, T.int64(0)], A[v_i, v_j])
                     T.writes(filter_with_top_p_top_k[v_i, v_j])
                     filter_with_top_p_top_k[v_i, v_j] = T.Select(B[v_i, T.int64(0)] <= A[v_i, v_j], A[v_i, v_j], T.float32(0))
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def get_renorm_cutoff(A: T.handle, B: T.handle, C: T.handle, D: T.handle, E: T.handle):
             batch, vocab_size = T.int64(), T.int64()
             sorted_prob = T.match_buffer(A, (batch, vocab_size))
@@ -1169,9 +1174,9 @@ def test_renormalize_top_p_top_k_prob():
             top_p = T.match_buffer(C, (batch, 1))
             top_k = T.match_buffer(D, (batch, 1), "int64")
             cutoff = T.match_buffer(E, (batch, 1))
-            # with T.block("root"):
+            # with T.sblock("root"):
             for ax0, ax1 in T.grid(batch, vocab_size):
-                with T.block("T_get_renorm_prob"):
+                with T.sblock("T_get_renorm_prob"):
                     v_ax0, v_ax1 = T.axis.remap("SS", [ax0, ax1])
                     T.reads(cumsum_sorted[v_ax0, T.min(T.min(T.int64(0), v_ax1), v_ax1 + T.int64(1)):T.min(T.min(T.int64(0), v_ax1), v_ax1 + T.int64(1)) + (T.max(T.max(T.int64(0), v_ax1), v_ax1 + T.int64(1)) + T.int64(1) - T.min(T.min(T.int64(0), v_ax1), v_ax1 + T.int64(1)))], top_p[v_ax0, 0], top_k[v_ax0, 0], sorted_prob[v_ax0, T.min(T.min(T.int64(0), v_ax1), v_ax1 + T.int64(1)):T.min(T.min(T.int64(0), v_ax1), v_ax1 + T.int64(1)) + (T.max(T.max(T.int64(0), v_ax1), v_ax1 + T.int64(1)) + T.int64(1) - T.min(T.min(T.int64(0), v_ax1), v_ax1 + T.int64(1)))])
                     T.writes(cutoff[v_ax0, 0])
@@ -1186,25 +1191,25 @@ def test_renormalize_top_p_top_k_prob():
                                     cutoff[v_ax0, 0] = sorted_prob[v_ax0, v_ax1 + T.int64(1)]
 
         @R.function
-        def _initialize_effect() -> R.Tuple(R.Object):
+        def _initialize_effect() -> R.Tuple(R.Any):
             with R.dataflow():
-                _io: R.Object = R.null_value()
-                lv: R.Tuple(R.Object) = (_io,)
-                gv: R.Tuple(R.Object) = lv
+                _io: R.Any = R.null_value()
+                lv: R.Tuple(R.Any) = (_io,)
+                gv: R.Tuple(R.Any) = lv
                 R.output(gv)
             return gv
 
         @R.function
-        def foo(prob: R.Tensor((2, 3), dtype="float32"), sorted_prob: R.Tensor((2, 3), dtype="float32"), top_p: R.Tensor((2, 1), dtype="float32"), top_k: R.Tensor((2, 1), dtype="int64"), _io: R.Object) -> R.Tuple(R.Tensor((2, 3), dtype="float32"), R.Tuple(R.Object)):
+        def foo(prob: R.Tensor((2, 3), dtype="float32"), sorted_prob: R.Tensor((2, 3), dtype="float32"), top_p: R.Tensor((2, 1), dtype="float32"), top_k: R.Tensor((2, 1), dtype="int64"), _io: R.Any) -> R.Tuple(R.Tensor((2, 3), dtype="float32"), R.Tuple(R.Any)):
             R.func_attr({"num_input": 5})
             cls = Expected
             with R.dataflow():
-                cumsum: R.Tensor((2, 3), dtype="float32") = R.cumsum(sorted_prob, axis=1, dtype="void", exclusive=None)
-                lv1 = R.call_tir(cls.get_renorm_cutoff, (sorted_prob, cumsum, top_p, top_k), out_sinfo=R.Tensor((2, 1), dtype="float32"))
-                lv2 = R.call_tir(cls.filter_with_top_p_top_k, (prob, lv1), out_sinfo=R.Tensor((2, 3), dtype="float32"))
+                cumsum: R.Tensor((2, 3), dtype="float32") = R.cumsum(sorted_prob, axis=1, dtype=None, exclusive=None)
+                lv1 = R.call_tir(cls.get_renorm_cutoff, (sorted_prob, cumsum, top_p, top_k), out_ty=R.Tensor((2, 1), dtype="float32"))
+                lv2 = R.call_tir(cls.filter_with_top_p_top_k, (prob, lv1), out_ty=R.Tensor((2, 3), dtype="float32"))
                 sum: R.Tensor((2, 1), dtype="float32") = R.sum(lv2, axis=[1], keepdims=True)
                 divide: R.Tensor((2, 3), dtype="float32") = R.divide(lv2, sum)
-                gv1: R.Tuple(R.Tensor((2, 3), dtype="float32"), R.Tuple(R.Object)) = divide, (_io,)
+                gv1: R.Tuple(R.Tensor((2, 3), dtype="float32"), R.Tuple(R.Any)) = divide, (_io,)
                 R.output(gv1)
             return gv1
     # fmt: on
@@ -1224,10 +1229,10 @@ def test_renormalize_top_p_top_k_prob():
 
     tvm.ir.assert_structural_equal(mod, Expected)
 
-    target = tvm.target.Target("cuda -libs=thrust", host="llvm")
+    target = tvm.target.Target({"kind": "cuda", "libs": ["thrust"]}, host="llvm")
     with target:
         mod = relax.transform.LegalizeOps()(mod)
-        mod = tir.transform.DefaultGPUSchedule()(mod)
+        mod = s_tir.transform.DefaultGPUSchedule()(mod)
 
     ex = tvm.compile(mod, target)
     dev = tvm.cuda(0)
@@ -1257,7 +1262,7 @@ def test_sort_argsort_topk():
             z2 = op.topk(x, k=2, axis=-1)
             return z0, z1, z2
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
         @R.function
         def foo(x: R.Tensor(("seq_len", 64), dtype="float16")):

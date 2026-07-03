@@ -52,7 +52,7 @@ Expr concat(Expr tensors, ffi::Optional<int64_t> axis);
  * \param axis The axes at which the input array are expanded.
  * \return The transformed result.
  */
-Expr expand_dims(Expr x, ffi::Array<Integer> axis);
+Expr expand_dims(Expr x, ffi::Array<int64_t> axis);
 
 /*!
  * \brief Flatten all the tensor dimensions into one.
@@ -72,7 +72,7 @@ Expr flatten(Expr x);
  * \param input axis_separators Array of values for input buffer.
  * \return The transformed result.
  */
-Expr layout_transform(Expr x, tir::IndexMap index_map, ffi::Optional<PrimValue> pad_value,
+Expr layout_transform(Expr x, tirx::IndexMap index_map, ffi::Optional<PrimExpr> pad_value,
                       ffi::Optional<ffi::Array<IntImm>> axis_separators,
                       ffi::Optional<ffi::Array<IntImm>> input_axis_separators = std::nullopt);
 
@@ -82,7 +82,7 @@ Expr layout_transform(Expr x, tir::IndexMap index_map, ffi::Optional<PrimValue> 
  * \param axes The target axes order, reverse order if not specified.
  * \return The transposed result.
  */
-Expr permute_dims(Expr x, ffi::Optional<ffi::Array<Integer>> axes);
+Expr permute_dims(Expr x, ffi::Optional<ffi::Array<int64_t>> axes);
 
 /*!
  * \brief Reshape the input array, supporting `-1` inference in the new
@@ -117,14 +117,14 @@ Expr split(Expr x, ffi::Variant<IntImm, ffi::Array<IntImm>> indices_or_sections,
  * If any specified axis has dimension that does not equal 1, it is an error.
  * \return The squeezed result.
  */
-Expr squeeze(Expr x, ffi::Optional<ffi::Array<Integer>> axis);
+Expr squeeze(Expr x, ffi::Optional<ffi::Array<int64_t>> axis);
 /*!
  * \brief Stack tensors along the specified axis.
  * \param tensors The input tensors to be stacked.
  * \param axis The axis along which the tensors will be stacked.
  * \return The stacked result.
  */
-Expr stack(Expr tensors, ffi::Optional<Integer> axis);
+Expr stack(Expr tensors, ffi::Optional<int64_t> axis);
 /*!
  * \brief Return a summation of data to the shape of collapse_target.
  * For details, please see the operator `relax.collapse_sum_to`.
@@ -171,7 +171,7 @@ Expr repeat(Expr data, int repeats, ffi::Optional<int64_t> axis = std::nullopt);
  * \param repeats The number of repetitions of data along each axis.
  * \return The computed result.
  */
-Expr tile(Expr data, ffi::Array<Integer> repeats);
+Expr tile(Expr data, ffi::Array<int64_t> repeats);
 
 /*!
  * \brief Reverses the order of elements along given axis.
@@ -179,7 +179,17 @@ Expr tile(Expr data, ffi::Array<Integer> repeats);
  * \param axis The axis to flip on
  * \return The computed result.
  */
-Expr flip(Expr data, Integer axis);
+Expr flip(Expr data, int64_t axis);
+
+/*!
+ * \brief Reverses variable length slices along seq_axis.
+ * \param data The input tensor.
+ * \param seq_lengths A 1-D tensor containing sequence lengths for each batch.
+ * \param seq_axis The axis along which to reverse.
+ * \param batch_axis The axis that indexes the batch.
+ * \return The computed result.
+ */
+Expr reverse_sequence(Expr data, Expr seq_lengths, int64_t seq_axis, int64_t batch_axis);
 
 /*!
  * \brief Gather elements from a tensor using indices.
@@ -283,7 +293,7 @@ Expr scatter_nd(Expr data, Expr indices, Expr updates, ffi::String reduction);
  * \param step The how many elements to skip in
  * \return  The computed result tensor with the same shape as `data`.
  */
-Expr slice_scatter(Expr input, Expr src, int axis, PrimValue start, PrimValue end, PrimValue step);
+Expr slice_scatter(Expr input, Expr src, int axis, PrimExpr start, PrimExpr end, PrimExpr step);
 
 /*!
  * \brief Returns a one-hot tensor.
@@ -294,7 +304,7 @@ Expr slice_scatter(Expr input, Expr src, int axis, PrimValue start, PrimValue en
  * \param axis The axis to fill.
  * \return The computed result.
  */
-Expr one_hot(Expr indices, PrimValue on_value, PrimValue off_value, int depth, int axis);
+Expr one_hot(Expr indices, PrimExpr on_value, PrimExpr off_value, int depth, int axis);
 
 }  // namespace relax
 }  // namespace tvm

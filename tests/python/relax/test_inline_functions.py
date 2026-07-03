@@ -14,12 +14,15 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: F401
 
 import pytest
 
 import tvm
 import tvm.testing
-from tvm.script import relax as R, ir as I, tir as T
+from tvm.script import ir as I
+from tvm.script import relax as R
+from tvm.script import tirx as T
 
 
 @pytest.mark.parametrize("key_type", [tvm.ir.GlobalVar, str])
@@ -52,9 +55,9 @@ def test_inline_simple(key_type):
         return D
 
     gvar = Before.get_global_var("subroutine")
-    if key_type == tvm.ir.GlobalVar:
+    if key_type is tvm.ir.GlobalVar:
         key = gvar
-    elif key_type == str:
+    elif key_type is str:
         key = gvar.name_hint
     else:
         raise TypeError(f"Unknown key_type: {key_type}")
@@ -168,8 +171,8 @@ def test_subroutine_with_symbolic_vars():
     """Inlined subroutines should use the caller's symbolic variables
 
     Before inlining, the subroutine and the caller have distinct
-    `tir::Var` for each symbolic variables.  After inlining, only the
-    caller's `tir::Var` symbolic variables should remain.
+    `tirx::Var` for each symbolic variables.  After inlining, only the
+    caller's `tirx::Var` symbolic variables should remain.
     """
 
     @I.ir_module
@@ -347,7 +350,7 @@ def test_error_when_inlining_recursive_function():
         @R.function(private=True)
         def subroutine() -> R.Tensor([], "int64"):
             R.func_attr({"relax.force_pure": True})
-            cond = R.call_packed("dummy_function", sinfo_args=R.Tensor([], "bool"))
+            cond = R.call_packed("dummy_function", ty_args=R.Tensor([], "bool"))
             if cond:
                 Out = Before.subroutine()
             else:
@@ -372,7 +375,7 @@ def test_error_when_inlining_mutually_recursive_functions():
         @R.function(private=True)
         def subroutine_a() -> R.Tensor([], "int64"):
             R.func_attr({"relax.force_pure": True})
-            cond = R.call_packed("dummy_function", sinfo_args=R.Tensor([], "bool"))
+            cond = R.call_packed("dummy_function", ty_args=R.Tensor([], "bool"))
             if cond:
                 Out = Before.subroutine_b()
             else:
@@ -383,7 +386,7 @@ def test_error_when_inlining_mutually_recursive_functions():
         @R.function(private=True)
         def subroutine_b() -> R.Tensor([], "int64"):
             R.func_attr({"relax.force_pure": True})
-            cond = R.call_packed("dummy_function", sinfo_args=R.Tensor([], "bool"))
+            cond = R.call_packed("dummy_function", ty_args=R.Tensor([], "bool"))
             if cond:
                 Out = Before.subroutine_a()
             else:

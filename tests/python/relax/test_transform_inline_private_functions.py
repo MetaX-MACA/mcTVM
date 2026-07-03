@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: F401
 
 import pytest
 
@@ -23,7 +24,7 @@ import tvm.testing
 from tvm import relax
 from tvm.script import ir as I
 from tvm.script import relax as R
-from tvm.script import tir as T
+from tvm.script import tirx as T
 
 
 def test_inline_simple():
@@ -87,7 +88,7 @@ def test_skip_inline_of_recursive_functions():
         @R.function(private=True)
         def subroutine() -> R.Tensor([], "int64"):
             R.func_attr({"relax.force_pure": True})
-            cond = R.call_packed("dummy_function", sinfo_args=R.Tensor([], "bool"))
+            cond = R.call_packed("dummy_function", ty_args=R.Tensor([], "bool"))
             if cond:
                 Out = Before.subroutine()
             else:

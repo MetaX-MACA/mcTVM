@@ -1,3 +1,4 @@
+# isort: skip_file
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -16,10 +17,9 @@
 # under the License.
 # pylint: disable=invalid-name, wrong-import-position
 """The Relax IR namespace containing the IR, type, operator, builder, vm, etc."""
+
 from tvm.runtime import vm
 from tvm.runtime.vm import VirtualMachine, VMInstrumentReturnKind
-
-from .type_converter import args_converter
 
 # Expr
 from .expr import (
@@ -43,16 +43,17 @@ from .expr import (
     Call,
     If,
     Constant,
-    PrimValue,
     DataTypeImm,
     StringImm,
+    prim_value,
 )
 
 from .expr import const, extern, get_shape_of
 
 # Type
-from .ty import (
+from .type import (
     Type,
+    AnyType,
     ObjectType,
     ShapeType,
     TensorType,
@@ -79,17 +80,6 @@ from .block_builder import BlockBuilder
 # ExprFunctor
 from .expr_functor import ExprFunctor, PyExprVisitor, PyExprMutator
 
-# StructInfo
-from .struct_info import (
-    StructInfo,
-    ObjectStructInfo,
-    PrimStructInfo,
-    ShapeStructInfo,
-    TensorStructInfo,
-    TupleStructInfo,
-    FuncStructInfo,
-)
-
 # pipeline
 from .pipeline import get_default_pipeline
 from .pipeline import get_pipeline
@@ -105,11 +95,11 @@ from .base_py_module import BasePyModule
 from . import exec_builder
 from . import expr
 from . import ty
+from . import type
 from . import analysis
 from . import transform
 from . import block_builder
 from . import op
-from . import struct_info
 from . import backend
 from . import training
 from . import distributed
@@ -120,3 +110,7 @@ from . import utils
 from .vm_build import build, VMExecutable
 
 from .binding_rewrite import DataflowBlockRewrite
+
+import tvm.script
+
+tvm.script.register_dialect("relax", "tvm.relax.script")

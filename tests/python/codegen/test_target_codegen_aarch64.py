@@ -20,11 +20,12 @@ Codegen tests for AArch64
 """
 
 import re
+
 import pytest
 
 import tvm
-from tvm import te
-from tvm.script import tir as T
+from tvm.script import ir as I
+from tvm.script import tirx as T
 from tvm.target.codegen import llvm_version_major
 
 
@@ -36,28 +37,35 @@ from tvm.target.codegen import llvm_version_major
     ["float", "float16", "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64"],
 )
 def test_mul(dtype):
-    target = "llvm -mtriple=aarch64-linux-gnu -mattr=+sve"
+    target = {"kind": "llvm", "mtriple": "aarch64-linux-gnu", "mattr": ["+sve"]}
 
-    def check_correct_assembly(type):
-        m = te.var("m")
-        A = te.placeholder(m, dtype=type, name="A")
-        B = te.placeholder(m, dtype=type, name="B")
-        C = te.compute((m), lambda i: A[i] * B[i], name="C")
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(var_A: T.handle, var_B: T.handle, var_C: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            m = T.int32()
+            A = T.match_buffer(var_A, (m,), dtype=dtype)
+            B = T.match_buffer(var_B, (m,), dtype=dtype)
+            C = T.match_buffer(var_C, (m,), dtype=dtype)
+            for i in range(m):
+                with T.sblock("C"):
+                    v_i = T.axis.spatial(m, i)
+                    T.reads(A[v_i], B[v_i])
+                    T.writes(C[v_i])
+                    C[v_i] = A[v_i] * B[v_i]
 
-        with tvm.target.Target(target):
-            f = tvm.tir.build(te.create_prim_func([A, B, C]))
+    with tvm.target.Target(target):
+        f = tvm.tirx.build(Module)
 
-        # Verify we see SVE load instructions and mul instructions using z registers
-        assembly = f.inspect_source("asm")
-        loads = re.findall("ld1[whdb]	{ z", assembly)
-        matches = re.findall(
-            r"mul\tz[0-9].[shdb],( p[0-9]/[m],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
-        )
+    assembly = f.inspect_source("asm")
+    loads = re.findall("ld1[whdb]	{ z", assembly)
+    matches = re.findall(
+        r"mul\tz[0-9].[shdb],( p[0-9]/[m],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
+    )
 
-        assert len(loads) > 1
-        assert len(matches) > 1
-
-    check_correct_assembly(type=dtype)
+    assert len(loads) > 1
+    assert len(matches) > 1
 
 
 @pytest.mark.skipif(
@@ -68,28 +76,35 @@ def test_mul(dtype):
     ["float", "float16", "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64"],
 )
 def test_add(dtype):
-    target = "llvm -mtriple=aarch64-linux-gnu -mattr=+sve"
+    target = {"kind": "llvm", "mtriple": "aarch64-linux-gnu", "mattr": ["+sve"]}
 
-    def check_correct_assembly(type):
-        m = te.var("m")
-        A = te.placeholder(m, dtype=type, name="A")
-        B = te.placeholder(m, dtype=type, name="B")
-        C = te.compute((m), lambda i: A[i] + B[i], name="C")
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(var_A: T.handle, var_B: T.handle, var_C: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            m = T.int32()
+            A = T.match_buffer(var_A, (m,), dtype=dtype)
+            B = T.match_buffer(var_B, (m,), dtype=dtype)
+            C = T.match_buffer(var_C, (m,), dtype=dtype)
+            for i in range(m):
+                with T.sblock("C"):
+                    v_i = T.axis.spatial(m, i)
+                    T.reads(A[v_i], B[v_i])
+                    T.writes(C[v_i])
+                    C[v_i] = A[v_i] + B[v_i]
 
-        with tvm.target.Target(target):
-            f = tvm.tir.build(te.create_prim_func([A, B, C]))
+    with tvm.target.Target(target):
+        f = tvm.tirx.build(Module)
 
-        # Verify we see SVE load instructions and add instructions using z registers
-        assembly = f.inspect_source("asm")
-        loads = re.findall("ld1[whdb]	{ z", assembly)
-        matches = re.findall(
-            r"add\tz[0-9].[shdb],( p[0-9]/[m],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
-        )
+    assembly = f.inspect_source("asm")
+    loads = re.findall("ld1[whdb]	{ z", assembly)
+    matches = re.findall(
+        r"add\tz[0-9].[shdb],( p[0-9]/[m],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
+    )
 
-        assert len(loads) > 1
-        assert len(matches) > 1
-
-    check_correct_assembly(type=dtype)
+    assert len(loads) > 1
+    assert len(matches) > 1
 
 
 @pytest.mark.skipif(
@@ -100,28 +115,35 @@ def test_add(dtype):
     ["float", "float16", "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64"],
 )
 def test_sub(dtype):
-    target = "llvm -mtriple=aarch64-linux-gnu -mattr=+sve"
+    target = {"kind": "llvm", "mtriple": "aarch64-linux-gnu", "mattr": ["+sve"]}
 
-    def check_correct_assembly(type):
-        m = te.var("m")
-        A = te.placeholder(m, dtype=type, name="A")
-        B = te.placeholder(m, dtype=type, name="B")
-        C = te.compute((m), lambda i: A[i] - B[i], name="C")
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(var_A: T.handle, var_B: T.handle, var_C: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            m = T.int32()
+            A = T.match_buffer(var_A, (m,), dtype=dtype)
+            B = T.match_buffer(var_B, (m,), dtype=dtype)
+            C = T.match_buffer(var_C, (m,), dtype=dtype)
+            for i in range(m):
+                with T.sblock("C"):
+                    v_i = T.axis.spatial(m, i)
+                    T.reads(A[v_i], B[v_i])
+                    T.writes(C[v_i])
+                    C[v_i] = A[v_i] - B[v_i]
 
-        with tvm.target.Target(target):
-            f = tvm.tir.build(te.create_prim_func([A, B, C]))
+    with tvm.target.Target(target):
+        f = tvm.tirx.build(Module)
 
-        # Verify we see SVE load instructions and sub instructions using z registers
-        assembly = f.inspect_source("asm")
-        loads = re.findall("ld1[whdb]	{ z", assembly)
-        matches = re.findall(
-            r"sub\tz[0-9].[shdb],( p[0-9]/[m],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
-        )
+    assembly = f.inspect_source("asm")
+    loads = re.findall("ld1[whdb]	{ z", assembly)
+    matches = re.findall(
+        r"sub\tz[0-9].[shdb],( p[0-9]/[m],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
+    )
 
-        assert len(loads) > 1
-        assert len(matches) > 1
-
-    check_correct_assembly(type=dtype)
+    assert len(loads) > 1
+    assert len(matches) > 1
 
 
 @pytest.mark.skipif(
@@ -132,29 +154,46 @@ def test_sub(dtype):
     ["float", "float16", "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64"],
 )
 def test_muladd(dtype):
-    target = "llvm -mtriple=aarch64-linux-gnu -mattr=+sve"
+    target = {"kind": "llvm", "mtriple": "aarch64-linux-gnu", "mattr": ["+sve"]}
 
-    def check_correct_assembly(type):
-        m = te.var("m")
-        A = te.placeholder(m, dtype=type, name="A")
-        B = te.placeholder(m, dtype=type, name="B")
-        C = te.placeholder(m, dtype=type, name="C")
-        D = te.compute((m), lambda i: A[i] * B[i] + C[i], name="D")
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(var_A: T.handle, var_B: T.handle, var_C: T.handle, var_D: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            m = T.int32()
+            A = T.match_buffer(var_A, (m,), dtype=dtype)
+            B = T.match_buffer(var_B, (m,), dtype=dtype)
+            C = T.match_buffer(var_C, (m,), dtype=dtype)
+            D = T.match_buffer(var_D, (m,), dtype=dtype)
+            for i in range(m):
+                with T.sblock("D"):
+                    v_i = T.axis.spatial(m, i)
+                    T.reads(A[v_i], B[v_i], C[v_i])
+                    T.writes(D[v_i])
+                    D[v_i] = A[v_i] * B[v_i] + C[v_i]
 
-        with tvm.target.Target(target):
-            f = tvm.tir.build(te.create_prim_func([A, B, C, D]))
+    with tvm.target.Target(target):
+        f = tvm.tirx.build(Module)
 
-        # Verify we see SVE load instructions and either mad or mla instructions using z registers
-        assembly = f.inspect_source("asm")
-        loads = re.findall("ld1[whdb]	{ z", assembly)
-        matches = re.findall(
-            r"mad|mla\tz[0-9].[shdb],( p[0-9]/[m],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
-        )
+    assembly = f.inspect_source("asm")
+    loads = re.findall("ld1[whdb]	{ z", assembly)
+    matches = re.findall(
+        # Group the mad|mla alternation: a top-level alternation would let a bare
+        # "mad" match anywhere in the assembly (e.g. inside scalar "fmadd").
+        r"(?:mad|mla)\tz[0-9].[shdb],( p[0-9]/[m],)? z[0-9].[shdb], z[0-9].[shdb]",
+        assembly,
+    )
 
-        assert len(loads) > 1
-        assert len(matches) > 1
+    if llvm_version_major() >= 18 and dtype in ("float", "float16"):
+        # Newer LLVM cost models (observed with LLVM 20) prefer a fixed-width
+        # NEON main loop over a scalable SVE loop for floating-point fmuladd
+        # on generic AArch64 targets, so also accept the NEON form.
+        loads += re.findall(r"ld[rp]\tq[0-9]", assembly)
+        matches += re.findall(r"fml[as]\tv[0-9]+\.[0-9]+[hs]", assembly)
 
-    check_correct_assembly(type=dtype)
+    assert len(loads) > 1
+    assert len(matches) > 1
 
 
 @pytest.mark.skipif(
@@ -165,32 +204,39 @@ def test_muladd(dtype):
     ["float", "float16", "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64"],
 )
 def test_max(dtype):
-    target = "llvm -mtriple=aarch64-linux-gnu -mattr=+sve"
+    target = {"kind": "llvm", "mtriple": "aarch64-linux-gnu", "mattr": ["+sve"]}
 
-    def check_correct_assembly(type):
-        m = te.var("m")
-        A = te.placeholder(m, dtype=type, name="A")
-        B = te.placeholder(m, dtype=type, name="B")
-        C = te.compute((m), lambda i: tvm.te.max(A[i], B[i]))
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(var_A: T.handle, var_B: T.handle, var_C: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            m = T.int32()
+            A = T.match_buffer(var_A, (m,), dtype=dtype)
+            B = T.match_buffer(var_B, (m,), dtype=dtype)
+            C = T.match_buffer(var_C, (m,), dtype=dtype)
+            for i in range(m):
+                with T.sblock("C"):
+                    v_i = T.axis.spatial(m, i)
+                    T.reads(A[v_i], B[v_i])
+                    T.writes(C[v_i])
+                    C[v_i] = T.max(A[v_i], B[v_i])
 
-        with tvm.target.Target(target):
-            f = tvm.tir.build(te.create_prim_func([A, B, C]))
+    with tvm.target.Target(target):
+        f = tvm.tirx.build(Module)
 
-        # Verify we see SVE load instructions and cmgt + sel instructions or a max instruction, all using z registers
-        assembly = f.inspect_source("asm")
-        loads = re.findall("ld1[whdb]	{ z", assembly)
-        compare = re.findall(
-            r"cmgt\tp[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
-        )
-        select = re.findall("sel\tz[0-9].[shdb], p[0-9], z[0-9].[shdb], z[0-9].[shdb]", assembly)
-        max = re.findall(
-            r"max\tz[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
-        )
+    assembly = f.inspect_source("asm")
+    loads = re.findall("ld1[whdb]	{ z", assembly)
+    compare = re.findall(
+        r"cmgt\tp[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
+    )
+    select = re.findall("sel\tz[0-9].[shdb], p[0-9], z[0-9].[shdb], z[0-9].[shdb]", assembly)
+    max_instr = re.findall(
+        r"max\tz[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
+    )
 
-        assert len(loads) > 1
-        assert (len(compare) > 1 and len(select) == len(compare)) or len(max) > 1
-
-    check_correct_assembly(type=dtype)
+    assert len(loads) > 1
+    assert (len(compare) > 1 and len(select) == len(compare)) or len(max_instr) > 1
 
 
 @pytest.mark.skipif(
@@ -201,32 +247,39 @@ def test_max(dtype):
     ["float", "float16", "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64"],
 )
 def test_min(dtype):
-    target = "llvm -mtriple=aarch64-linux-gnu -mattr=+sve"
+    target = {"kind": "llvm", "mtriple": "aarch64-linux-gnu", "mattr": ["+sve"]}
 
-    def check_correct_assembly(type):
-        m = te.var("m")
-        A = te.placeholder(m, dtype=type, name="A")
-        B = te.placeholder(m, dtype=type, name="B")
-        C = te.compute((m), lambda i: tvm.te.min(A[i], B[i]))
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(var_A: T.handle, var_B: T.handle, var_C: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            m = T.int32()
+            A = T.match_buffer(var_A, (m,), dtype=dtype)
+            B = T.match_buffer(var_B, (m,), dtype=dtype)
+            C = T.match_buffer(var_C, (m,), dtype=dtype)
+            for i in range(m):
+                with T.sblock("C"):
+                    v_i = T.axis.spatial(m, i)
+                    T.reads(A[v_i], B[v_i])
+                    T.writes(C[v_i])
+                    C[v_i] = T.min(A[v_i], B[v_i])
 
-        with tvm.target.Target(target):
-            f = tvm.tir.build(te.create_prim_func([A, B, C]))
+    with tvm.target.Target(target):
+        f = tvm.tirx.build(Module)
 
-        # Verify we see SVE load instructions and cmgt + sel instructions or a min instruction, all using z registers
-        assembly = f.inspect_source("asm")
-        loads = re.findall("ld1[whdb]	{ z", assembly)
-        compare = re.findall(
-            r"cmgt\tp[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
-        )
-        select = re.findall("sel\tz[0-9].[shdb], p[0-9], z[0-9].[shdb], z[0-9].[shdb]", assembly)
-        min = re.findall(
-            r"min\tz[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
-        )
+    assembly = f.inspect_source("asm")
+    loads = re.findall("ld1[whdb]	{ z", assembly)
+    compare = re.findall(
+        r"cmgt\tp[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
+    )
+    select = re.findall("sel\tz[0-9].[shdb], p[0-9], z[0-9].[shdb], z[0-9].[shdb]", assembly)
+    min_instr = re.findall(
+        r"min\tz[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
+    )
 
-        assert len(loads) > 1
-        assert (len(compare) > 1 and len(select) == len(compare)) or len(min) > 1
-
-    check_correct_assembly(type=dtype)
+    assert len(loads) > 1
+    assert (len(compare) > 1 and len(select) == len(compare)) or len(min_instr) > 1
 
 
 @pytest.mark.skipif(
@@ -237,28 +290,35 @@ def test_min(dtype):
     ["float", "float16", "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64"],
 )
 def test_div(dtype):
-    target = "llvm -mtriple=aarch64-linux-gnu -mattr=+sve"
+    target = {"kind": "llvm", "mtriple": "aarch64-linux-gnu", "mattr": ["+sve"]}
 
-    def check_correct_assembly(type):
-        m = te.var("m")
-        A = te.placeholder(m, dtype=type, name="A")
-        B = te.placeholder(m, dtype=type, name="B")
-        C = te.compute((m), lambda i: tvm.te.div(A[i], B[i]))
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(var_A: T.handle, var_B: T.handle, var_C: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            m = T.int32()
+            A = T.match_buffer(var_A, (m,), dtype=dtype)
+            B = T.match_buffer(var_B, (m,), dtype=dtype)
+            C = T.match_buffer(var_C, (m,), dtype=dtype)
+            for i in range(m):
+                with T.sblock("C"):
+                    v_i = T.axis.spatial(m, i)
+                    T.reads(A[v_i], B[v_i])
+                    T.writes(C[v_i])
+                    C[v_i] = tvm.tirx.div(A[v_i], B[v_i])
 
-        with tvm.target.Target(target):
-            f = tvm.tir.build(te.create_prim_func([A, B, C]))
+    with tvm.target.Target(target):
+        f = tvm.tirx.build(Module)
 
-        # Verify we see SVE load instructions and div instructions using z registers
-        assembly = f.inspect_source("asm")
-        loads = re.findall("ld1[whdb]	{ z", assembly)
-        matches = re.findall(
-            r"div\tz[0-9].[shdb],( p[0-9]/[m],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
-        )
+    assembly = f.inspect_source("asm")
+    loads = re.findall("ld1[whdb]	{ z", assembly)
+    matches = re.findall(
+        r"div\tz[0-9].[shdb],( p[0-9]/[m],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
+    )
 
-        assert len(loads) > 1
-        assert len(matches) >= 1
-
-    check_correct_assembly(type=dtype)
+    assert len(loads) > 1
+    assert len(matches) >= 1
 
 
 @pytest.mark.skipif(
@@ -268,28 +328,35 @@ def test_div(dtype):
     "dtype", ["uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64"]
 )
 def test_mod(dtype):
-    target = "llvm -mtriple=aarch64-linux-gnu -mattr=+sve"
+    target = {"kind": "llvm", "mtriple": "aarch64-linux-gnu", "mattr": ["+sve"]}
 
-    def check_correct_assembly(type):
-        m = te.var("m")
-        A = te.placeholder(m, dtype=type, name="A")
-        B = te.placeholder(m, dtype=type, name="B")
-        C = te.compute((m), lambda i: tvm.te.floormod(A[i], B[i]), name="C")
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(var_A: T.handle, var_B: T.handle, var_C: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            m = T.int32()
+            A = T.match_buffer(var_A, (m,), dtype=dtype)
+            B = T.match_buffer(var_B, (m,), dtype=dtype)
+            C = T.match_buffer(var_C, (m,), dtype=dtype)
+            for i in range(m):
+                with T.sblock("C"):
+                    v_i = T.axis.spatial(m, i)
+                    T.reads(A[v_i], B[v_i])
+                    T.writes(C[v_i])
+                    C[v_i] = T.floormod(A[v_i], B[v_i])
 
-        with tvm.target.Target(target):
-            f = tvm.tir.build(te.create_prim_func([A, B, C]))
+    with tvm.target.Target(target):
+        f = tvm.tirx.build(Module)
 
-        # Verify we see SVE load instructions and mls instructions using z registers
-        assembly = f.inspect_source("asm")
-        loads = re.findall("ld1[whdb]	{ z", assembly)
-        matches = re.findall(
-            r"mls\tz[0-9].[shdb],( p[0-9]/[m],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
-        )
+    assembly = f.inspect_source("asm")
+    loads = re.findall("ld1[whdb]	{ z", assembly)
+    matches = re.findall(
+        r"mls\tz[0-9].[shdb],( p[0-9]/[m],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
+    )
 
-        assert len(loads) > 1
-        assert len(matches) > 0
-
-    check_correct_assembly(type=dtype)
+    assert len(loads) > 1
+    assert len(matches) > 0
 
 
 @pytest.mark.skipif(
@@ -300,28 +367,38 @@ def test_mod(dtype):
     ["float", "float16", "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64"],
 )
 def test_eq(dtype):
-    target = "llvm -mtriple=aarch64-linux-gnu -mattr=+sve"
+    target = {"kind": "llvm", "mtriple": "aarch64-linux-gnu", "mattr": ["+sve"]}
 
-    def check_correct_assembly(type):
-        m = te.var("m")
-        A = te.placeholder(m, dtype=type, name="A")
-        B = te.placeholder(m, dtype=type, name="B")
-        C = te.compute((m), lambda i: A[i] == B[i], name="C")
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(var_A: T.handle, var_B: T.handle, var_C: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            m = T.int32()
+            A = T.match_buffer(var_A, (m,), dtype=dtype)
+            B = T.match_buffer(var_B, (m,), dtype=dtype)
+            C = T.match_buffer(var_C, (m,), "bool")
+            for i in range(m):
+                with T.sblock("C"):
+                    v_i = T.axis.spatial(m, i)
+                    T.reads(A[v_i], B[v_i])
+                    T.writes(C[v_i])
+                    C[v_i] = A[v_i] == B[v_i]
 
-        with tvm.target.Target(target):
-            f = tvm.tir.build(te.create_prim_func([A, B, C]))
+    with tvm.target.Target(target):
+        f = tvm.tirx.build(Module)
 
-        # Verify we see SVE load instructions and cmpeq or cmeq instructions using z registers
-        assembly = f.inspect_source("asm")
-        loads = re.findall("ld1[whdb]	{ z", assembly)
-        matches = re.findall(
-            r"cm(p)?eq\tp[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
-        )
+    assembly = f.inspect_source("asm")
+    loads = re.findall("ld1[whdb]	{ z", assembly)
+    matches = re.findall(
+        r"cm(p)?eq\tp[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
+    )
 
-        assert len(loads) > 1
-        assert len(matches) > 1
-
-    check_correct_assembly(type=dtype)
+    assert len(loads) > 1
+    # The number of SVE compares depends on the LLVM cost model: LLVM <= 17
+    # interleaves the scalable loop by two, while LLVM 20 emits a fixed-width
+    # NEON main loop with a single predicated SVE epilogue.
+    assert len(matches) > 0
 
 
 @pytest.mark.skipif(
@@ -332,28 +409,38 @@ def test_eq(dtype):
     ["float", "float16", "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64"],
 )
 def test_neq(dtype):
-    target = "llvm -mtriple=aarch64-linux-gnu -mattr=+sve"
+    target = {"kind": "llvm", "mtriple": "aarch64-linux-gnu", "mattr": ["+sve"]}
 
-    def check_correct_assembly(type):
-        m = te.var("m")
-        A = te.placeholder(m, dtype=type, name="A")
-        B = te.placeholder(m, dtype=type, name="B")
-        C = te.compute((m), lambda i: A[i] != B[i], name="C")
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(var_A: T.handle, var_B: T.handle, var_C: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            m = T.int32()
+            A = T.match_buffer(var_A, (m,), dtype=dtype)
+            B = T.match_buffer(var_B, (m,), dtype=dtype)
+            C = T.match_buffer(var_C, (m,), "bool")
+            for i in range(m):
+                with T.sblock("C"):
+                    v_i = T.axis.spatial(m, i)
+                    T.reads(A[v_i], B[v_i])
+                    T.writes(C[v_i])
+                    C[v_i] = A[v_i] != B[v_i]
 
-        with tvm.target.Target(target):
-            f = tvm.tir.build(te.create_prim_func([A, B, C]))
+    with tvm.target.Target(target):
+        f = tvm.tirx.build(Module)
 
-        # Verify we see SVE load instructions and cmpgt, cmgt, cmpne or cmne instructions, all using z registers
-        assembly = f.inspect_source("asm")
-        loads = re.findall("ld1[whdb]	{ z", assembly)
-        matches = re.findall(
-            r"cm(p)?(gt|ne)\tp[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
-        )
+    assembly = f.inspect_source("asm")
+    loads = re.findall("ld1[whdb]	{ z", assembly)
+    matches = re.findall(
+        r"cm(p)?(gt|ne)\tp[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
+    )
 
-        assert len(loads) > 1
-        assert len(matches) > 1
-
-    check_correct_assembly(type=dtype)
+    assert len(loads) > 1
+    # The number of SVE compares depends on the LLVM cost model: LLVM <= 17
+    # interleaves the scalable loop by two, while LLVM 20 emits a fixed-width
+    # NEON main loop with a single predicated SVE epilogue.
+    assert len(matches) > 0
 
 
 @pytest.mark.skipif(
@@ -363,28 +450,35 @@ def test_neq(dtype):
     "dtype", ["uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64"]
 )
 def test_or(dtype):
-    target = "llvm -mtriple=aarch64-linux-gnu -mattr=+sve"
+    target = {"kind": "llvm", "mtriple": "aarch64-linux-gnu", "mattr": ["+sve"]}
 
-    def check_correct_assembly(type):
-        m = te.var("m")
-        A = te.placeholder(m, dtype=type, name="A")
-        B = te.placeholder(m, dtype=type, name="B")
-        C = te.compute((m), lambda i: A[i] | B[i], name="C")
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(var_A: T.handle, var_B: T.handle, var_C: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            m = T.int32()
+            A = T.match_buffer(var_A, (m,), dtype=dtype)
+            B = T.match_buffer(var_B, (m,), dtype=dtype)
+            C = T.match_buffer(var_C, (m,), dtype=dtype)
+            for i in range(m):
+                with T.sblock("C"):
+                    v_i = T.axis.spatial(m, i)
+                    T.reads(A[v_i], B[v_i])
+                    T.writes(C[v_i])
+                    C[v_i] = A[v_i] | B[v_i]
 
-        with tvm.target.Target(target):
-            f = tvm.tir.build(te.create_prim_func([A, B, C]))
+    with tvm.target.Target(target):
+        f = tvm.tirx.build(Module)
 
-        # Verify we see SVE load instructions and orr instructions using z registers
-        assembly = f.inspect_source("asm")
-        loads = re.findall("ld1[whdb]	{ z", assembly)
-        matches = re.findall(
-            r"orr\tz[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
-        )
+    assembly = f.inspect_source("asm")
+    loads = re.findall("ld1[whdb]	{ z", assembly)
+    matches = re.findall(
+        r"orr\tz[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
+    )
 
-        assert len(loads) > 1
-        assert len(matches) > 1
-
-    check_correct_assembly(type=dtype)
+    assert len(loads) > 1
+    assert len(matches) > 1
 
 
 @pytest.mark.skipif(
@@ -394,28 +488,35 @@ def test_or(dtype):
     "dtype", ["uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64"]
 )
 def test_and(dtype):
-    target = "llvm -mtriple=aarch64-linux-gnu -mattr=+sve"
+    target = {"kind": "llvm", "mtriple": "aarch64-linux-gnu", "mattr": ["+sve"]}
 
-    def check_correct_assembly(type):
-        m = te.var("m")
-        A = te.placeholder(m, dtype=type, name="A")
-        B = te.placeholder(m, dtype=type, name="B")
-        C = te.compute((m), lambda i: A[i] & B[i], name="C")
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(var_A: T.handle, var_B: T.handle, var_C: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            m = T.int32()
+            A = T.match_buffer(var_A, (m,), dtype=dtype)
+            B = T.match_buffer(var_B, (m,), dtype=dtype)
+            C = T.match_buffer(var_C, (m,), dtype=dtype)
+            for i in range(m):
+                with T.sblock("C"):
+                    v_i = T.axis.spatial(m, i)
+                    T.reads(A[v_i], B[v_i])
+                    T.writes(C[v_i])
+                    C[v_i] = A[v_i] & B[v_i]
 
-        with tvm.target.Target(target):
-            f = tvm.tir.build(te.create_prim_func([A, B, C]))
+    with tvm.target.Target(target):
+        f = tvm.tirx.build(Module)
 
-        # Verify we see SVE load instructions and and instructions using z registers
-        assembly = f.inspect_source("asm")
-        loads = re.findall("ld1[whdb]	{ z", assembly)
-        matches = re.findall(
-            r"and\tz[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
-        )
+    assembly = f.inspect_source("asm")
+    loads = re.findall("ld1[whdb]	{ z", assembly)
+    matches = re.findall(
+        r"and\tz[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
+    )
 
-        assert len(loads) > 1
-        assert len(matches) > 1
-
-    check_correct_assembly(type=dtype)
+    assert len(loads) > 1
+    assert len(matches) > 1
 
 
 @pytest.mark.skipif(
@@ -425,27 +526,34 @@ def test_and(dtype):
     "dtype", ["uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64"]
 )
 def test_not(dtype):
-    target = "llvm -mtriple=aarch64-linux-gnu -mattr=+sve"
+    target = {"kind": "llvm", "mtriple": "aarch64-linux-gnu", "mattr": ["+sve"]}
 
-    def check_correct_assembly(type):
-        m = te.var("m")
-        A = te.placeholder(m, dtype=type, name="A")
-        C = te.compute((m), lambda i: ~A[i], name="C")
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(var_A: T.handle, var_C: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            m = T.int32()
+            A = T.match_buffer(var_A, (m,), dtype=dtype)
+            C = T.match_buffer(var_C, (m,), dtype=dtype)
+            for i in range(m):
+                with T.sblock("C"):
+                    v_i = T.axis.spatial(m, i)
+                    T.reads(A[v_i])
+                    T.writes(C[v_i])
+                    C[v_i] = ~A[v_i]
 
-        with tvm.target.Target(target):
-            f = tvm.tir.build(te.create_prim_func([A, C]))
+    with tvm.target.Target(target):
+        f = tvm.tirx.build(Module)
 
-        # Verify we see SVE load instructions and eor instructions using z registers
-        assembly = f.inspect_source("asm")
-        loads = re.findall("ld1[whdb]	{ z", assembly)
-        matches = re.findall(
-            r"eor\tz[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
-        )
+    assembly = f.inspect_source("asm")
+    loads = re.findall("ld1[whdb]	{ z", assembly)
+    matches = re.findall(
+        r"eor\tz[0-9].[shdb],( p[0-9]/[zm],)? z[0-9].[shdb], z[0-9].[shdb]", assembly
+    )
 
-        assert len(loads) > 1
-        assert len(matches) > 1
-
-    check_correct_assembly(type=dtype)
+    assert len(loads) > 1
+    assert len(matches) > 1
 
 
 @pytest.mark.skipif(
@@ -459,24 +567,31 @@ def test_not(dtype):
     "dtype", ["uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64"]
 )
 def test_memcpy(dtype):
-    target = "llvm -mtriple=aarch64-linux-gnu -mattr=+sve"
+    target = {"kind": "llvm", "mtriple": "aarch64-linux-gnu", "mattr": ["+sve"]}
 
-    def check_correct_assembly(type):
-        m = te.var("m")
-        A = te.placeholder(m, dtype=type, name="A")
-        B = te.placeholder(m, dtype="int32", name="B")
-        C = te.compute((m), lambda i: A[B[i]], name="C")
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(var_A: T.handle, var_B: T.handle, var_C: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            m = T.int32()
+            A = T.match_buffer(var_A, (m,), dtype=dtype)
+            B = T.match_buffer(var_B, (m,), "int32")
+            C = T.match_buffer(var_C, (m,), dtype=dtype)
+            for i in range(m):
+                with T.sblock("C"):
+                    v_i = T.axis.spatial(m, i)
+                    T.reads(B[v_i], A[B[v_i]])
+                    T.writes(C[v_i])
+                    C[v_i] = A[B[v_i]]
 
-        with tvm.target.Target(target):
-            f = tvm.tir.build(te.create_prim_func([A, B, C]))
+    with tvm.target.Target(target):
+        f = tvm.tirx.build(Module)
 
-        # Verify we see gather instructions in the assembly
-        assembly = f.inspect_source("asm")
-        loads = re.findall("ld1[whdb]	{ z", assembly)
+    assembly = f.inspect_source("asm")
+    loads = re.findall("ld1[whdb]	{ z", assembly)
 
-        assert len(loads) > 0
-
-    check_correct_assembly(type=dtype)
+    assert len(loads) > 0
 
 
 @pytest.mark.skipif(
@@ -488,32 +603,44 @@ def test_memcpy(dtype):
     [
         ("+neon", False),
         ("+sve", True),
-        ("+v9a", True),
+        # Since LLVM 19, SVE/SVE2 are optional extensions of Armv9.0-A, so
+        # "+v9a" no longer implies "+sve" and no vscale_range() is added:
+        # https://releases.llvm.org/19.1.0/docs/ReleaseNotes.html#changes-to-the-aarch64-backend
+        ("+v9a", llvm_version_major() < 19),
         ("+sme", True),
     ],
 )
 def test_vscale_range_function_attribute(mattr, expect_attr):
-    target = f"llvm -mtriple=aarch64-linux-gnu -mattr={mattr}"
+    target = {"kind": "llvm", "mtriple": "aarch64-linux-gnu", "mattr": [mattr]}
 
-    m = te.var("m")
-    A = te.placeholder(m, dtype="float32", name="A")
-    C = te.compute((m), lambda i: A[i] + 1, name="C")
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(var_A: T.handle, var_C: T.handle):
+            T.func_attr({"tirx.noalias": True})
+            m = T.int32()
+            A = T.match_buffer(var_A, (m,))
+            C = T.match_buffer(var_C, (m,))
+            for i in range(m):
+                with T.sblock("C"):
+                    v_i = T.axis.spatial(m, i)
+                    T.reads(A[v_i])
+                    T.writes(C[v_i])
+                    C[v_i] = A[v_i] + T.float32(1)
 
     with tvm.target.Target(target):
-        f = tvm.tir.build(te.create_prim_func([A, C]))
+        f = tvm.tirx.build(Module)
 
     # Check if the vscale_range() attribute exists
     ll = f.inspect_source("ll")
-    attr = re.findall(rf".*vscale_range\(\d+,\d+\)*.", ll)
+    attr = re.findall(r".*vscale_range\(\d+,\d+\)*.", ll)
 
     if expect_attr:
-        assert (
-            len(attr) > 0
-        ), f"Function attribute vscale_range() was not found in generated LLVM IR"
+        assert len(attr) > 0, "Function attribute vscale_range() was not found in generated LLVM IR"
     else:
-        assert (
-            len(attr) == 0
-        ), f"Unexpected function attribute vscale_range() was found in generated LLVM IR"
+        assert len(attr) == 0, (
+            "Unexpected function attribute vscale_range() was found in generated LLVM IR"
+        )
 
 
 if __name__ == "__main__":

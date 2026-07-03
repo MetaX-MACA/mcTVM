@@ -16,11 +16,12 @@
 # under the License.
 # pylint: disable=invalid-name, unused-argument, redefined-argument-from-local
 """Relax Fold Batchnorm into Conv2D."""
+
+from tvm import relax, tirx
 from tvm.ir.module import IRModule
 from tvm.ir.transform import PassContext
 from tvm.relax import Expr
-from tvm.relax.dpl import is_op, rewrite_call, wildcard, is_const, TupleGetItemPattern
-from tvm import relax, tir
+from tvm.relax.dpl import TupleGetItemPattern, is_const, is_op, rewrite_call, wildcard
 
 from . import function_pass
 
@@ -80,19 +81,19 @@ class FoldBatchnormToConv2D:
             bn_attrs = bn_op.attrs
 
             bn_variance = relax.op.add(
-                bn_variance, relax.PrimValue(tir.FloatImm("float32", bn_attrs["epsilon"]))
+                bn_variance, relax.prim_value(tirx.FloatImm("float32", bn_attrs["epsilon"]))
             )
             dino = relax.op.sqrt(bn_variance)
             wt = relax.op.divide(bn_weight, dino)
             bs = relax.op.subtract(bn_bias, relax.op.multiply(bn_mean, wt))
             if conv_attrs["kernel_layout"] == "OIHW":
-                wt = relax.op.reshape(wt, shape=(bn_weight.struct_info.shape[0], 1, 1, 1))
+                wt = relax.op.reshape(wt, shape=(bn_weight.ty.shape[0], 1, 1, 1))
             elif conv_attrs["kernel_layout"] == "IOHW":
-                wt = wt.reshape(1, bn_weight.struct_info.shape[0], 1, 1)
+                wt = wt.reshape(1, bn_weight.ty.shape[0], 1, 1)
             else:
                 return expr
             wt_conv = relax.op.multiply(conv_weight, wt)
-            bs_args = relax.op.reshape(bs, shape=(1, bn_bias.struct_info.shape[0], 1, 1))
+            bs_args = relax.op.reshape(bs, shape=(1, bn_bias.ty.shape[0], 1, 1))
 
             conv_out = relax.Call(conv_op.op, (conv_input, wt_conv), conv_attrs)
             return relax.op.add(conv_out, bs_args)

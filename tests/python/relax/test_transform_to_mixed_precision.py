@@ -16,11 +16,14 @@
 # under the License.
 
 import numpy as np
+
 import tvm
-from tvm import relax
 import tvm.testing
+from tvm import relax
 from tvm.relax.transform import ToMixedPrecision
-from tvm.script.parser import ir as I, relax as R, tir as T
+from tvm.script.parser import ir as I
+from tvm.script.parser import relax as R
+from tvm.script.parser import tirx as T
 
 
 def _assert_test(input, expected=None, expected2=None):
@@ -34,7 +37,7 @@ def _assert_test(input, expected=None, expected2=None):
 
 
 def test_conv2d():
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Input:
         @R.function
         def main(
@@ -45,7 +48,7 @@ def test_conv2d():
                 R.output(gv)
             return gv
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
         @R.function
         def main(
@@ -69,7 +72,7 @@ def test_conv2d():
                 R.output(gv)
             return gv
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected2:
         @R.function
         def main(
@@ -98,7 +101,7 @@ def test_conv2d():
 
 
 def test_conv2d_relu():
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Input:
         @R.function
         def main(
@@ -110,7 +113,7 @@ def test_conv2d_relu():
                 R.output(gv)
             return gv
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
         @R.function
         def main(
@@ -137,7 +140,7 @@ def test_conv2d_relu():
                 R.output(gv)
             return gv
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected2:
         @R.function
         def main(
@@ -166,8 +169,22 @@ def test_conv2d_relu():
     _assert_test(Input, Expected, Expected2)
 
 
+def test_unknown_dtype_is_not_rewritten():
+    @I.ir_module(s_tir=True)
+    class Input:
+        @R.function
+        def main(x: R.Tensor((2, 3), dtype=None)) -> R.Tensor((2, 3), dtype=None):
+            with R.dataflow():
+                gv: R.Tensor((2, 3), dtype=None) = R.nn.relu(x)
+                R.output(gv)
+            return gv
+
+    mod = ToMixedPrecision()(Input)
+    tvm.ir.assert_structural_equal(mod, Input)
+
+
 def test_relu_conv2d_relu():
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Input:
         @R.function
         def main(
@@ -180,7 +197,7 @@ def test_relu_conv2d_relu():
                 R.output(gv2)
             return gv2
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
         @R.function
         def main(
@@ -208,7 +225,7 @@ def test_relu_conv2d_relu():
                 R.output(gv2)
             return gv2
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected2:
         @R.function
         def main(
@@ -239,7 +256,7 @@ def test_relu_conv2d_relu():
 
 
 def test_conv2d_relu_conv2d():
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Input:
         @R.function
         def main(
@@ -254,7 +271,7 @@ def test_conv2d_relu_conv2d():
                 R.output(gv3)
             return gv3
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
         @R.function
         def main(
@@ -295,7 +312,7 @@ def test_conv2d_relu_conv2d():
                 R.output(gv3)
             return gv3
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected2:
         @R.function
         def main(
@@ -340,7 +357,7 @@ def test_conv2d_relu_conv2d():
 
 
 def test_gemm_add_silu():
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Input:
         @R.function
         def main(
@@ -355,7 +372,7 @@ def test_gemm_add_silu():
                 R.output(gv2)
             return gv2
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
         @R.function
         def main(
@@ -374,7 +391,7 @@ def test_gemm_add_silu():
                 R.output(gv2)
             return gv2
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected2:
         @R.function
         def main(
@@ -396,7 +413,7 @@ def test_gemm_add_silu():
 
 
 def test_tuple():
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Input:
         @R.function
         def main(
@@ -415,7 +432,7 @@ def test_tuple():
                 R.output(gv7)
             return gv7
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
         @R.function
         def main(
@@ -484,7 +501,7 @@ def test_tuple():
                 R.output(gv7)
             return gv7
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected2:
         @R.function
         def main(
@@ -556,7 +573,7 @@ def test_tuple():
 
 
 def test_concat_matmul():
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Input:
         @R.function
         def main(
@@ -570,7 +587,7 @@ def test_concat_matmul():
                 R.output(lv14)
             return lv14
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
         @R.function
         def main(
@@ -586,7 +603,7 @@ def test_concat_matmul():
                 R.output(lv14)
             return lv14
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected2:
         @R.function
         def main(
@@ -607,7 +624,7 @@ def test_concat_matmul():
 
 
 def test_conv2d_softmax():
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Input:
         @R.function
         def main(
@@ -620,7 +637,7 @@ def test_conv2d_softmax():
                 R.output(gv2)
             return gv2
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
         @R.function
         def main(
@@ -648,7 +665,7 @@ def test_conv2d_softmax():
                 R.output(gv2)
             return gv2
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected2:
         @R.function
         def main(
@@ -727,7 +744,7 @@ def test_conv2d_bias_conv2d():
                 R.output(gv)
             return gv
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected:
         @R.function
         def main(
@@ -778,7 +795,7 @@ def test_conv2d_bias_conv2d():
                 R.output(gv)
             return gv
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Expected2:
         @R.function
         def main(
@@ -1037,24 +1054,24 @@ def test_convert_sig():
 
 
 def test_call_tir_with_float16_args():
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Before:
         @R.function
         def main(A: R.Tensor([64], "float16")):
             cls = Before
             with R.dataflow():
-                B = R.call_tir(cls.tir_identity, [A], out_sinfo=R.Tensor([64], "float16"))
-                C = R.call_tir(cls.tir_identity, [B], out_sinfo=R.Tensor([64], "float16"))
+                B = R.call_tir(cls.tir_identity, [A], out_ty=R.Tensor([64], "float16"))
+                C = R.call_tir(cls.tir_identity, [B], out_ty=R.Tensor([64], "float16"))
                 R.output(C)
             return C
 
-        @T.prim_func
+        @T.prim_func(s_tir=True)
         def tir_identity(
             Input: T.Buffer(64, "float16"),
             Output: T.Buffer(64, "float16"),
         ):
             for i in range(64):
-                with T.block("copy"):
+                with T.sblock("copy"):
                     vi = T.axis.remap("S", [i])
                     Output[vi] = Input[vi]
 
@@ -1062,6 +1079,59 @@ def test_call_tir_with_float16_args():
 
     After = ToMixedPrecision()(Before)
     tvm.ir.assert_structural_equal(Expected, After)
+
+
+def test_dynamic_strided_slice():
+    @I.ir_module(s_tir=True)
+    class Input:
+        @R.function
+        def main(
+            x: R.Tensor((2, 3, 28, 28), "float32"),
+            w: R.Tensor((4, 3, 3, 3), "float32"),
+            begin: R.Tensor((4,), "int64"),
+            end: R.Tensor((4,), "int64"),
+            strides: R.Tensor((4,), "int64"),
+        ) -> R.Tensor(None, "float32", ndim=4):
+            with R.dataflow():
+                lv: R.Tensor((2, 4, 26, 26), "float32") = R.nn.conv2d(x, w, out_dtype="float32")
+                gv = R.dynamic_strided_slice(lv, begin, end, strides)
+                R.output(gv)
+            return gv
+
+    @I.ir_module(s_tir=True)
+    class Expected:
+        @R.function
+        def main(
+            x: R.Tensor((2, 3, 28, 28), dtype="float32"),
+            w: R.Tensor((4, 3, 3, 3), dtype="float32"),
+            begin: R.Tensor((4,), dtype="int64"),
+            end: R.Tensor((4,), dtype="int64"),
+            strides: R.Tensor((4,), dtype="int64"),
+        ) -> R.Tensor(None, dtype="float32", ndim=4):
+            with R.dataflow():
+                lv: R.Tensor((2, 3, 28, 28), dtype="float16") = R.astype(x, dtype="float16")
+                lv1: R.Tensor((4, 3, 3, 3), dtype="float16") = R.astype(w, dtype="float16")
+                lv2: R.Tensor((2, 4, 26, 26), dtype="float32") = R.nn.conv2d(
+                    lv,
+                    lv1,
+                    strides=[1, 1],
+                    padding=[0, 0, 0, 0],
+                    dilation=[1, 1],
+                    groups=1,
+                    data_layout="NCHW",
+                    kernel_layout="OIHW",
+                    out_layout="NCHW",
+                    out_dtype="float32",
+                )
+                lv3: R.Tensor((2, 4, 26, 26), dtype="float16") = R.astype(lv2, dtype="float16")
+                lv4: R.Tensor((2, 4, 26, 26), dtype="float32") = R.astype(lv3, dtype="float32")
+                gv: R.Tensor(None, dtype="float32", ndim=4) = R.dynamic_strided_slice(
+                    lv4, begin, end, strides
+                )
+                R.output(gv)
+            return gv
+
+    _assert_test(Input, Expected)
 
 
 if __name__ == "__main__":

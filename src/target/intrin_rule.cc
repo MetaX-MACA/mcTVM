@@ -23,171 +23,197 @@
  */
 #include "intrin_rule.h"
 
-#include <tvm/tir/op.h>
-#include <tvm/tir/op_attr_types.h>
+#include <tvm/runtime/logging.h>
+#include <tvm/tirx/buffer.h>
+#include <tvm/tirx/op.h>
+#include <tvm/tirx/op_attr_types.h>
 
 namespace tvm {
 namespace codegen {
 namespace intrin {
-using tir::FLowerIntrinsic;
+using tirx::FLowerIntrinsic;
 
-TVM_REGISTER_OP("tir.exp").set_attr<FLowerIntrinsic>("default.FLowerIntrinsic",
-                                                     DispatchPureExtern<FloatSuffix>);
-
-TVM_REGISTER_OP("tir.erf").set_attr<FLowerIntrinsic>("default.FLowerIntrinsic",
-                                                     DispatchPureExtern<FloatSuffix>);
-
-TVM_REGISTER_OP("tir.log").set_attr<FLowerIntrinsic>("default.FLowerIntrinsic",
-                                                     DispatchPureExtern<FloatSuffix>);
-
-TVM_REGISTER_OP("tir.log2")
+TVM_REGISTER_OP("tirx.exp")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.log10")
+TVM_REGISTER_OP("tirx.erf")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.log1p")
+TVM_REGISTER_OP("tirx.log")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.tanh")
+TVM_REGISTER_OP("tirx.log2")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.tan").set_attr<FLowerIntrinsic>("default.FLowerIntrinsic",
-                                                     DispatchPureExtern<FloatSuffix>);
-
-TVM_REGISTER_OP("tir.trunc")
+TVM_REGISTER_OP("tirx.log10")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.atan")
+TVM_REGISTER_OP("tirx.log1p")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.atanh")
+TVM_REGISTER_OP("tirx.tanh")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.atan2")
+TVM_REGISTER_OP("tirx.tan")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.cos").set_attr<FLowerIntrinsic>("default.FLowerIntrinsic",
-                                                     DispatchPureExtern<FloatSuffix>);
-
-TVM_REGISTER_OP("tir.acos")
+TVM_REGISTER_OP("tirx.trunc")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.cosh")
+TVM_REGISTER_OP("tirx.atan")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.acosh")
+TVM_REGISTER_OP("tirx.atanh")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.sin").set_attr<FLowerIntrinsic>("default.FLowerIntrinsic",
-                                                     DispatchPureExtern<FloatSuffix>);
-
-TVM_REGISTER_OP("tir.asin")
+TVM_REGISTER_OP("tirx.atan2")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.sinh")
+TVM_REGISTER_OP("tirx.cos")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.asinh")
+TVM_REGISTER_OP("tirx.acos")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.hypot")
+TVM_REGISTER_OP("tirx.cosh")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.nextafter")
+TVM_REGISTER_OP("tirx.acosh")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.copysign")
+TVM_REGISTER_OP("tirx.sin")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.ldexp")
+TVM_REGISTER_OP("tirx.asin")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.sqrt")
+TVM_REGISTER_OP("tirx.sinh")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.floor")
+TVM_REGISTER_OP("tirx.asinh")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.ceil")
+TVM_REGISTER_OP("tirx.hypot")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.round")
+TVM_REGISTER_OP("tirx.nextafter")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.nearbyint")
+TVM_REGISTER_OP("tirx.copysign")
     .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
 
-TVM_REGISTER_OP("tir.pow").set_attr<FLowerIntrinsic>("default.FLowerIntrinsic",
-                                                     DispatchPureExtern<FloatSuffix>);
+TVM_REGISTER_OP("tirx.ldexp")
+    .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
+
+TVM_REGISTER_OP("tirx.sqrt")
+    .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
+
+TVM_REGISTER_OP("tirx.floor")
+    .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
+
+TVM_REGISTER_OP("tirx.ceil")
+    .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
+
+TVM_REGISTER_OP("tirx.round")
+    .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
+
+TVM_REGISTER_OP("tirx.nearbyint")
+    .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
+
+TVM_REGISTER_OP("tirx.pow")
+    .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", DispatchPureExtern<FloatSuffix>);
+
+TVM_REGISTER_OP("tirx.tvm_access_ptr")
+    .set_attr<FLowerIntrinsic>("default.FLowerIntrinsic", [](const PrimExpr& e) -> PrimExpr {
+      const CallNode* call = e.as<CallNode>();
+      TVM_FFI_ICHECK(call != nullptr);
+      TVM_FFI_ICHECK_EQ(call->args.size(), 5U);
+      PrimType dtype = call->args[0].ty();
+      Var buffer_var = call->args[1].as_or_throw<Var>();
+      PrimExpr offset = call->args[2];
+      TVM_FFI_ICHECK(call->ty().IsHandle());
+      if (dtype.lanes() != 1) {
+        PrimType offset_ty = offset.ty();
+        offset = offset * MakeConst(offset_ty, dtype.lanes());
+        offset = Ramp(offset, MakeConst(offset_ty, 1), dtype.lanes());
+      }
+      Buffer dummy_buf(buffer_var, dtype.WithLanes(1), {offset + 1}, {}, 0, buffer_var->name_hint,
+                       0, 0, kDefault);
+      BufferLoad buf_load(dummy_buf, {offset});
+      return Call(PrimType::Handle(), builtin::address_of(), {buf_load});
+    });
 
 PrimExpr DispatchFastErf(const PrimExpr& e) {
   DLOG(WARNING) << "fast_erf will be used instead of erf";
   const CallNode* call = e.as<CallNode>();
-  ICHECK(call != nullptr);
-  ICHECK_EQ(call->args.size(), 1);
+  TVM_FFI_ICHECK(call != nullptr);
+  TVM_FFI_ICHECK_EQ(call->args.size(), 1);
   PrimExpr arg = call->args[0];
-  int bits = arg.dtype().bits();
+  PrimType arg_ty = arg.ty();
+  int bits = arg_ty.bits();
   PrimExpr res;
-  if (arg.dtype().is_float() && (bits == 16 || bits == 32)) {
+  if (arg_ty.code() == DLDataTypeCode::kDLFloat && (bits == 16 || bits == 32)) {
     res = fast_erf_float_expr(arg, bits);
   } else {
-    LOG(FATAL) << "Unsupported type in Metal fast_erf";
+    TVM_FFI_THROW(InternalError) << "Unsupported type in Metal fast_erf";
   }
   return res;
 }
 
 PrimExpr DispatchNumericalStableTanh(const PrimExpr& e) {
-  using tir::make_const;
-  using tir::make_zero;
-  const tir::CallNode* call = e.as<tir::CallNode>();
-  ICHECK(call != nullptr);
+  using tirx::MakeConst;
+  const tirx::CallNode* call = e.as<tirx::CallNode>();
+  TVM_FFI_ICHECK(call != nullptr);
   const PrimExpr& x = call->args[0];
-  PrimExpr one = make_const(x.dtype(), 1);
-  PrimExpr two = make_const(x.dtype(), 2);
-  PrimExpr neg_two = make_const(x.dtype(), -2);
+  PrimType x_ty = x.ty();
+  PrimExpr one = MakeConst(x_ty, 1);
+  PrimExpr two = MakeConst(x_ty, 2);
+  PrimExpr neg_two = MakeConst(x_ty, -2);
 
   PrimExpr exp_neg2x = exp(neg_two * x);
   PrimExpr exp_pos2x = exp(two * x);
 
   PrimExpr tanh_pos = (one - exp_neg2x) / (one + exp_neg2x);
   PrimExpr tanh_neg = (exp_pos2x - one) / (exp_pos2x + one);
-  return tir::Select(x >= make_zero(x.dtype()), tanh_pos, tanh_neg);
+  // MakeConst can handle both vector and scalar types.
+  return tirx::Select(x >= MakeConst(x_ty, 0), tanh_pos, tanh_neg);
 }
 
 }  // namespace intrin
 
 namespace legalize {
 
-using namespace tir;
+using namespace tirx;
 
-TVM_REGISTER_OP("tir.rsqrt")
+TVM_REGISTER_OP("tirx.rsqrt")
     .set_attr<FLegalize>("default.FLegalize", [](const PrimExpr& e) -> PrimExpr {
       const CallNode* call = e.as<CallNode>();
-      ICHECK(call != nullptr);
-      auto one = make_const(call->args[0].dtype(), 1);
+      TVM_FFI_ICHECK(call != nullptr);
+      auto one = MakeConst(call->args[0].ty(), 1);
       return one / sqrt(call->args[0]);
     });
 
-TVM_REGISTER_OP("tir.sigmoid")
+TVM_REGISTER_OP("tirx.sigmoid")
     .set_attr<FLegalize>("default.FLegalize", [](const PrimExpr& e) -> PrimExpr {
       const CallNode* call = e.as<CallNode>();
-      ICHECK(call != nullptr);
-      auto one = make_const(call->args[0].dtype(), 1);
+      TVM_FFI_ICHECK(call != nullptr);
+      auto one = MakeConst(call->args[0].ty(), 1);
       return one / (one + exp(-call->args[0]));
     });
 
-TVM_REGISTER_OP("tir.isfinite")
+TVM_REGISTER_OP("tirx.isfinite")
+    .set_attr<tirx::TIRxOpCategory>("TIRxOpCategory", ffi::String("builtin"), 1)
     .set_attr<FLegalize>("default.FLegalize", [](const PrimExpr& e) -> PrimExpr {
       const CallNode* call = e.as<CallNode>();
-      ICHECK(call != nullptr);
+      TVM_FFI_ICHECK(call != nullptr);
       return isfinite(call->args[0]);
     });
 
-TVM_REGISTER_OP("tir.isinf")
+TVM_REGISTER_OP("tirx.isinf")
+    .set_attr<tirx::TIRxOpCategory>("TIRxOpCategory", ffi::String("builtin"), 1)
     .set_attr<FLegalize>("default.FLegalize", [](const PrimExpr& e) -> PrimExpr {
       const CallNode* call = e.as<CallNode>();
-      ICHECK(call != nullptr);
+      TVM_FFI_ICHECK(call != nullptr);
       return isinf(call->args[0]);
     });
 
@@ -203,18 +229,25 @@ TVM_REGISTER_OP("tir.isinf")
 static PrimExpr QMultiplyShift(PrimExpr x, PrimExpr y, PrimExpr q, PrimExpr left_shift,
                                PrimExpr right_shift, PrimExpr is_left_shift_required) {
   // Only int32 types are supported (any number of lanes is allowed)
-  ICHECK(y.dtype().code() == DLDataTypeCode::kDLInt && y.dtype().bits() == 32);
-  ICHECK(left_shift.dtype().code() == DLDataTypeCode::kDLInt && left_shift.dtype().bits() == 32);
-  ICHECK(right_shift.dtype().code() == DLDataTypeCode::kDLInt && right_shift.dtype().bits() == 32);
+  TVM_FFI_ICHECK(y.ty().MatchesElementType(DLDataTypeCode::kDLInt, 32));
+  TVM_FFI_ICHECK(left_shift.ty().MatchesElementType(DLDataTypeCode::kDLInt, 32));
+  TVM_FFI_ICHECK(right_shift.ty().MatchesElementType(DLDataTypeCode::kDLInt, 32));
 
-  DataType hp_dtype = DataType::Int(64, x.dtype().lanes());
-  DataType lp_dtype = DataType::Int(32, x.dtype().lanes());
+  PrimType x_ty = x.ty();
+  auto signed_int_ty = [](int bits, const PrimType& source_ty) {
+    if (source_ty.IsScalableVector()) {
+      return PrimType::ScalableVector(DLDataTypeCode::kDLInt, bits, source_ty.VScaleFactor());
+    }
+    return PrimType::Int(bits, source_ty.lanes());
+  };
+  PrimType hp_dtype = signed_int_ty(64, x_ty);
+  PrimType lp_dtype = signed_int_ty(32, x_ty);
 
   // 1) Cast and Multiply the integer multiplier
-  PrimExpr one = make_const(hp_dtype, 1);
+  PrimExpr one = MakeConst(hp_dtype, 1);
   x = cast(hp_dtype, x);
   y = cast(hp_dtype, y);
-  x = tir::Select(is_left_shift_required, x << left_shift, x);
+  x = tirx::Select(is_left_shift_required, x << left_shift, x);
 
   // 2) Perform the multiplication in higher precision.
   x = x * y;
@@ -231,12 +264,12 @@ static PrimExpr QMultiplyShift(PrimExpr x, PrimExpr y, PrimExpr q, PrimExpr left
   return cast(lp_dtype, x);
 }
 
-TVM_REGISTER_OP("tir.q_multiply_shift")
+TVM_REGISTER_OP("tirx.q_multiply_shift")
     .set_attr<FLegalize>("default.FLegalize", [](const PrimExpr& e) -> PrimExpr {
-      using tir::make_const;
+      using tirx::MakeConst;
 
-      const tir::CallNode* call = e.as<tir::CallNode>();
-      ICHECK(call != nullptr);
+      const tirx::CallNode* call = e.as<tirx::CallNode>();
+      TVM_FFI_ICHECK(call != nullptr);
 
       PrimExpr x = call->args[0];
       PrimExpr y = call->args[1];
@@ -249,9 +282,9 @@ TVM_REGISTER_OP("tir.q_multiply_shift")
           return int_node->value;
         }
         auto broadcast_node = node.as<BroadcastNode>();
-        CHECK(broadcast_node != nullptr);
+        TVM_FFI_ICHECK(broadcast_node != nullptr);
         auto int_node = broadcast_node->value.as<IntImmNode>();
-        CHECK(int_node != nullptr);
+        TVM_FFI_ICHECK(int_node != nullptr);
         return int_node->value;
       };
       // Power of 2 is determined by the fixed_point_multiplier == 1 << 30. In case of power of
@@ -265,8 +298,12 @@ TVM_REGISTER_OP("tir.q_multiply_shift")
           return x << exp;
         } else {
           // power of 2 is less than 0, round and then apply right shift.
-          DataType lp_dtype = DataType::Int(32, x.dtype().lanes());
-          PrimExpr one = make_const(lp_dtype, 1);
+          PrimType x_ty = x.ty();
+          PrimType lp_dtype =
+              x_ty.IsScalableVector()
+                  ? PrimType::ScalableVector(DLDataTypeCode::kDLInt, 32, x_ty.VScaleFactor())
+                  : PrimType::Int(32, x_ty.lanes());
+          PrimExpr one = MakeConst(lp_dtype, 1);
           exp = -exp;
           PrimExpr rounding_factor = one << (exp - 1);
           PrimExpr rounded_t = x + rounding_factor;
@@ -274,22 +311,23 @@ TVM_REGISTER_OP("tir.q_multiply_shift")
         }
       } else {
         // Only int32 types are supported (any number of lanes is allowed)
-        ICHECK(s.dtype().code() == DLDataTypeCode::kDLInt && s.dtype().bits() == 32);
+        TVM_FFI_ICHECK(s.ty().MatchesElementType(DLDataTypeCode::kDLInt, 32));
 
-        // Calculating integer shifts
-        PrimExpr zero = make_const(s.dtype(), 0);
-        PrimExpr left_shift = tir::Select(s > zero, s, zero);
-        PrimExpr right_shift = tir::Select(s > zero, zero, -s);
+        // Calculating integer shifts. MakeConst can handle both vector and scalar types.
+        PrimType s_ty = s.ty();
+        PrimExpr zero = MakeConst(s_ty, 0);
+        PrimExpr left_shift = tirx::Select(s > zero, s, zero);
+        PrimExpr right_shift = tirx::Select(s > zero, zero, -s);
         PrimExpr is_left_shift_required = (left_shift != zero);
 
         return QMultiplyShift(x, y, q, left_shift, right_shift, is_left_shift_required);
       }
     });
 
-TVM_REGISTER_OP("tir.q_multiply_shift_per_axis")
+TVM_REGISTER_OP("tirx.q_multiply_shift_per_axis")
     .set_attr<FLegalize>("default.FLegalize", [](const PrimExpr& e) -> PrimExpr {
-      const tir::CallNode* call = e.as<tir::CallNode>();
-      ICHECK(call != nullptr);
+      const tirx::CallNode* call = e.as<tirx::CallNode>();
+      TVM_FFI_ICHECK(call != nullptr);
 
       PrimExpr x = call->args[0];
       PrimExpr y = call->args[1];

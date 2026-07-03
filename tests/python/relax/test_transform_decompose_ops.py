@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: F401, F841
 
 from typing import Union
 
@@ -22,7 +23,9 @@ import tvm.script
 import tvm.testing
 from tvm import IRModule, relax
 from tvm.relax import Function
-from tvm.script import relax as R, tir as T, ir as I
+from tvm.script import ir as I
+from tvm.script import relax as R
+from tvm.script import tirx as T
 
 
 def test_batch_norm_inference():
@@ -372,7 +375,7 @@ def test_op_tensor_to_shape():
             x_1 = T.int64()
             x_2 = T.int64()
             gv: R.Shape(ndim=3) = R.call_pure_packed(
-                "vm.builtin.tensor_to_shape", t, sinfo_args=(R.Shape(ndim=3),)
+                "vm.builtin.tensor_to_shape", t, ty_args=(R.Shape(ndim=3),)
             )
             y: R.Shape([x, x_1, x_2]) = R.match_cast(gv, R.Shape([x, x_1, x_2]))
             gv_1: R.Shape([x, x_1, x_2]) = R.shape([x, x_1, x_2])

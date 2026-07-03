@@ -14,20 +14,24 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: F841
+
+import numpy as np
+import pytest
 
 import tvm
 import tvm.testing
-
 from tvm.script import relax as R
-
-import numpy as np
 
 exec_mode = tvm.testing.parameter("bytecode", "compiled")
 
-pytestmark = tvm.testing.parametrize_targets("llvm")
+pytestmark = pytest.mark.skipif(not tvm.testing.device_enabled("llvm"), reason="llvm not enabled")
 
 
-def test_pass_tensor_to_function(exec_mode, target, dev):
+def test_pass_tensor_to_function(exec_mode):
+    target = "llvm"
+    dev = tvm.device(target)
+
     @R.function
     def relax_func(
         A: R.Tensor([16], "int32"),
@@ -59,7 +63,10 @@ def test_pass_tensor_to_function(exec_mode, target, dev):
     np.testing.assert_array_equal(np_A * 2, from_callback.numpy())
 
 
-def test_generate_tensor_in_function(exec_mode, target, dev):
+def test_generate_tensor_in_function(exec_mode):
+    target = "llvm"
+    dev = tvm.device(target)
+
     @R.function
     def relax_func(
         callback: R.Callable([], R.Tensor([16], "int32")),
@@ -85,7 +92,10 @@ def test_generate_tensor_in_function(exec_mode, target, dev):
     np.testing.assert_array_equal(np_A * 2, output.numpy())
 
 
-def test_catch_exception_with_full_stack_trace(exec_mode, target, dev):
+def test_catch_exception_with_full_stack_trace(exec_mode):
+    target = "llvm"
+    dev = tvm.device(target)
+
     @R.function
     def relax_func(
         callback: R.Callable([], R.Tensor([16], "int32")),
@@ -112,9 +122,9 @@ def test_catch_exception_with_full_stack_trace(exec_mode, target, dev):
         while stack.tb_next is not None:
             stack = stack.tb_next
         frame = stack.tb_frame
-        assert (
-            frame.f_code.co_filename.find("test_vm_callback_function.py") != -1
-        ), "Inner-most stack frame should be from Python callback"
+        assert frame.f_code.co_filename.find("test_vm_callback_function.py") != -1, (
+            "Inner-most stack frame should be from Python callback"
+        )
 
     else:
         raise RuntimeError("Exception thrown in callback was not propagated to calling scope")

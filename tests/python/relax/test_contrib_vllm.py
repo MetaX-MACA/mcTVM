@@ -16,14 +16,15 @@
 # under the License.
 import numpy as np
 import pytest
+import tvm_ffi
 
-import tvm.testing
 import tvm
+import tvm.testing
 from tvm import relax
 from tvm.script import ir as I
 from tvm.script import relax as R
-from tvm.script import tir as T
-
+from tvm.script import tirx as T
+from tvm.testing import env
 
 has_vllm = tvm.get_global_func("tvm.contrib.vllm.single_query_cached_kv_attention", True)
 
@@ -32,7 +33,11 @@ vllm_enabled = pytest.mark.skipif(
     reason="VLLM not enabled.",
 )
 
-pytestmark = [vllm_enabled] + tvm.testing.requires_cuda.marks()
+pytestmark = [
+    vllm_enabled,
+    pytest.mark.gpu,
+    pytest.mark.skipif(not env.has_cuda(), reason="need cuda"),
+]
 
 
 def build_and_run(mod, inputs_np, target, legalize=True):
@@ -40,7 +45,7 @@ def build_and_run(mod, inputs_np, target, legalize=True):
         mod = relax.transform.LegalizeOps()(mod)
 
         with tvm.target.Target("cuda"):
-            mod = tvm.tir.transform.DefaultGPUSchedule()(mod)
+            mod = tvm.s_tir.transform.DefaultGPUSchedule()(mod)
 
     with tvm.transform.PassContext():
         ex = tvm.compile(mod, target)
@@ -52,7 +57,7 @@ def build_and_run(mod, inputs_np, target, legalize=True):
 
     out = f(*inputs)
 
-    if isinstance(out, tvm.ir.container.Array):
+    if isinstance(out, tvm_ffi.Array):
         return [arr.numpy() for arr in out]
 
     return out.numpy()
@@ -90,7 +95,7 @@ def test_attention():
                         16,
                         max_len,
                     ],
-                    out_sinfo=query.struct_info,
+                    out_ty=query.ty,
                 )
                 R.output(out)
             return out
@@ -135,7 +140,7 @@ def test_attention():
                         max_logits,
                         tmp_out,
                     ],
-                    out_sinfo=query.struct_info,
+                    out_ty=query.ty,
                 )
                 R.output(out)
             return out
@@ -362,7 +367,7 @@ def test_cache():
                     key_cache,
                     value_cache,
                     slot_mapping,
-                    sinfo_args=[key_cache.struct_info, value_cache.struct_info],
+                    ty_args=[key_cache.ty, value_cache.ty],
                 )
                 out = (kv[0], kv[1])
                 R.output(out)

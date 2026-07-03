@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: E501, F401
 
 import os
 import tempfile
@@ -23,13 +24,14 @@ import pytest
 
 import tvm
 import tvm.testing
-from tvm import relax, tir
-from tvm.contrib import utils
+from tvm import relax, s_tir, tirx
 from tvm.relax.dpl import is_op, wildcard
 from tvm.relax.testing import transform
 from tvm.script import ir as I
 from tvm.script import relax as R
-from tvm.script import tir as T
+from tvm.script import tirx as T
+from tvm.support import utils
+from tvm.testing import env
 
 env_checker_codegen = tvm.get_global_func("relax.ext.tensorrt", True)
 env_checker_runtime = tvm.get_global_func("relax.is_tensorrt_runtime_enabled", True)
@@ -44,7 +46,11 @@ requires_tensorrt_runtime = pytest.mark.skipif(
 )
 
 # Global variable in pytest that applies markers to all tests.
-pytestmark = [requires_tensorrt_codegen] + tvm.testing.requires_cuda.marks()
+pytestmark = [
+    requires_tensorrt_codegen,
+    pytest.mark.gpu,
+    pytest.mark.skipif(not env.has_cuda(), reason="need cuda"),
+]
 
 # Target gpu
 target_str = "nvidia/nvidia-t4"
@@ -74,10 +80,10 @@ def gen_ground_truth(mod, target, dev, inputs):
     # Since there is no default schedule for GPU in MS yet, this is necessary
     with target:
         seq = tvm.transform.Sequential(
-            [relax.transform.LegalizeOps(), tir.transform.DefaultGPUSchedule()]
+            [relax.transform.LegalizeOps(), s_tir.transform.DefaultGPUSchedule()]
         )
         new_mod = seq(mod)
-    assert relax.analysis.well_formed(new_mod)
+    relax.analysis.well_formed(new_mod)
     exec = tvm.compile(new_mod, target, params={})
     vm = relax.VirtualMachine(exec, dev)
     return vm["main"](*inputs)
@@ -86,9 +92,9 @@ def gen_ground_truth(mod, target, dev, inputs):
 @tvm.script.ir_module
 class InputModule:
     @R.function
-    def main(
-        x: R.Tensor((16, 16), "float32"), y: R.Tensor((16, 16), "float32")
-    ) -> R.Tensor((16, 16), "float32"):
+    def main(x: R.Tensor((16, 16), "float32"), y: R.Tensor((16, 16), "float32")) -> R.Tensor(
+        (16, 16), "float32"
+    ):
         with R.dataflow():
             z1 = R.multiply(x, y)
             z2 = R.add(z1, x)
@@ -120,7 +126,8 @@ def setup_test():
 entry_func_name = tvm.testing.parameter("main", "func")
 
 
-@tvm.testing.requires_gpu
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
 @requires_tensorrt_runtime
 def test_tensorrt_only(entry_func_name):
     mod, inputs, expected = setup_test()
@@ -150,7 +157,8 @@ def test_tensorrt_only(entry_func_name):
     check_roundtrip(ex0, dev, inputs, expected, entry_func_name)
 
 
-@tvm.testing.requires_gpu
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
 @requires_tensorrt_runtime
 def test_mix_use_tensorrt_and_tvm():
     mod, inputs, expected = setup_test()
@@ -177,7 +185,7 @@ def test_mix_use_tensorrt_and_tvm():
                     relax.transform.MetaScheduleApplyDatabase(work_dir),
                 ]
             )(mod)
-    assert relax.analysis.well_formed(new_mod)
+    relax.analysis.well_formed(new_mod)
     with transform.PassContext(opt_level=0):
         ex0 = tvm.compile(new_mod, target, params={})
 
@@ -245,12 +253,12 @@ class Conv2dx2_after:
             lv = R.call_dps_packed(
                 "fused_relax_nn_conv2d_tensorrt",
                 (data, weight1),
-                out_sinfo=R.Tensor((16, 32, 32, 16), dtype="float16"),
+                out_ty=R.Tensor((16, 32, 32, 16), dtype="float16"),
             )
             gv = R.call_dps_packed(
                 "fused_relax_nn_conv2d_tensorrt",
                 (lv, weight2),
-                out_sinfo=R.Tensor((16, 32, 32, 16), dtype="float16"),
+                out_ty=R.Tensor((16, 32, 32, 16), dtype="float16"),
             )
             R.output(gv)
         return gv
@@ -320,7 +328,7 @@ def test_dynamic_shape():
             ) -> R.Tensor((1, r1), dtype="float16"):
                 R.func_attr({"Composite": "cublas.matmul"})
                 with R.dataflow():
-                    gv_1: R.Tensor((1, r1), dtype="float16") = R.matmul(x_1, w1_1, out_dtype="void")
+                    gv_1: R.Tensor((1, r1), dtype="float16") = R.matmul(x_1, w1_1, out_dtype=None)
                     R.output(gv_1)
                 return gv_1
 
@@ -341,12 +349,12 @@ def test_dynamic_shape():
                 lv = R.call_dps_packed(
                     "fused_relax_matmul_cublas",
                     (x, w1),
-                    out_sinfo=R.Tensor((1, r1), dtype="float16"),
+                    out_ty=R.Tensor((1, r1), dtype="float16"),
                 )
                 lv1 = R.call_dps_packed(
                     "fused_relax_matmul_cublas",
                     (x, w2),
-                    out_sinfo=R.Tensor((1, r2), dtype="float16"),
+                    out_ty=R.Tensor((1, r2), dtype="float16"),
                 )
                 gv: R.Tuple(
                     R.Tensor((1, r1), dtype="float16"), R.Tensor((1, r2), dtype="float16")
@@ -378,7 +386,7 @@ def test_no_op_for_call_to_tir():
             _ = Before.shape_func(x)
             return x
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def shape_func(H: T.Buffer(T.int64(4), "int64")):
             H[T.int64(0)] = H[T.int64(0)] + T.int64(1)
 

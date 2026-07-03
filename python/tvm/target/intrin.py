@@ -15,8 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 """Target dependent intrinsic registration."""
+
 from tvm.ir import register_intrin_lowering
-from tvm.tir import call_pure_extern
+from tvm.tirx import call_pure_extern
 
 
 def _rule_float_suffix(op):
@@ -40,13 +41,13 @@ def _rule_float_suffix(op):
     register_intrin_lowering : The registration function for intrinsic lowering rule.
     """
     name = op.op.name
-    assert name.startswith("tir.")
+    assert name.startswith("tirx.")
     prefix = name[4:]
 
-    if op.dtype == "float32":
-        return call_pure_extern(op.dtype, "%sf" % prefix, *op.args)
-    if op.dtype == "float64":
-        return call_pure_extern(op.dtype, prefix, *op.args)
+    if op.ty.dtype == "float32":
+        return call_pure_extern(op.ty, f"{prefix}f", *op.args)
+    if op.ty.dtype == "float64":
+        return call_pure_extern(op.ty, prefix, *op.args)
     return op
 
 
@@ -70,12 +71,12 @@ def _rule_float_direct(op):
     --------
     register_intrin_lowering : The registration function for intrinsic lowering rule.
     """
-    if str(op.dtype).startswith("float"):
-        return call_pure_extern(op.dtype, op.op.name[4:], *op.args)
+    if str(op.ty.dtype).startswith("float"):
+        return call_pure_extern(op.ty, op.op.name[4:], *op.args)
     return None
 
 
 # opencl pattern for exp
-register_intrin_lowering("tir.exp", target="opencl", f=_rule_float_direct, level=99)
+register_intrin_lowering("tirx.exp", target="opencl", f=_rule_float_direct, level=99)
 # default pattern for exp
-register_intrin_lowering("tir.exp", target="default", f=_rule_float_suffix, level=99)
+register_intrin_lowering("tirx.exp", target="default", f=_rule_float_suffix, level=99)

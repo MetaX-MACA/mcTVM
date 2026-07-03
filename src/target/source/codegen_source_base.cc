@@ -28,13 +28,13 @@ namespace tvm {
 namespace codegen {
 
 void CodeGenSourceBase::ClearFuncState() {
-  name_supply_ = NameSupply();
+  name_supply_ = UniqueNameSupply();
   ssa_assign_map_.clear();
   var_idmap_.clear();
   scope_mark_.clear();
 }
 
-std::string CodeGenSourceBase::SSAGetID(std::string src, DataType t) {
+std::string CodeGenSourceBase::SSAGetID(std::string src, const PrimType& t) {
   if (name_supply_->ContainsName(src)) return src;
   auto it = ssa_assign_map_.find(src);
   if (it != ssa_assign_map_.end()) {
@@ -52,8 +52,8 @@ std::string CodeGenSourceBase::SSAGetID(std::string src, DataType t) {
   return e.vid;
 }
 
-std::string CodeGenSourceBase::AllocVarID(const tir::VarNode* v) {
-  ICHECK(!var_idmap_.count(v)) << "Need input to be in SSA form dup " << v->name_hint;
+std::string CodeGenSourceBase::AllocVarID(const tirx::VarNode* v) {
+  TVM_FFI_ICHECK(!var_idmap_.count(v)) << "Need input to be in SSA form dup " << v->name_hint;
   std::string key = v->name_hint;
   std::string vid = name_supply_->FreshName(key);
   std::replace(vid.begin(), vid.end(), ':', '_');
@@ -63,9 +63,9 @@ std::string CodeGenSourceBase::AllocVarID(const tir::VarNode* v) {
   return vid;
 }
 
-std::string CodeGenSourceBase::GetVarID(const tir::VarNode* v) const {
+std::string CodeGenSourceBase::GetVarID(const tirx::VarNode* v) const {
   auto it = var_idmap_.find(v);
-  ICHECK(it != var_idmap_.end()) << "Find undefined Variable " << v->name_hint;
+  TVM_FFI_ICHECK(it != var_idmap_.end()) << "Find undefined Variable " << v->name_hint;
   return it->second;
 }
 
@@ -83,7 +83,7 @@ void CodeGenSourceBase::MarkConst(std::string vid) {
     e.scope_id = 0;
     ssa_assign_map_[vid] = e;
   } else {
-    ICHECK_EQ(it->second.vid, vid);
+    TVM_FFI_ICHECK_EQ(it->second.vid, vid);
   }
 }
 
@@ -99,22 +99,23 @@ void CodeGenSourceBase::EndScope(int scope_id) {
   indent_ -= 2;
 }
 
-void CodeGenSourceBase::PrintType(DataType type, std::ostream& os) {  // NOLINT(*)
-  ICHECK_EQ(type.lanes(), 1) << "do not yet support vector types";
-  if (type.is_handle()) {
+void CodeGenSourceBase::PrintType(const PrimType& type, std::ostream& os) {  // NOLINT(*)
+  int lanes = type.lanes();
+  TVM_FFI_ICHECK_EQ(lanes, 1) << "do not yet support vector types";
+  if (type.IsHandle()) {
     os << "void*";
     return;
   }
-  if (type.is_void()) {
+  if (type.IsVoid()) {
     os << "void";
     return;
   }
   // default c may be have bool type, can be handled in subclass
-  if (type.is_bool()) {
+  if (type.MatchesCode(kDLBool)) {
     os << "int";
     return;
   }
-  if (type.is_float()) {
+  if (type.MatchesCode(kDLFloat)) {
     if (type.bits() == 32) {
       os << "float";
       return;
@@ -123,7 +124,7 @@ void CodeGenSourceBase::PrintType(DataType type, std::ostream& os) {  // NOLINT(
       os << "double";
       return;
     }
-  } else if (type.is_uint()) {
+  } else if (type.MatchesCode(kDLUInt)) {
     switch (type.bits()) {
       case 8:
       case 16:
@@ -136,7 +137,7 @@ void CodeGenSourceBase::PrintType(DataType type, std::ostream& os) {  // NOLINT(
         os << "int";
         return;
     }
-  } else if (type.is_int()) {
+  } else if (type.MatchesCode(kDLInt)) {
     switch (type.bits()) {
       case 8:
       case 16:
@@ -147,19 +148,19 @@ void CodeGenSourceBase::PrintType(DataType type, std::ostream& os) {  // NOLINT(
       }
     }
   }
-  LOG(FATAL) << "Cannot convert type " << type << " to C type";
+  TVM_FFI_THROW(InternalError) << "Cannot convert type " << type << " to C type";
 }
 
 void CodeGenSourceBase::PrintType(const Type& type, std::ostream& os) {  // NOLINT(*)
   if (auto* ptr = type.as<PrimTypeNode>()) {
-    return PrintType(ptr->dtype, os);
+    return PrintType(ffi::GetRef<PrimType>(ptr), os);
   } else if (auto* ptr = type.as<PointerTypeNode>()) {
     PrintType(ptr->element_type, os);
     os << '*';
   } else if (IsVoidType(type)) {
     os << "void";
   } else {
-    LOG(FATAL) << "Type " << type << " does not have a corresponding C Type";
+    TVM_FFI_THROW(InternalError) << "Type " << type << " does not have a corresponding C Type";
   }
 }
 

@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: F841
 
 import re
 
@@ -22,7 +23,8 @@ import pytest
 import tvm
 from tvm import relax
 from tvm.ir.base import assert_structural_equal
-from tvm.script.parser import relax as R, tir as T
+from tvm.script.parser import relax as R
+from tvm.script.parser import tirx as T
 
 
 def test_copy_with_new_vars():
@@ -51,7 +53,7 @@ def test_copy_with_new_vars_copied_symbolic_vars():
     assert len(after.params) == len(before.params)
     for before_var, after_var in zip(before.params, after.params):
         assert before_var != after_var
-        assert before_var.struct_info.shape[0] != after_var.struct_info.shape[0]
+        assert before_var.ty.shape[0] != after_var.ty.shape[0]
 
 
 def test_copy_with_new_vars_on_ir_module():
@@ -169,6 +171,7 @@ def test_structural_equal_of_call_nodes():
     tvm.ir.assert_structural_equal(uses_same_object_twice, uses_two_different_objects)
 
 
+@pytest.mark.xfail(reason="value-bearing R.Prim annotations were removed")
 def test_structural_equal_with_recursive_lambda_function():
     """A recursive lambda function may be checked for structural equality
 
@@ -261,10 +264,8 @@ def test_structural_equal_with_distinct_recursive_lambda_function():
         "blocks[0]",
         "bindings[0]",
         "value",
-        "true_branch",
-        "body",
-        "value",
-        "value",
+        "cond",
+        "a",
     ]
 
     with pytest.raises(ValueError, match=re.escape(".".join(mismatch_path))):

@@ -15,13 +15,24 @@
 # specific language governing permissions and limitations
 # under the License.
 """Elementwise operators"""
+
 # pylint: disable=redefined-builtin,unused-argument
 import tvm
-from tvm import te
-from tvm.tir import PrimExpr
+from tvm import DataTypeCode, te
+from tvm.tirx import PrimExpr
 
 from . import cpp, tag
 from .utils import get_const_tuple
+
+
+def _require_float_tensor(op_name, x):
+    if not x.dtype.matches_code(DataTypeCode.FLOAT, DataTypeCode.BFLOAT):
+        raise TypeError(f"topi.{op_name} only supports floating-point inputs, but got {x.dtype}")
+    return x
+
+
+def _is_integer_tensor(x):
+    return x.dtype.matches_code(DataTypeCode.INT, DataTypeCode.UINT)
 
 
 @tvm.te.tag_scope(tag=tag.ELEMWISE)
@@ -210,6 +221,7 @@ def acos(x):
     y : tvm.te.Tensor
         The result.
     """
+    x = _require_float_tensor("acos", x)
     return te.compute(x.shape, lambda *i: te.acos(x(*i)))
 
 
@@ -227,6 +239,7 @@ def acosh(x):
     y : tvm.te.Tensor
         The result.
     """
+    x = _require_float_tensor("acosh", x)
     return te.compute(x.shape, lambda *i: te.acosh(x(*i)))
 
 
@@ -244,6 +257,7 @@ def asin(x):
     y : tvm.te.Tensor
         The result.
     """
+    x = _require_float_tensor("asin", x)
     return te.compute(x.shape, lambda *i: te.asin(x(*i)))
 
 
@@ -261,6 +275,7 @@ def asinh(x):
     y : tvm.te.Tensor
         The result.
     """
+    x = _require_float_tensor("asinh", x)
     return te.compute(x.shape, lambda *i: te.asinh(x(*i)))
 
 
@@ -295,6 +310,7 @@ def atanh(x):
     y : tvm.te.Tensor
         The result.
     """
+    x = _require_float_tensor("atanh", x)
     return te.compute(x.shape, lambda *i: te.atanh(x(*i)))
 
 
@@ -435,7 +451,10 @@ def isinf(x):
 
 @tvm.te.tag_scope(tag=tag.ELEMWISE)
 def round(x):
-    """Round elements of x to nearest integer.
+    """Round elements of x to nearest integer using ties-to-even (banker's rounding).
+
+    Ties are broken by rounding to the nearest even integer, matching the ONNX Round
+    specification and IEEE 754 default rounding mode.
 
     Parameters
     ----------
@@ -447,7 +466,7 @@ def round(x):
     y : tvm.te.Tensor
         The result.
     """
-    return te.compute(x.shape, lambda *i: te.round(x(*i)))
+    return te.compute(x.shape, lambda *i: te.nearbyint(x(*i)))
 
 
 def log(x):
@@ -463,7 +482,7 @@ def log(x):
     y : tvm.te.Tensor
         The result.
     """
-    if x.dtype.startswith("int"):
+    if x.dtype.matches_code(DataTypeCode.INT):
         x = te.compute(x.shape, lambda *i: x(*i).astype("float32"))
     return te.compute(x.shape, lambda *i: te.log(x(*i)), tag=tag.ELEMWISE)
 
@@ -481,7 +500,7 @@ def log2(x):
     y : tvm.te.Tensor
         The result.
     """
-    if x.dtype.startswith("int"):
+    if x.dtype.matches_code(DataTypeCode.INT):
         x = te.compute(x.shape, lambda *i: x(*i).astype("float32"))
     return te.compute(x.shape, lambda *i: te.log2(x(*i)), tag=tag.ELEMWISE)
 
@@ -499,7 +518,7 @@ def log10(x):
     y : tvm.te.Tensor
         The result.
     """
-    if x.dtype.startswith("int"):
+    if x.dtype.matches_code(DataTypeCode.INT):
         x = te.compute(x.shape, lambda *i: x(*i).astype("float32"))
     return te.compute(x.shape, lambda *i: te.log10(x(*i)), tag=tag.ELEMWISE)
 
@@ -518,7 +537,7 @@ def sqrt(x):
     y : tvm.te.Tensor
         The result.
     """
-    if x.dtype.startswith("int"):
+    if x.dtype.matches_code(DataTypeCode.INT):
         x = te.compute(x.shape, lambda *i: x(*i).astype("float32"))
     return te.compute(x.shape, lambda *i: te.sqrt(x(*i)))
 
@@ -537,7 +556,7 @@ def rsqrt(x):
     y : tvm.te.Tensor
         The result.
     """
-    if x.dtype.startswith("int"):
+    if x.dtype.matches_code(DataTypeCode.INT):
         x = te.compute(x.shape, lambda *i: x(*i).astype("float32"))
     return te.compute(x.shape, lambda *i: te.rsqrt(x(*i)))
 
@@ -606,9 +625,9 @@ def clip(x, a_min, a_max):
     ----------
     x : tvm.te.Tensor
         Input argument.
-    a_min : tvm.tir.PrimExpr
+    a_min : tvm.tirx.PrimExpr
         Minimum value.
-    a_max : tvm.tir.PrimExpr
+    a_max : tvm.tirx.PrimExpr
         Maximum value.
 
     Returns
@@ -620,14 +639,14 @@ def clip(x, a_min, a_max):
     def _compute(*indices):
         value = x(*indices)
         const_min = (
-            tvm.tir.Cast(value.dtype, a_min)
+            tvm.tirx.Cast(value.ty, a_min)
             if isinstance(a_min, PrimExpr)
-            else tvm.tir.const(a_min, value.dtype)
+            else tvm.tirx.const(a_min, value.ty)
         )
         const_max = (
-            tvm.tir.Cast(value.dtype, a_max)
+            tvm.tirx.Cast(value.ty, a_max)
             if isinstance(a_max, PrimExpr)
-            else tvm.tir.const(a_max, value.dtype)
+            else tvm.tirx.const(a_max, value.ty)
         )
         return tvm.te.max(tvm.te.min(value, const_max), const_min)
 
@@ -657,11 +676,11 @@ def fixed_point_multiply(x, multiplier, shift):
 
     def _compute(*indices):
         value = x(*indices)
-        return tvm.tir.q_multiply_shift(
+        return tvm.tirx.q_multiply_shift(
             value,
-            tvm.tir.const(multiplier, "int32"),
-            tvm.tir.const(31, "int32"),
-            tvm.tir.const(shift, "int32"),
+            tvm.tirx.const(multiplier, "int32"),
+            tvm.tirx.const(31, "int32"),
+            tvm.tirx.const(shift, "int32"),
         )
 
     return te.compute(x.shape, _compute)
@@ -711,14 +730,14 @@ def fixed_point_multiply_per_axis(
         m = y(*param_indices)
         l_shift = lshift(*param_indices)
         r_shift = rshift(*param_indices)
-        return tvm.tir.q_multiply_shift_per_axis(
+        return tvm.tirx.q_multiply_shift_per_axis(
             value,
             m,
             l_shift,
             r_shift,
-            tvm.tir.const(31, "int32"),
-            tvm.tir.const(is_lshift_required, "bool"),
-            tvm.tir.const(is_rshift_required, "bool"),
+            tvm.tirx.const(31, "int32"),
+            tvm.tirx.const(is_lshift_required, "bool"),
+            tvm.tirx.const(is_rshift_required, "bool"),
         )
 
     return te.compute(x.shape, _compute)
@@ -746,7 +765,7 @@ def cast(x, dtype, span=None):
     if isinstance(x, te.tensor.Tensor):
         return te.compute(x.shape, lambda *i: x(*i).astype(dtype), tag=tag.ELEMWISE)
     # pylint: disable=import-outside-toplevel
-    from tvm.tir import _ffi_api
+    from tvm.tirx import _ffi_api
 
     return _ffi_api._cast(dtype, x, span)
 
@@ -783,6 +802,8 @@ def fast_exp(x):
     y : tvm.te.Tensor
         The result.
     """
+    if _is_integer_tensor(x):
+        x = cast(x, "float32")
     return cpp.fast_exp(x, x.dtype, tag.ELEMWISE)
 
 
@@ -799,6 +820,8 @@ def fast_tanh(x):
     y : tvm.te.Tensor
         The result.
     """
+    if _is_integer_tensor(x):
+        x = cast(x, "float32")
     return cpp.fast_tanh(x, x.dtype, tag.ELEMWISE)
 
 
@@ -833,23 +856,29 @@ def ceil_log2(x):
     y : tvm.te.Tensor
         The result.
     """
-    if not isinstance(x, tvm.tir.PrimExpr):
-        x = tvm.tir.const(x)
+    if not isinstance(x, tvm.tirx.PrimExpr):
+        x = tvm.tirx.const(x)
 
-    if "float" in x.dtype:
-        return tvm.tir.ceil(tvm.tir.log2(x))
+    if x.ty.matches_code(DataTypeCode.FLOAT, DataTypeCode.BFLOAT):
+        return tvm.tirx.ceil(tvm.tirx.log2(x))
 
     target = tvm.target.Target.current()
 
-    if "vulkan" in target.kind.name:
-        clz = tvm.tir.clz(x)
-        bits = int(x.dtype[-2:])
-        res = tvm.tir.if_then_else(x & (x - 1) == 0, bits - clz - 1, bits - clz)
-        if res.dtype != x.dtype:
-            return cast(res, x.dtype)
-        return res
+    if target is not None:
+        target_name = target.kind.name
+        if "vulkan" in target_name:
+            clz = tvm.tirx.clz(x)
+            bits = x.ty.dtype.bits
+            res = tvm.tirx.if_then_else(x & (x - 1) == 0, bits - clz - 1, bits - clz)
+            if res.ty != x.ty:
+                return cast(res, x.ty)
+            return res
 
-    if "adreno" in target.device_name or target.kind.name in ["metal", "rocm", "webgpu"]:
-        return cast(tvm.tir.ceil(tvm.tir.log2(cast(x, "float32"))), x.dtype)
+        if "adreno" in str(target.attrs.get("device", "")) or target_name in [
+            "metal",
+            "rocm",
+            "webgpu",
+        ]:
+            return cast(tvm.tirx.ceil(tvm.tirx.log2(cast(x, "float32"))), x.ty)
 
-    return cast(tvm.tir.ceil(tvm.tir.log2(cast(x, "float64"))), x.dtype)
+    return cast(tvm.tirx.ceil(tvm.tirx.log2(cast(x, "float64"))), x.ty)

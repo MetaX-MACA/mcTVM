@@ -25,17 +25,17 @@
 #ifndef TVM_TARGET_SOURCE_CODEGEN_SOURCE_BASE_H_
 #define TVM_TARGET_SOURCE_CODEGEN_SOURCE_BASE_H_
 
-#include <tvm/ir/name_supply.h>
+#include <tvm/ir/unique_name_supply.h>
 #include <tvm/target/codegen.h>
-#include <tvm/tir/expr.h>
-#include <tvm/tir/op.h>
+#include <tvm/tirx/expr.h>
+#include <tvm/tirx/op.h>
 
 #include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#include "../../runtime/meta_data.h"
+#include "../../runtime/metadata.h"
 
 namespace tvm {
 namespace codegen {
@@ -58,7 +58,8 @@ class CodeGenSourceBase {
    * \param t The type representation.
    * \param os The stream to print the ctype into
    */
-  virtual void PrintType(DataType type, std::ostream& os);  // NOLINT(*)
+  virtual void PrintType(const PrimType& type, std::ostream& os);  // NOLINT(*)
+  void PrintType(DLDataType type, std::ostream& os) { PrintType(PrimType(type), os); }
   /*!
    * Print Type representation of type type.
    * \param type The type representation.
@@ -83,20 +84,23 @@ class CodeGenSourceBase {
    * \param v The variable.
    * \return the variable name.
    */
-  std::string AllocVarID(const tir::VarNode* v);
+  std::string AllocVarID(const tirx::VarNode* v);
   /*!
    * \brief Get a variable name.
    * \param v The variable.
    * \return the variable name.
    */
-  std::string GetVarID(const tir::VarNode* v) const;
+  std::string GetVarID(const tirx::VarNode* v) const;
   /*!
    * \brief Get the SSA ID corresponds to src
    *  If necessary, generate new assignment
    * \param src The source expression
    * \param t The type of the expression.
    */
-  std::string SSAGetID(std::string src, DataType t);
+  std::string SSAGetID(std::string src, const PrimType& t);
+  std::string SSAGetID(std::string src, DLDataType t) {
+    return SSAGetID(std::move(src), PrimType(t));
+  }
   /*!
    * \brief mark the beginning of a new scope
    * \return The scope id.
@@ -113,7 +117,8 @@ class CodeGenSourceBase {
    * \param src The source expression.
    * \param t The type of target.
    */
-  virtual void PrintSSAAssign(const std::string& target, const std::string& src, DataType t) = 0;
+  virtual void PrintSSAAssign(const std::string& target, const std::string& src,
+                              const PrimType& t) = 0;
 
   /*! \brief the declaration stream */
   std::ostringstream decl_stream;
@@ -122,17 +127,17 @@ class CodeGenSourceBase {
   /*! \brief the forward declaration stream */
   std::ostringstream fwd_decl_stream;
   /*! \brief name of each variable */
-  std::unordered_map<const tir::VarNode*, std::string> var_idmap_;
-  /*! \brief NameSupply for allocation */
-  NameSupply name_supply_;
+  std::unordered_map<const tirx::VarNode*, std::string> var_idmap_;
+  /*! \brief Unique name supply for allocation */
+  UniqueNameSupply name_supply_;
+  /*! \brief The current indentation value */
+  int indent_{0};
 
  private:
   /*! \brief assignment map of ssa */
   std::unordered_map<std::string, SSAEntry> ssa_assign_map_;
   /*! \brief array to check whether we are inside certain scope */
   std::vector<bool> scope_mark_;
-  /*! \brief The current indentation value */
-  int indent_{0};
 };
 
 /*!
@@ -176,7 +181,7 @@ ffi::Module CreateMetadataModule(const std::unordered_map<std::string, runtime::
  * \param fget_source a closure to replace default get source behavior.
  */
 ffi::Module DeviceSourceModuleCreate(
-    std::string data, std::string fmt, std::unordered_map<std::string, runtime::FunctionInfo> fmap,
+    std::string data, std::string fmt, ffi::Map<ffi::String, runtime::FunctionInfo> fmap,
     std::string type_key, std::function<std::string(const std::string&)> fget_source = nullptr);
 
 }  // namespace codegen

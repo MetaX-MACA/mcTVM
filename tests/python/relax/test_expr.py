@@ -14,20 +14,24 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: F811
 import numpy as np
+import pytest
+import tvm_ffi
+
 import tvm
 from tvm import relax as rx
-from tvm import tir
+from tvm import tirx
+from tvm.relax.expr import make_shape
 from tvm.script import relax as R
-import pytest
 
 
 def _check_equal(x, y, map_free_vars=False):
     tvm.ir.assert_structural_equal(x, y, map_free_vars)
     tvm.ir.assert_structural_equal(y, x, map_free_vars)
 
-    xhash = tvm.ir.structural_hash(x, map_free_vars)
-    yhash = tvm.ir.structural_hash(y, map_free_vars)
+    xhash = tvm_ffi.structural_hash(x, map_free_vars)
+    yhash = tvm_ffi.structural_hash(y, map_free_vars)
 
     assert xhash == yhash
 
@@ -41,26 +45,48 @@ def _check_json_roundtrip(x):
 def test_var() -> None:
     v0 = rx.Var("v0")
     assert v0.name_hint == "v0"
-    assert v0.struct_info_ is None
+    assert v0.ty is None
     shape = [54, 96]
     v1 = rx.Var("v1", R.Tensor(shape, "float32"))
     assert v1.name_hint == "v1"
-    for s0, s1 in zip(v1.struct_info.shape, shape):
+    for s0, s1 in zip(v1.ty.shape, shape):
         assert s0 == s1
-    tvm.ir.assert_structural_equal(v1.struct_info, rx.TensorStructInfo(shape, "float32"))
+    tvm.ir.assert_structural_equal(v1.ty, rx.TensorType(shape, "float32"))
+
+
+def test_tensor_type_empty_dtype_is_unknown() -> None:
+    tvm.ir.assert_structural_equal(rx.TensorType([1, 2], dtype=""), rx.TensorType([1, 2], None))
+
+
+def test_relax_expr_ty_running_example() -> None:
+    m = tirx.Var("m", "int64")
+    x = rx.Var("x", R.Tensor([m, 16], "float32"))
+
+    assert isinstance(x.ty, tvm.ir.Type)
+    assert x.ty.dtype == "float32"
+    assert x.ty.ndim == 2
+
+    call = rx.op.add(x, x)
+    assert call.ty is None
+
+    bb = rx.BlockBuilder()
+    normalized = bb.normalize(call)
+
+    assert isinstance(normalized.ty, tvm.ir.Type)
+    tvm.ir.assert_structural_equal(normalized.ty, x.ty)
 
 
 def test_dataflow_var() -> None:
     v0 = rx.DataflowVar("v0")
     assert v0.name_hint == "v0"
-    assert v0.struct_info_ is None
+    assert v0.ty is None
 
     shape = [54, 96]
     v1 = rx.DataflowVar("v1", R.Tensor(shape, "float16"))
     assert v1.name_hint == "v1"
 
     assert isinstance(v1, rx.DataflowVar)
-    tvm.ir.assert_structural_equal(v1.struct_info, rx.TensorStructInfo(shape, "float16"))
+    tvm.ir.assert_structural_equal(v1.ty, rx.TensorType(shape, "float16"))
 
 
 def test_tuple() -> None:
@@ -82,29 +108,27 @@ def test_tuple() -> None:
         t[-3]
 
 
-def test_tuple_sinfo_inferred_on_construction():
-    v0 = rx.Var("v0", rx.ObjectStructInfo())
-    v1 = rx.Var("v1", rx.ObjectStructInfo())
+def test_tuple_ty_inferred_on_construction():
+    v0 = rx.Var("v0", rx.AnyType())
+    v1 = rx.Var("v1", rx.AnyType())
     tup = rx.Tuple((v0, v1))
 
-    assert tup.struct_info_ is not None
-    tvm.ir.assert_structural_equal(
-        tup.struct_info, rx.TupleStructInfo([rx.ObjectStructInfo(), rx.ObjectStructInfo()])
-    )
+    assert tup.ty is not None
+    tvm.ir.assert_structural_equal(tup.ty, rx.TupleType([rx.AnyType(), rx.AnyType()]))
 
 
-def test_tuple_sinfo_requires_fields_with_known_sinfo():
-    v0 = rx.Var("v0", rx.ObjectStructInfo())
+def test_tuple_ty_requires_fields_with_known_ty():
+    v0 = rx.Var("v0", rx.AnyType())
     v1 = rx.Var("v1")
     tup = rx.Tuple((v0, v1))
 
-    assert tup.struct_info_ is None
+    assert tup.ty is None
 
 
 def test_match_cast() -> None:
     # match_cast([16, 8], [m, n])
-    m = tir.Var("m", dtype="int64")
-    n = tir.Var("n", dtype="int64")
+    m = tirx.Var("m", dtype="int64")
+    n = tirx.Var("n", dtype="int64")
     shape = rx.const([16, 8], "int32")
     var = rx.Var("v0", R.Shape())
     b0 = rx.MatchCast(var, shape, R.Tensor([m, n], "int32"))
@@ -126,13 +150,13 @@ def test_match_cast() -> None:
 
 
 def test_match_cast() -> None:
-    m = tir.Var("m", dtype="int64")
-    n = tir.Var("n", dtype="int64")
+    m = tirx.Var("m", dtype="int64")
+    n = tirx.Var("n", dtype="int64")
     ivalue = rx.Var("input_value")
-    sinfo = rx.TensorStructInfo([n, m], "float32")
-    b0 = rx.MatchCast(rx.Var("v"), ivalue, sinfo)
+    ty = rx.TensorType([n, m], "float32")
+    b0 = rx.MatchCast(rx.Var("v"), ivalue, ty)
     assert b0.value.same_as(ivalue)
-    assert b0.struct_info == sinfo
+    assert b0.ty == ty
     _check_json_roundtrip(b0)
 
 
@@ -145,8 +169,8 @@ def test_var_binding() -> None:
 
 
 def test_binding_block() -> None:
-    m = tir.Var("m", dtype="int64")
-    n = tir.Var("n", dtype="int64")
+    m = tirx.Var("m", dtype="int64")
+    n = tirx.Var("n", dtype="int64")
     shape = rx.const([16, 8], "int32")
     b0 = rx.MatchCast(rx.Var("v0"), shape, R.Tensor([m, n], "int32"))
 
@@ -160,8 +184,8 @@ def test_binding_block() -> None:
 
 
 def test_dataflow_block() -> None:
-    m = tir.Var("m", dtype="int64")
-    n = tir.Var("n", dtype="int64")
+    m = tirx.Var("m", dtype="int64")
+    n = tirx.Var("n", dtype="int64")
     shape = rx.const([16, 8], "int32")
     b0 = rx.MatchCast(rx.Var("v0"), shape, R.Tensor([m, n], "int32"))
 
@@ -190,12 +214,12 @@ def test_func():
     blocks = [rx.BindingBlock(bindings)]
 
     seqe = rx.SeqExpr(blocks, x)
-    ret_struct_info = R.Tensor(dtype="float32", ndim=-1)
-    func = rx.Function([x], seqe, ret_struct_info)
+    ret_ty = R.Tensor(dtype="float32", ndim=-1)
+    func = rx.Function([x], seqe, ret_ty)
     func = func.with_attr("global_symbol", "func")
     assert func.params[0] == x
     assert func.body == seqe
-    assert func.ret_struct_info == ret_struct_info
+    assert func.ret_ty == ret_ty
     assert func.attrs["global_symbol"] == "func"
 
 
@@ -208,8 +232,8 @@ def test_shape_of():
 
 
 def test_shape_expr():
-    m = tir.Var("m", dtype="int64")
-    n = tir.Var("n", dtype="int64")
+    m = tirx.Var("m", dtype="int64")
+    n = tirx.Var("n", dtype="int64")
     s = rx.ShapeExpr([m, n])
     assert s.values[0] == m
     assert s.values[1] == n
@@ -217,7 +241,7 @@ def test_shape_expr():
     assert s[1] == n
     assert s[-1] == n
     assert s[-2] == m
-    assert isinstance(s.struct_info, rx.ShapeStructInfo)
+    assert isinstance(s.ty, rx.ShapeType)
 
     with pytest.raises(IndexError, match="ShapeExpr index out of range"):
         s[2]
@@ -228,42 +252,54 @@ def test_shape_expr():
     shape_expr = rx.ShapeExpr([10, 20])
     assert shape_expr.values[0] == 10
     assert shape_expr.values[1] == 20
-    tvm.ir.assert_structural_equal(shape_expr.struct_info, R.Shape((10, 20)))
+    tvm.ir.assert_structural_equal(shape_expr.ty, R.Shape((10, 20)))
 
     x = rx.Var("v0", R.Tensor((10, 20), "float32"))
-    assert x.struct_info.shape[0] == 10
-    assert x.struct_info.shape[1] == 20
-    tvm.ir.assert_structural_equal(x.struct_info.shape.struct_info, R.Shape((10, 20)))
+    assert x.ty.shape[0] == 10
+    assert x.ty.shape[1] == 20
+    tvm.ir.assert_structural_equal(x.ty.shape.ty, R.Shape((10, 20)))
 
-    m = tir.Var("m", "int32")
-    with pytest.raises(
-        tvm.TVMError, match="the value in ShapeStructInfo can only have dtype of int64"
-    ):
+    m = tirx.Var("m", "int32")
+    with pytest.raises(RuntimeError, match="the value in ShapeType can only have dtype of int64"):
         rx.ShapeExpr([m, 3])
 
 
-def test_prim_value():
-    pv = rx.PrimValue(tir.IntImm("int64", 1))
-    assert pv.value.value == 1
-    _check_equal(pv, rx.PrimValue(tir.IntImm("int64", 1)))
-    _check_json_roundtrip(pv)
+def test_prim_value_helper_from_python_scalar():
+    int_value = rx.prim_value(1)
+    assert isinstance(int_value, tirx.IntImm)
+    tvm.ir.assert_structural_equal(int_value.ty, tvm.ir.PrimType("int64"))
+    assert int_value.value == 1
+
+    np_int_value = rx.prim_value(np.int32(2))
+    assert isinstance(np_int_value, tirx.IntImm)
+    tvm.ir.assert_structural_equal(np_int_value.ty, tvm.ir.PrimType("int64"))
+    assert np_int_value.value == 2
+
+    float_value = rx.prim_value(1.0)
+    assert isinstance(float_value, tirx.FloatImm)
+    tvm.ir.assert_structural_equal(float_value.ty, tvm.ir.PrimType("float64"))
+    assert float_value.value == 1.0
+
+    np_float_value = rx.prim_value(np.float32(1.5))
+    assert isinstance(np_float_value, tirx.FloatImm)
+    tvm.ir.assert_structural_equal(np_float_value.ty, tvm.ir.PrimType("float64"))
+    assert np_float_value.value == 1.5
 
 
-def test_prim_value_with_var():
-    n = tir.Var("n", "int64")
-    pv = rx.PrimValue(n)
-    assert pv.value.same_as(n)
-    tvm.ir.assert_structural_equal(pv.struct_info, rx.PrimStructInfo(value=n))
-    _check_equal(pv, rx.PrimValue(n))
-    _check_json_roundtrip(pv)
+def test_prim_value_helper_preserves_prim_expr():
+    float_imm = tirx.FloatImm("float32", 1.0)
+    assert rx.prim_value(float_imm).same_as(float_imm)
+    assert R.prim_value(float_imm).same_as(float_imm)
+
+    n = tirx.Var("n", "int64")
+    expr = n + 1
+    assert rx.prim_value(n).same_as(n)
+    assert rx.prim_value(expr).same_as(expr)
 
 
-def test_prim_value_with_expr():
-    n = tir.Var("n", "int64")
-    pv = rx.PrimValue(n + 1)
-    tvm.ir.assert_structural_equal(pv.struct_info, rx.PrimStructInfo(value=n + 1))
-    _check_equal(pv, rx.PrimValue(n + 1))
-    _check_json_roundtrip(pv)
+def test_prim_value_helper_rejects_relax_expr():
+    with pytest.raises(TypeError, match="Cannot convert"):
+        rx.prim_value(rx.Var("x"))
 
 
 def test_string_imm():
@@ -283,8 +319,8 @@ def test_datatype_imm():
 
 
 def test_call():
-    dtype = rx.PrimStructInfo("int32")
-    func = rx.Var("func", rx.FuncStructInfo([dtype], dtype))
+    dtype = tvm.ir.PrimType("int32")
+    func = rx.Var("func", rx.FuncType([dtype], dtype))
     arg = rx.Var("arg", dtype)
     call = rx.Call(func, [arg])
     assert call.op.same_as(func)
@@ -293,13 +329,38 @@ def test_call():
 
 
 def test_call_raises_error_for_invalid_function():
-    """relax::Call requires the function to have FuncStructInfo"""
-    dtype = rx.PrimStructInfo("int32")
+    """relax::Call requires the function to have FuncType"""
+    dtype = tvm.ir.PrimType("int32")
     func = rx.Var("func", dtype)
     arg = rx.Var("arg", dtype)
 
     with pytest.raises(ValueError):
         rx.Call(func, [arg])
+
+
+def test_call_raises_error_for_missing_operator():
+    """relax::Call requires a defined operator."""
+    with pytest.raises(ValueError, match="defined operator"):
+        rx.Call(None, [])
+
+
+if __name__ == "__main__":
+    tvm.testing.main()
+
+
+def test_make_shape_invalid_type():
+    with pytest.raises(TypeError):
+        make_shape(123)
+
+
+def test_make_shape_valid_list():
+    shape = make_shape([1, 2, 3])
+    assert len(shape) == 3
+
+
+def test_make_shape_valid_tuple():
+    shape = make_shape((4, 5))
+    assert len(shape) == 2
 
 
 if __name__ == "__main__":

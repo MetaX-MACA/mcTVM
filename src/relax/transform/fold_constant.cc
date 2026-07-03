@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <tvm/ffi/cast.h>
+#include <tvm/ffi/extra/module.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/function.h>
 #include <tvm/relax/analysis.h>
@@ -24,9 +26,9 @@
 #include <tvm/relax/op_attr_types.h>
 #include <tvm/relax/transform.h>
 #include <tvm/relax/type.h>
-#include <tvm/runtime/module.h>
-#include <tvm/tir/function.h>
-#include <tvm/tir/op.h>
+#include <tvm/runtime/logging.h>
+#include <tvm/tirx/function.h>
+#include <tvm/tirx/op.h>
 
 namespace tvm {
 namespace relax {
@@ -35,7 +37,7 @@ class ConstantFolder : public ExprMutator {
  public:
   static Function Fold(Function func, IRModule ctx_module) {
     ConstantFolder folder(std::move(ctx_module));
-    func = Downcast<Function>(RemoveAllUnused(folder(func)));
+    func = RemoveAllUnused(folder(func)).as_or_throw<Function>();
     return func;
   }
 
@@ -43,22 +45,21 @@ class ConstantFolder : public ExprMutator {
   explicit ConstantFolder(IRModule ctx_module) : ExprMutator(ctx_module) {}
 
   /*!
-   * \brief Pattern match the shape inside the given struct info to a
+   * \brief Pattern match the shape inside the given type to a
    * constant shape and get runtime shape tuple from it.
-   * \param struct_info The given struct info whose shape inside is to be casted.
+   * \param ty The given type whose shape inside is to be casted.
    * \return The runtime shape tuple, or nullopt if it is not a constant shape.
-   * \note Only TensorStructInfo is supported at this moment. Return std::nullopt
-   * if the input struct info is not TensorStructInfo.
+   * \note Only TensorType is supported. Returns std::nullopt
+   * if the input type is not TensorType.
    */
-  static ffi::Optional<ffi::Shape> MatchConstShape(const StructInfo& struct_info) {
-    // Only support single output for call_tir at this moment.
-    const auto* tensor_sinfo = struct_info.as<TensorStructInfoNode>();
-    if (tensor_sinfo == nullptr) {
+  static ffi::Optional<ffi::Shape> MatchConstShape(const Type& ty) {
+    const auto* tensor_ty = ty.as<TensorTypeNode>();
+    if (tensor_ty == nullptr) {
       return std::nullopt;
     }
 
-    const auto* shape = tensor_sinfo->shape.as<ShapeExprNode>();
-    ICHECK(shape != nullptr) << "struct info given by call_tir should have ShapeExpr shape";
+    const auto* shape = tensor_ty->shape.as<ShapeExprNode>();
+    TVM_FFI_ICHECK(shape != nullptr) << "type given by call_tir should have ShapeExpr shape";
 
     std::vector<int64_t> shape_values;
     for (const auto v : shape->values) {
@@ -88,12 +89,12 @@ class ConstantFolder : public ExprMutator {
    * \brief Pattern match op to a TIR function and look it up.
    * \return The TIR function, or nullopt if pattern match fails.
    */
-  ffi::Optional<tir::PrimFunc> MatchPrimFunc(const Expr& op) {
-    const GlobalVar& global_var = Downcast<GlobalVar>(op);
+  ffi::Optional<tirx::PrimFunc> MatchPrimFunc(const Expr& op) {
+    const GlobalVar& global_var = op.as_or_throw<GlobalVar>();
     // NOTE: as check works for nullptr(returns null)
     ffi::Optional<BaseFunc> base_func = builder_->GetContextIRModule()->functions.Get(global_var);
-    if (auto* pfunc = base_func.as<tir::PrimFuncNode>()) {
-      return ffi::GetRef<tir::PrimFunc>(pfunc);
+    if (auto* pfunc = base_func.as<tirx::PrimFuncNode>()) {
+      return ffi::GetRef<tirx::PrimFunc>(pfunc);
     }
     return std::nullopt;
   }
@@ -102,7 +103,7 @@ class ConstantFolder : public ExprMutator {
    * \brief Get a cached build version of func
    * \return The cached func, nullopt if func cannot be built.
    */
-  ffi::Optional<ffi::Function> GetCachedBuild(tir::PrimFunc func) {
+  ffi::Optional<ffi::Function> GetCachedBuild(tirx::PrimFunc func) {
     // TODO(tvm-team): consider another way of bulk extract and build PrimFunc once
     // would be helpful for future cases where PrimFunc recursively call into each other
     Target eval_cpu_target{"llvm"};
@@ -118,11 +119,11 @@ class ConstantFolder : public ExprMutator {
       // already scheduled to only work on GPU, we will need to skip this in the const folder for
       // now
       // TODO(Hongyi): further check and narrow the scope of foldable function
-      const auto pf = tvm::ffi::Function::GetGlobalRequired("tir.build");
+      const auto pf = tvm::ffi::Function::GetGlobalRequired("tirx.build");
       func = WithAttr(func, tvm::attr::kGlobalSymbol, ffi::String("tir_function"));
       ffi::Module rt_module = pf(func, eval_cpu_target).cast<ffi::Module>();
       build_func = rt_module->GetFunction("tir_function");
-    } catch (const tvm::Error& err) {
+    } catch (const tvm::ffi::Error& err) {
       // build failure may happen in which case we skip
       DLOG(WARNING) << "Build failure for function " << func << ", Error message: " << err.what();
     }
@@ -137,17 +138,66 @@ class ConstantFolder : public ExprMutator {
    * folding iota ops could result in large constants being materialized, thus increasing the size
    * of the program.
    */
-  bool ShouldBeFolded(Expr expr) {
-    // TODO(prakalp): Implement a heuristic to check if folding this expr is actually useful or
-    // not.
-    return true;
+  static bool ExprContainsTensor(const Expr& expr) {
+    if (GetType(expr).as<TensorTypeNode>()) {
+      return true;
+    }
+    if (const auto* tuple = expr.as<TupleNode>()) {
+      for (const auto& field : tuple->fields) {
+        if (ExprContainsTensor(field)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
-  // Try constant evaluate the function call
-  // if failed return std::nullopt
-  ffi::Optional<Expr> ConstEvaluateCallTIR(tir::PrimFunc tir_func,
+  bool ShouldBeFolded(Expr expr) {
+    // Skip folding for creation ops (no tensor inputs) that produce large outputs.
+    // These ops (e.g., zeros, ones, full, arange) are cheap to compute at runtime,
+    // and folding them would materialize large constants in the binary.
+    static constexpr int64_t kMaxFoldElements = 1024;
+
+    const auto* call = expr.as<CallNode>();
+    if (!call) return true;
+
+    const auto* tensor_ty = call->ty.as<TensorTypeNode>();
+    if (!tensor_ty) return true;
+
+    auto opt_shape = tensor_ty->GetShape();
+    if (!opt_shape) return true;
+
+    int64_t num_elements = 1;
+    for (const auto& dim : opt_shape.value()) {
+      const auto* int_dim = dim.as<IntImmNode>();
+      if (!int_dim) return true;
+      int64_t d = int_dim->value;
+      if (d <= 0) return true;
+      if (num_elements > kMaxFoldElements / d) {
+        num_elements = kMaxFoldElements + 1;
+        break;
+      }
+      num_elements *= d;
+    }
+
+    if (num_elements <= kMaxFoldElements) return true;
+
+    // Large output. Only skip if there are no tensor inputs,
+    // i.e., this is a pure creation op.
+    for (const auto& arg : call->args) {
+      if (ExprContainsTensor(arg)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  // Try constant evaluate a call_tir with a single tensor output.
+  // Returns std::nullopt on failure.
+  ffi::Optional<Expr> ConstEvaluateCallTIR(tirx::PrimFunc tir_func,
                                            ffi::Array<runtime::Tensor> arr_args, ffi::Shape shape,
-                                           DataType ret_type) {
+                                           DLDataType ret_type) {
     // obtain function from the cache.
     ffi::Optional<ffi::Function> func = GetCachedBuild(tir_func);
     if (!func) return std::nullopt;
@@ -175,25 +225,74 @@ class ConstantFolder : public ExprMutator {
     return Constant(ret_tensor);
   }
 
+  // Try constant evaluate a call_tir with tuple outputs (multiple output tensors).
+  // Returns std::nullopt on failure.
+  ffi::Optional<Expr> ConstEvaluateCallTIRTuple(tirx::PrimFunc tir_func,
+                                                ffi::Array<runtime::Tensor> arr_args,
+                                                const TupleTypeNode* tuple_ty) {
+    ffi::Optional<ffi::Function> func = GetCachedBuild(tir_func);
+    if (!func) return std::nullopt;
+
+    DLDevice cpu_dev = {DLDeviceType::kDLCPU, 0};
+    size_t num_outputs = tuple_ty->fields.size();
+
+    // Match shapes and dtypes for all output fields.
+    std::vector<runtime::Tensor> ret_tensors;
+    for (size_t i = 0; i < num_outputs; ++i) {
+      ffi::Optional<ffi::Shape> shape = MatchConstShape(tuple_ty->fields[i]);
+      if (!shape) return std::nullopt;
+      auto tensor_ty = tuple_ty->fields[i].as_or_throw<TensorType>();
+      if (tensor_ty->IsUnknownDtype()) return std::nullopt;
+      ret_tensors.push_back(
+          runtime::Tensor::Empty(shape.value(), tensor_ty->dtype.value()->dtype, cpu_dev));
+    }
+
+    // Pack input args + all output tensors.
+    std::vector<runtime::Tensor> temp_args(arr_args.begin(), arr_args.end());
+    std::vector<AnyView> packed_args;
+    packed_args.reserve(temp_args.size() + num_outputs);
+    for (const auto& arg : temp_args) {
+      packed_args.push_back(arg);
+    }
+    for (const auto& out_tensor : ret_tensors) {
+      packed_args.push_back(out_tensor);
+    }
+
+    ffi::Any ret;
+    func.value().CallPacked(ffi::PackedArgs(packed_args.data(), packed_args.size()), &ret);
+
+    ffi::Array<Expr> fields;
+    for (size_t i = 0; i < num_outputs; ++i) {
+      fields.push_back(Constant(ret_tensors[i]));
+    }
+    return Tuple(fields);
+  }
+
   // Returns the folded expr if the call is successfully folded to constant, otherwise null.
   ffi::Optional<Expr> VisitCallTIR(Call call) {
-    // call_tir needs to have at least three arguments
-    ICHECK_GE(call->args.size(), 2);
-    ffi::Optional<tir::PrimFunc> func = MatchPrimFunc(call->args[0]);
-    ICHECK(call->args[1].as<TupleNode>()) << "call_tir.args[1] must be Tuple";
+    // call_tir needs to have at least two arguments
+    TVM_FFI_ICHECK_GE(call->args.size(), 2);
+    ffi::Optional<tirx::PrimFunc> func = MatchPrimFunc(call->args[0]);
+    TVM_FFI_ICHECK(call->args[1].as<TupleNode>()) << "call_tir.args[1] must be Tuple";
     ffi::Optional<ffi::Array<runtime::Tensor>> arr_args =
         MatchConstArrayArgs(call->args[1].as<TupleNode>()->fields);
-    ICHECK_EQ(call->sinfo_args.size(), 1) << "call_tir should have exactly one sinfo arg";
-    ffi::Optional<ffi::Shape> shape = MatchConstShape(call->sinfo_args[0]);
-    bool output_not_tuple = call->sinfo_args.size() == 1;
-    // Pattern 0: call constant function, const argument with const shape.
-    if (func && arr_args && shape && output_not_tuple) {
-      TensorStructInfo ret_sinfo = Downcast<TensorStructInfo>(call->struct_info_);
-      // value_or will return value if it is not null, otherwise return or
-      return ConstEvaluateCallTIR(func.value(), arr_args.value(), shape.value(), ret_sinfo->dtype)
+    TVM_FFI_ICHECK_EQ(call->ty_args.size(), 1) << "call_tir should have exactly one ty arg";
+
+    if (!func || !arr_args) return {};
+
+    // Handle tuple output: ty_args[0] is a TupleType.
+    if (const auto* tuple_ty = call->ty_args[0].as<TupleTypeNode>()) {
+      return ConstEvaluateCallTIRTuple(func.value(), arr_args.value(), tuple_ty);
+    }
+
+    // Handle single tensor output.
+    ffi::Optional<ffi::Shape> shape = MatchConstShape(call->ty_args[0]);
+    if (shape) {
+      TensorType ret_ty = call->ty.as_or_throw<TensorType>();
+      return ConstEvaluateCallTIR(func.value(), arr_args.value(), shape.value(),
+                                  ret_ty->dtype.value()->dtype)
           .value_or({});
     }
-    // TODO(hongyi): support const-fold tuple outputs
     return {};
   }
 
@@ -205,7 +304,7 @@ class ConstantFolder : public ExprMutator {
   // this pass to fold `tensor_to_shape` op.
   Expr VisitExpr_(const CallNode* call) final {
     // post-order mutation
-    Call post_call = Downcast<Call>(VisitExprPostOrder_(call));
+    Call post_call = VisitExprPostOrder_(call).as_or_throw<Call>();
 
     // Check if it is useful to fold this call
     if (!ShouldBeFolded(post_call)) return post_call;
@@ -235,7 +334,7 @@ class ConstantFolder : public ExprMutator {
     ffi::Array<Expr> new_args;
     for (auto arg : post_call->args) {
       if (arg->IsInstance<VarNode>()) {
-        ffi::Optional<Expr> val = LookupBinding(Downcast<Var>(arg));
+        ffi::Optional<Expr> val = LookupBinding(arg.as_or_throw<Var>());
         if (val.defined() && val.value()->IsInstance<ShapeExprNode>()) {
           new_args.push_back(val.value());
           continue;
@@ -244,14 +343,14 @@ class ConstantFolder : public ExprMutator {
       new_args.push_back(arg);
     }
     post_call =
-        Call(post_call->op, new_args, post_call->attrs, post_call->sinfo_args, post_call->span);
+        Call(post_call->op, new_args, post_call->attrs, post_call->ty_args, post_call->span);
 
     // If we are in a dataflow block, we can fold ops.
     if (builder_->CurrentBlockIsDataFlow()) {
       // Check if we can them to call_tir
       if (legalize_map.count(op)) {
         // Get the legalized expression
-        Call post_call_normalized = Downcast<Call>(builder_->Normalize(post_call));
+        Call post_call_normalized = builder_->Normalize(post_call).as_or_throw<Call>();
         Expr legalized_expr = builder_->Normalize(legalize_map[op](builder_, post_call_normalized));
         // If the legalized expression is call_tir, try to fold it.
         const CallNode* call = legalized_expr.as<CallNode>();
@@ -266,20 +365,20 @@ class ConstantFolder : public ExprMutator {
         //   Thus, this is a temporary solution until we have a consensus about
         //   how to deal with composite ops. One possibility is we register the
         //   decomposition map for each op in a similar way we do for legalization.
-        ICHECK_EQ(post_call->args.size(), 1);
+        TVM_FFI_ICHECK_EQ(post_call->args.size(), 1);
         Expr arg = post_call->args[0];
         if (arg->IsInstance<ConstantNode>()) {
-          Constant constant = Downcast<Constant>(arg);
+          Constant constant = arg.as_or_throw<Constant>();
           runtime::Tensor ndarray = constant->data;
-          ICHECK_EQ(ndarray->device.device_type, kDLCPU);
-          ICHECK(ndarray.IsContiguous());
-          ICHECK_EQ(ndarray->byte_offset, 0);
-          ICHECK_EQ(ndarray->ndim, 1);
+          TVM_FFI_ICHECK_EQ(ndarray->device.device_type, kDLCPU);
+          TVM_FFI_ICHECK(ndarray.IsContiguous());
+          TVM_FFI_ICHECK_EQ(ndarray->byte_offset, 0);
+          TVM_FFI_ICHECK_EQ(ndarray->ndim, 1);
           const int64_t* data = static_cast<const int64_t*>(ndarray->data);
           int64_t num_elems = ndarray->shape[0];
           ffi::Array<PrimExpr> shape_values;
           for (int64_t i = 0; i < num_elems; i++) {
-            shape_values.push_back(IntImm(DataType::Int(64), data[i]));
+            shape_values.push_back(IntImm::Int64(data[i]));
           }
           return ShapeExpr(shape_values);
         }
@@ -287,14 +386,14 @@ class ConstantFolder : public ExprMutator {
         // Special handling for "relax.shape_to_tensor" since it is implemented in ffi::Function.
         // TODO(sunggg): revisit this when we extend ConstantFolding to fold ffi::Function.
         Expr arg = post_call->args[0];
-        ShapeExpr shape = Downcast<ShapeExpr>(arg);
+        ShapeExpr shape = arg.as_or_throw<ShapeExpr>();
         ffi::Array<PrimExpr> values = shape->values;
-        ffi::Array<Integer> arr;
+        ffi::Array<int64_t> arr;
         bool is_known = true;
         for (size_t i = 0; i < values.size(); i++) {
           PrimExpr val = values[i];
-          arr.push_back(ffi::GetRef<IntImm>(val.as<IntImmNode>()));
-          is_known &= (val.dtype() == DataType::Int(64));
+          arr.push_back(val.as<IntImmNode>()->value);
+          is_known &= val.ty().MatchesElementType(DLDataTypeCode::kDLInt, 64);
         }
         if (is_known) {
           const auto func = tvm::ffi::Function::GetGlobalRequired("relax.run.shape_to_tensor");
@@ -317,7 +416,8 @@ class ConstantFolder : public ExprMutator {
   }
 
   // cache for function build, via structural equality
-  std::unordered_map<tir::PrimFunc, ffi::Optional<ffi::Function>, StructuralHash, StructuralEqual>
+  std::unordered_map<tirx::PrimFunc, ffi::Optional<ffi::Function>, ffi::StructuralHash,
+                     ffi::StructuralEqual>
       func_build_cache_;
 };
 

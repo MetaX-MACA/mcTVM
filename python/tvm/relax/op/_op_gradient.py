@@ -16,48 +16,46 @@
 # under the License.
 # pylint: disable=unused-argument, redefined-builtin, invalid-name
 """Gradient definitions for Relax operators."""
+
 import functools
 import operator
-from typing import List
 
 from tvm import relax
-from tvm.base import TVMError
 from tvm.arith import Analyzer
-from tvm.relax.struct_info import ShapeStructInfo
+from tvm.ir import PrimType
+from tvm.relax.type import ShapeType
 
+from ...tirx import PrimExpr
 from ..block_builder import BlockBuilder
-from ..expr import Call, Var, Expr, ShapeExpr
-from ...tir import PrimExpr
-
+from ..expr import Call, Expr, ShapeExpr, Var
 from .base import register_gradient
-from .binary import less, greater_equal
+from .binary import greater_equal, less
 from .create import triu
 from .datatype import astype
 from .grad import (
-    no_grad,
-    nll_loss_backward,
-    max_pool2d_backward,
     avg_pool2d_backward,
+    max_pool2d_backward,
+    nll_loss_backward,
+    no_grad,
     take_backward,
 )
 from .index import strided_slice
 from .linear_algebra import matmul
 from .manipulate import (
-    collapse_sum_to,
     broadcast_to,
-    permute_dims,
-    expand_dims,
+    collapse_sum_to,
     concat,
+    expand_dims,
+    flatten,
+    permute_dims,
     reshape,
     split,
     squeeze,
-    flatten,
 )
-from .nn import conv2d_transpose, conv2d
+from .nn import conv2d, conv2d_transpose
 from .search import where
-from .statistical import sum, cumsum
-from .unary import cos, exp, log, sin, sigmoid
-
+from .statistical import cumsum, sum
+from .unary import cos, exp, log, sigmoid, sin
 
 # TODO(yixin, chaofan): handle symbolic shape for most of the gradients
 
@@ -68,9 +66,9 @@ from .unary import cos, exp, log, sin, sigmoid
 def _get_shape(expr: Expr) -> ShapeExpr:
     """Get the shape from a Tensor expr."""
     try:
-        shape = expr.struct_info.shape
+        shape = expr.ty.shape
     except Exception as error:
-        raise TVMError(
+        raise RuntimeError(
             f"Get the shape of {expr} failed. Please normalize it first and ensure it is a Tensor."
         ) from error
     return shape
@@ -79,27 +77,29 @@ def _get_shape(expr: Expr) -> ShapeExpr:
 def _get_dtype(expr: Expr) -> str:
     """Get the dtype from a Tensor expr."""
     try:
-        dtype = expr.struct_info.dtype
+        dtype = expr.ty.dtype
     except Exception as error:
-        raise TVMError(
+        raise RuntimeError(
             f"Get the dtype of {expr} failed. Please normalize it first and ensure it is a Tensor."
         ) from error
+    if isinstance(dtype, PrimType):
+        dtype = dtype.dtype
     return dtype
 
 
 def _fit_shape(bb: BlockBuilder, input_grad: Expr, input: Expr) -> Expr:
     """When expr and target has the same shape, return expr;
-    otherwise return `collapse_sum_to(expr, target.struct_info.shape)`.
+    otherwise return `collapse_sum_to(expr, target.ty.shape)`.
 
     Will use BlockBuilder to normalize expr first.
     """
     target_shape = _get_shape(input)
-    expr_sinfo = _get_shape(bb.normalize(input_grad)).struct_info
-    target_sinfo = target_shape.struct_info
-    assert isinstance(expr_sinfo, ShapeStructInfo)
-    assert isinstance(target_sinfo, ShapeStructInfo)
+    expr_ty = _get_shape(bb.normalize(input_grad)).ty
+    target_ty = target_shape.ty
+    assert isinstance(expr_ty, ShapeType)
+    assert isinstance(target_ty, ShapeType)
 
-    def _check_shape_equal(lhs: ShapeStructInfo, rhs: ShapeStructInfo):
+    def _check_shape_equal(lhs: ShapeType, rhs: ShapeType):
         if len(lhs.values) != len(rhs.values):
             return False
         analyzer = Analyzer()
@@ -110,7 +110,7 @@ def _fit_shape(bb: BlockBuilder, input_grad: Expr, input: Expr) -> Expr:
 
     return (
         input_grad
-        if _check_shape_equal(expr_sinfo, target_sinfo)
+        if _check_shape_equal(expr_ty, target_ty)
         else collapse_sum_to(input_grad, target_shape)
     )
 
@@ -132,7 +132,7 @@ def add_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of add.
 
     Forward Form:
@@ -153,7 +153,7 @@ def subtract_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of subtract.
 
     Forward Form:
@@ -174,7 +174,7 @@ def multiply_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of multiply.
 
     Forward Form:
@@ -196,7 +196,7 @@ def divide_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of divide.
 
     Forward Form:
@@ -218,7 +218,7 @@ def power_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of power.
 
     Forward Form:
@@ -243,7 +243,7 @@ def maximum_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of maximum.
 
     Forward Form:
@@ -267,7 +267,7 @@ def minimum_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of minimum.
 
     Forward Form:
@@ -296,7 +296,7 @@ def equal_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     return [no_grad(orig_call.args[0]), no_grad(orig_call.args[1])]
 
 
@@ -306,7 +306,7 @@ def greater_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     return [no_grad(orig_call.args[0]), no_grad(orig_call.args[1])]
 
 
@@ -316,7 +316,7 @@ def greater_equal_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     return [no_grad(orig_call.args[0]), no_grad(orig_call.args[1])]
 
 
@@ -326,7 +326,7 @@ def less_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     return [no_grad(orig_call.args[0]), no_grad(orig_call.args[1])]
 
 
@@ -336,7 +336,7 @@ def less_equal_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     return [no_grad(orig_call.args[0]), no_grad(orig_call.args[1])]
 
 
@@ -346,7 +346,7 @@ def not_equal_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     return [no_grad(orig_call.args[0]), no_grad(orig_call.args[1])]
 
 
@@ -361,7 +361,7 @@ def zeros_like_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     return [no_grad(orig_call.args[0])]
 
 
@@ -371,7 +371,7 @@ def ones_like_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     return [no_grad(orig_call.args[0])]
 
 
@@ -381,7 +381,7 @@ def full_like_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     return [no_grad(orig_call.args[0]), no_grad(orig_call.args[1])]
 
 
@@ -391,7 +391,7 @@ def zeros_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     return [no_grad(orig_call.args[0])]
 
 
@@ -401,7 +401,7 @@ def ones_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     return [no_grad(orig_call.args[0])]
 
 
@@ -411,7 +411,7 @@ def full_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     return [no_grad(orig_call.args[0]), no_grad(orig_call.args[1])]
 
 
@@ -424,7 +424,7 @@ def triu_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of triu.
 
     Forward Form:
@@ -446,7 +446,7 @@ def abs_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of abs.
 
     Forward Form:
@@ -467,7 +467,7 @@ def cos_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of cos.
 
     Forward Form:
@@ -485,7 +485,7 @@ def exp_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of exp.
 
     Forward Form:
@@ -503,7 +503,7 @@ def log_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of log.
 
     Forward Form:
@@ -521,7 +521,7 @@ def negative_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of negative.
 
     Forward Form:
@@ -539,7 +539,7 @@ def sigmoid_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of sigmoid.
 
     Forward Form:
@@ -558,7 +558,7 @@ def sin_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of sin.
 
     Forward Form:
@@ -576,7 +576,7 @@ def sqrt_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of sqrt.
 
     Forward Form:
@@ -596,7 +596,7 @@ def tanh_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of tanh.
 
     Forward Form:
@@ -618,7 +618,7 @@ def sum_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of sum.
 
     Forward Form:
@@ -642,7 +642,7 @@ def mean_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of mean.
 
     Forward Form:
@@ -669,7 +669,7 @@ def variance_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of variance.
 
     Forward Form:
@@ -701,7 +701,7 @@ def permute_dims_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of permute_dims.
 
     Forward Form:
@@ -726,7 +726,7 @@ def concat_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of concat.
 
     Forward Form:
@@ -738,14 +738,14 @@ def concat_grad(
     axis = orig_call.attrs.axis
     assert axis is not None
     axis = int(axis)
-    split_indices: List[PrimExpr] = []
-    sinfo = orig_call.args[0].struct_info
-    assert isinstance(sinfo, relax.TupleStructInfo)
-    for i in range(len(sinfo.fields) - 1):
-        tensor_sinfo = sinfo.fields[i]
-        assert isinstance(tensor_sinfo, relax.TensorStructInfo)
-        assert tensor_sinfo.shape is not None
-        index = tensor_sinfo.shape[axis]
+    split_indices: list[PrimExpr] = []
+    ty = orig_call.args[0].ty
+    assert isinstance(ty, relax.TupleType)
+    for i in range(len(ty.fields) - 1):
+        tensor_ty = ty.fields[i]
+        assert isinstance(tensor_ty, relax.TensorType)
+        assert tensor_ty.shape is not None
+        index = tensor_ty.shape[axis]
         if i > 0:
             index += split_indices[i - 1]
         split_indices.append(index)
@@ -758,7 +758,7 @@ def split_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of split.
 
     Forward Form:
@@ -778,7 +778,7 @@ def expand_dims_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of expand_dims.
 
     Forward Form:
@@ -796,7 +796,7 @@ def reshape_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of reshape.
 
     Forward Form:
@@ -819,7 +819,7 @@ def cumsum_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of cumsum.
 
     Forward Form:
@@ -853,7 +853,7 @@ def broadcast_to_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of broadcast_to.
 
     Forward Form:
@@ -879,7 +879,7 @@ def take_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of take.
 
     Forward Form:
@@ -908,7 +908,7 @@ def where_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of where.
 
     Forward Form:
@@ -940,7 +940,7 @@ def matmul_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of matmul.
 
     Forward Form:
@@ -1000,7 +1000,7 @@ def astype_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of astype.
 
     Forward Form:
@@ -1021,7 +1021,7 @@ def relu_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of relu.
 
     Forward Form:
@@ -1041,7 +1041,7 @@ def silu_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of silu.
 
     Forward Form:
@@ -1062,7 +1062,7 @@ def softmax_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of softmax.
 
     Forward Form:
@@ -1080,7 +1080,7 @@ def log_softmax_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of log_softmax.
 
     Forward Form:
@@ -1099,7 +1099,7 @@ def cross_entropy_with_logits_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of cross_entropy_with_logits.
 
     Forward Form:
@@ -1111,7 +1111,7 @@ def cross_entropy_with_logits_grad(
     """
     x, y = orig_call.args
 
-    if x.struct_info.ndim > 1:
+    if x.ty.ndim > 1:
         batch_size = int(_get_shape(x)[0])
         output_grad = output_grad / relax.const(batch_size, _get_dtype(output_grad))
 
@@ -1170,7 +1170,7 @@ def conv2d_grad(
     orig_call: Call,
     output_grad: Var,
     ctx: BlockBuilder,
-) -> List[Expr]:
+) -> list[Expr]:
     """Gradient of conv2d. Now only supports `NCHW` data layout and `OIHW` kernel layout.
 
     Forward Form:
@@ -1202,7 +1202,7 @@ kernel_layout, out_layout, out_dtype)`
     out_h = (grad_h - 1) * stride_h - pad_top - pad_bottom + filter_h
     out_w = (grad_w - 1) * stride_w - pad_left - pad_right + filter_w
 
-    output_padding = (in_h - out_h, in_w - out_w)
+    output_padding = (int(in_h - out_h), int(in_w - out_w))
 
     data_grad = conv2d_transpose(  # type: ignore
         output_grad,

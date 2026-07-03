@@ -25,9 +25,10 @@
 #define TVM_RUNTIME_DEVICE_API_H_
 
 #include <tvm/ffi/any.h>
+#include <tvm/ffi/error.h>
 #include <tvm/ffi/optional.h>
+#include <tvm/ffi/string.h>
 #include <tvm/runtime/base.h>
-#include <tvm/runtime/logging.h>
 
 #include <string>
 /*!
@@ -98,7 +99,6 @@ enum DeviceAttrKind : int {
   kTotalGlobalMemory = 14,
   kAvailableGlobalMemory = 15,
   kImagePitchAlignment = 16,
-  kMxcArch = 17,
 };
 
 #ifdef TVM_KALLOC_ALIGNMENT
@@ -126,7 +126,7 @@ constexpr int kDefaultWorkspaceAlignment = 1;
  *  \brief TVM Runtime Device API, abstracts the device
  *  specific interface for memory management.
  */
-class TVM_DLL DeviceAPI {
+class TVM_RUNTIME_DLL DeviceAPI {
  public:
   /*! \brief virtual destructor */
   virtual ~DeviceAPI() {}
@@ -345,12 +345,14 @@ inline const char* DLDeviceType2Str(int type) {
       return "webgpu";
     case kDLHexagon:
       return "hexagon";
+    case kDLTrn:
+      return "trn";
     case kDLMACA:
       return "maca";
     case kDLMACAHost:
       return "maca_host";
     default:
-      LOG(FATAL) << "unknown type = " << type;
+      TVM_FFI_THROW(InternalError) << "unknown type = " << type;
   }
   throw;
 }
@@ -369,7 +371,7 @@ inline bool IsRPCSessionDevice(Device dev) { return (dev.device_type / kRPCSessM
  * \return the table index.
  */
 inline int GetRPCSessionIndex(Device dev) {
-  ICHECK(IsRPCSessionDevice(dev)) << "GetRPCSessionIndex: dev has no RPC session";
+  TVM_FFI_ICHECK(IsRPCSessionDevice(dev)) << "GetRPCSessionIndex: dev has no RPC session";
   return dev.device_type / kRPCSessMask - 1;
 }
 
@@ -402,12 +404,26 @@ inline std::ostream& operator<<(std::ostream& os, DLDevice dev) {  // NOLINT(*)
  * \return A Device with RPC session mask added, valid on the RPC client.
  */
 inline Device AddRPCSessionMask(Device dev, int session_table_index) {
-  CHECK(!IsRPCSessionDevice(dev)) << "AddRPCSessionMask: dev already non-zero RPCSessionIndex: "
-                                  << dev;
+  TVM_FFI_ICHECK(!IsRPCSessionDevice(dev))
+      << "AddRPCSessionMask: dev already non-zero RPCSessionIndex: " << dev;
   dev.device_type =
       static_cast<DLDeviceType>(dev.device_type | (kRPCSessMask * (session_table_index + 1)));
   return dev;
 }
+
+/*!
+ * \brief Check if runtime module is enabled for target.
+ * \param target The target module name.
+ * \return Whether runtime is enabled.
+ */
+TVM_RUNTIME_DLL bool RuntimeEnabled(const ffi::String& target);
+
+/*! \brief namespace for constant symbols */
+namespace symbol {
+constexpr const char* tvm_global_barrier_state = "__tvm_global_barrier_state";
+/*! \brief global function to set device */
+constexpr const char* tvm_set_device = "__tvm_set_device";
+}  // namespace symbol
 
 }  // namespace runtime
 }  // namespace tvm

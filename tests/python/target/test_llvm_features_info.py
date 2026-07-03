@@ -17,7 +17,7 @@
 import pytest
 
 import tvm
-from tvm.target import _ffi_api, codegen, Target
+from tvm.target import Target, _ffi_api, codegen
 
 LLVM_VERSION = codegen.llvm_version_major()
 
@@ -39,7 +39,7 @@ def test_llvm_targets(capfd):
     assert str(codegen.llvm_get_targets()) == str(_ffi_api.llvm_get_targets())
 
     tvm.target.codegen.llvm_get_cpu_features(
-        tvm.target.Target("llvm -mtriple=x86_64-linux-gnu -mcpu=dummy")
+        tvm.target.Target({"kind": "llvm", "mtriple": "x86_64-linux-gnu", "mcpu": "dummy"})
     )
     expected_str = (
         " with `-mcpu=dummy` is not valid in "
@@ -50,25 +50,26 @@ def test_llvm_targets(capfd):
     assert expected_str in readout_error
 
 
-min_llvm_version, llvm_target, cpu_arch, cpu_features, is_supported = tvm.testing.parameters(
-    (-1, "x86_64", "sandybridge", "sse4.1", True),
-    (-1, "x86_64", "ivybridge", ["sse4.1", "ssse3"], True),
-    (-1, "x86_64", "ivybridge", ["sse4.1", "ssse3", "avx512bw"], False),
-    # 32bit vs 64bit
-    (-1, "aarch64", "cortex-a55", "neon", True),
-    (-1, "aarch64", "cortex-a55", "dotprod", True),
-    (-1, "aarch64", "cortex-a55", "dsp", False),
-    (-1, "arm", "cortex-a55", "dsp", True),
-    (-1, "aarch64", "cortex-a55", ["neon", "dotprod"], True),
-    (-1, "aarch64", "cortex-a55", ["neon", "dotprod", "dsp"], False),
-    (-1, "arm", "cortex-a55", ["neon", "dotprod"], True),
-    (-1, "aarch64", "cortex-a55", ["neon", "dotprod", "dsp"], False),
-    (-1, "arm", "cortex-a55", ["neon", "dotprod", "dsp"], True),
+@pytest.mark.parametrize(
+    "min_llvm_version,llvm_target,cpu_arch,cpu_features,is_supported",
+    [
+        (-1, "x86_64", "sandybridge", "sse4.1", True),
+        (-1, "x86_64", "ivybridge", ["sse4.1", "ssse3"], True),
+        (-1, "x86_64", "ivybridge", ["sse4.1", "ssse3", "avx512bw"], False),
+        # 32bit vs 64bit
+        (-1, "aarch64", "cortex-a55", "neon", True),
+        (-1, "aarch64", "cortex-a55", "dotprod", True),
+        (-1, "aarch64", "cortex-a55", "dsp", False),
+        (-1, "arm", "cortex-a55", "dsp", True),
+        (-1, "aarch64", "cortex-a55", ["neon", "dotprod"], True),
+        (-1, "aarch64", "cortex-a55", ["neon", "dotprod", "dsp"], False),
+        (-1, "arm", "cortex-a55", ["neon", "dotprod"], True),
+        (-1, "aarch64", "cortex-a55", ["neon", "dotprod", "dsp"], False),
+        (-1, "arm", "cortex-a55", ["neon", "dotprod", "dsp"], True),
+    ],
 )
-
-
 def test_target_features(min_llvm_version, llvm_target, cpu_arch, cpu_features, is_supported):
-    target = Target("llvm -mtriple=%s-- -mcpu=%s" % (llvm_target, cpu_arch))
+    target = Target({"kind": "llvm", "mtriple": f"{llvm_target}--", "mcpu": cpu_arch})
 
     ##
     ## legalize llvm_target

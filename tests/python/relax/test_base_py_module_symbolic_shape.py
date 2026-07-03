@@ -14,15 +14,18 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: E741
 
 import numpy as np
 import pytest
 
 import tvm
+from tvm import relax, tirx
 from tvm.ir import IRModule
 from tvm.relax.base_py_module import BasePyModule
-from tvm import tir, relax
-from tvm.script import ir as I, tir as T, relax as R
+from tvm.script import ir as I
+from tvm.script import relax as R
+from tvm.script import tirx as T
 
 
 def _make_module():
@@ -33,8 +36,8 @@ def test_infer_concrete_shape_from_numpy_input():
     mod = _make_module()
     bpm = BasePyModule(mod, device=tvm.cpu(0), target="llvm")
 
-    n = tir.Var("n", "int64")
-    m = tir.Var("m", "int64")
+    n = tirx.Var("n", "int64")
+    m = tirx.Var("m", "int64")
     sym_shape = [n, m]
 
     x = np.zeros((3, 4), dtype="float32")
@@ -46,7 +49,7 @@ def test_infer_concrete_shape_all_concrete_dims():
     mod = _make_module()
     bpm = BasePyModule(mod, device=tvm.cpu(0), target="llvm")
 
-    shape = [tir.IntImm("int32", 5), 6]
+    shape = [tirx.IntImm("int32", 5), 6]
     inferred = bpm._infer_concrete_shape_from_args(shape, in_args=[])
     assert inferred == [5, 6]
 
@@ -55,14 +58,14 @@ def test_infer_concrete_shape_error_when_uninferrable():
     mod = _make_module()
     bpm = BasePyModule(mod, device=tvm.cpu(0), target="llvm")
 
-    k = tir.Var("k", "int64")
+    k = tirx.Var("k", "int64")
     with pytest.raises(ValueError):
         bpm._infer_concrete_shape_from_args([k, 8], in_args=[])
 
 
 @I.ir_module
 class AddModuleSymbolic(BasePyModule):
-    @T.prim_func
+    @T.prim_func(s_tir=True)
     def add_tir(var_x: T.handle, var_y: T.handle, var_out: T.handle):
         T.func_attr({"global_symbol": "add_tir"})
         n = T.int64()
@@ -74,9 +77,9 @@ class AddModuleSymbolic(BasePyModule):
             out[i] = x[i] + y[i]
 
     @R.function
-    def main_relax(
-        x: R.Tensor(("n",), "float32"), y: R.Tensor(("n",), "float32")
-    ) -> R.Tensor(("n",), "float32"):
+    def main_relax(x: R.Tensor(("n",), "float32"), y: R.Tensor(("n",), "float32")) -> R.Tensor(
+        ("n",), "float32"
+    ):
         return R.add(x, y)
 
 
@@ -103,10 +106,10 @@ def test_base_py_module_tir_symbolic_end_to_end():
     a = np.random.randn(5).astype("float32")
     b = np.random.randn(5).astype("float32")
 
-    n = tir.Var("n", "int64")
-    out_sinfo = relax.TensorStructInfo((n,), "float32")
+    n = tirx.Var("n", "int64")
+    out_ty = relax.TensorType((n,), "float32")
 
-    out = bpm.call_tir("add_tir", [a, b], out_sinfo)
+    out = bpm.call_tir("add_tir", [a, b], out_ty)
     out_np = out if isinstance(out, np.ndarray) else out.numpy()
     tvm.testing.assert_allclose(out_np, a + b, rtol=1e-6, atol=1e-6)
 
@@ -116,9 +119,9 @@ def test_infer_concrete_shape_multiple_symbolic_dims():
     mod = _make_module()
     bpm = BasePyModule(mod, device=tvm.cpu(0), target="llvm")
 
-    n = tir.Var("n", "int64")
-    m = tir.Var("m", "int64")
-    k = tir.Var("k", "int64")
+    n = tirx.Var("n", "int64")
+    m = tirx.Var("m", "int64")
+    k = tirx.Var("k", "int64")
     sym_shape = [n, m, k]
 
     x = np.zeros((2, 3, 4), dtype="float32")
@@ -131,7 +134,7 @@ def test_infer_concrete_shape_mixed_concrete_symbolic():
     mod = _make_module()
     bpm = BasePyModule(mod, device=tvm.cpu(0), target="llvm")
 
-    n = tir.Var("n", "int64")
+    n = tirx.Var("n", "int64")
     sym_shape = [n, 5, 10]  # First dim is symbolic, others are concrete
 
     x = np.zeros((3, 5, 10), dtype="float32")
@@ -149,8 +152,8 @@ def test_infer_concrete_shape_from_tvm_tensors():
         mod = _make_module()
         bpm = BasePyModule(mod, device=tvm.cpu(0), target="llvm")
 
-        n = tir.Var("n", "int64")
-        m = tir.Var("m", "int64")
+        n = tirx.Var("n", "int64")
+        m = tirx.Var("m", "int64")
         sym_shape = [n, m]
 
         inferred = bpm._infer_concrete_shape_from_args(sym_shape, [x_tvm])
@@ -165,8 +168,8 @@ def test_infer_concrete_shape_multiple_inputs():
     mod = _make_module()
     bpm = BasePyModule(mod, device=tvm.cpu(0), target="llvm")
 
-    n = tir.Var("n", "int64")
-    m = tir.Var("m", "int64")
+    n = tirx.Var("n", "int64")
+    m = tirx.Var("m", "int64")
     sym_shape = [n, m]
 
     # Multiple inputs with different shapes - should use first matching one
@@ -181,8 +184,8 @@ def test_infer_concrete_shape_wrong_ndim():
     mod = _make_module()
     bpm = BasePyModule(mod, device=tvm.cpu(0), target="llvm")
 
-    n = tir.Var("n", "int64")
-    m = tir.Var("m", "int64")
+    n = tirx.Var("n", "int64")
+    m = tirx.Var("m", "int64")
     sym_shape = [n, m]  # 2D
 
     x = np.zeros((3,), dtype="float32")  # 1D - wrong ndim
@@ -192,7 +195,7 @@ def test_infer_concrete_shape_wrong_ndim():
 
 @I.ir_module
 class MatrixModuleSymbolic(BasePyModule):
-    @T.prim_func
+    @T.prim_func(s_tir=True)
     def matmul_tir(var_a: T.handle, var_b: T.handle, var_c: T.handle):
         T.func_attr({"global_symbol": "matmul_tir"})
         m = T.int64()
@@ -229,8 +232,8 @@ def test_base_py_module_multiple_symbolic_dims():
 
     # Test TIR function with multiple symbolic dims
     # Use concrete shapes for TIR function to avoid constraint issues
-    out_sinfo = relax.TensorStructInfo((2, 4), "float32")
-    out_tir = bpm.call_tir("matmul_tir", [a, b], out_sinfo)
+    out_ty = relax.TensorType((2, 4), "float32")
+    out_tir = bpm.call_tir("matmul_tir", [a, b], out_ty)
     out_tir_np = out_tir if isinstance(out_tir, np.ndarray) else out_tir.numpy()
     tvm.testing.assert_allclose(out_tir_np, expected, rtol=1e-6, atol=1e-6)
 
@@ -253,10 +256,10 @@ def test_base_py_module_call_dps_packed_symbolic():
         a = np.random.randn(5).astype("float32")
         b = np.random.randn(5).astype("float32")
 
-        n = tir.Var("n", "int64")
-        out_sinfo = relax.TensorStructInfo((n,), "float32")
+        n = tirx.Var("n", "int64")
+        out_ty = relax.TensorType((n,), "float32")
 
-        out = bpm.call_dps_packed("test_add_packed", [a, b], out_sinfo)
+        out = bpm.call_dps_packed("test_add_packed", [a, b], out_ty)
         out_np = out if isinstance(out, np.ndarray) else out.numpy()
         tvm.testing.assert_allclose(out_np, a + b, rtol=1e-6, atol=1e-6)
 
@@ -282,9 +285,9 @@ def test_base_py_module_call_dps_packed_multiple_args():
         a = np.random.randn(2, 3).astype("float32")
         b = np.random.randn(3, 4).astype("float32")
 
-        out_sinfo = relax.TensorStructInfo((2, 4), "float32")
+        out_ty = relax.TensorType((2, 4), "float32")
 
-        out = bpm.call_dps_packed("test_matmul_packed", [a, b], out_sinfo)
+        out = bpm.call_dps_packed("test_matmul_packed", [a, b], out_ty)
         out_np = out if isinstance(out, np.ndarray) else out.numpy()
         expected = np.matmul(a, b)
         tvm.testing.assert_allclose(out_np, expected, rtol=1e-6, atol=1e-6)
@@ -314,10 +317,10 @@ def test_base_py_module_call_dps_packed_scalar_args():
         x = np.random.randn(4).astype("float32")
         scalar = 2.5
 
-        n = tir.Var("n", "int64")
-        out_sinfo = relax.TensorStructInfo((n,), "float32")
+        n = tirx.Var("n", "int64")
+        out_ty = relax.TensorType((n,), "float32")
 
-        out = bpm.call_dps_packed("test_add_scalar_packed", [x, scalar], out_sinfo)
+        out = bpm.call_dps_packed("test_add_scalar_packed", [x, scalar], out_ty)
         out_np = out if isinstance(out, np.ndarray) else out.numpy()
         expected = x + scalar
         tvm.testing.assert_allclose(out_np, expected, rtol=1e-6, atol=1e-6)
@@ -336,8 +339,8 @@ def test_infer_concrete_shape_from_pytorch_tensors():
     mod = _make_module()
     bpm = BasePyModule(mod, device=tvm.cpu(0), target="llvm")
 
-    n = tir.Var("n", "int64")
-    m = tir.Var("m", "int64")
+    n = tirx.Var("n", "int64")
+    m = tirx.Var("m", "int64")
     sym_shape = [n, m]
 
     x_torch = torch.zeros((3, 4), dtype=torch.float32)

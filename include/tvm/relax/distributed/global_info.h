@@ -25,6 +25,7 @@
 #ifndef TVM_RELAX_DISTRIBUTED_GLOBAL_INFO_H_
 #define TVM_RELAX_DISTRIBUTED_GLOBAL_INFO_H_
 
+#include <tvm/ffi/container/shape.h>
 #include <tvm/ir/expr.h>
 #include <tvm/ir/module.h>
 namespace tvm {
@@ -40,7 +41,7 @@ class DeviceMeshNode : public GlobalInfoNode {
   ffi::Shape shape;
 
   /*! \brief device ids in the mesh*/
-  ffi::Array<Integer> device_ids;
+  ffi::Array<int64_t> device_ids;
 
   /*! \brief Optionally use range to represent device_ids*/
   ffi::Optional<Range> device_range;
@@ -61,7 +62,7 @@ class DeviceMeshNode : public GlobalInfoNode {
  */
 class DeviceMesh : public GlobalInfo {
  public:
-  TVM_DLL DeviceMesh(ffi::Shape shape, ffi::Array<Integer> device_ids);
+  TVM_DLL DeviceMesh(ffi::Shape shape, ffi::Array<int64_t> device_ids);
   TVM_DLL DeviceMesh(ffi::Shape shape, Range device_range);
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(DeviceMesh, GlobalInfo, DeviceMeshNode);
 };

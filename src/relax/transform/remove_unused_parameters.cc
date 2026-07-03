@@ -35,10 +35,10 @@ namespace relax {
 namespace {
 
 template <typename T>
-using PSet = std::unordered_set<T, ObjectPtrHash, ObjectPtrEqual>;
+using PSet = std::unordered_set<T, ffi::ObjectPtrHash, ffi::ObjectPtrEqual>;
 
 template <typename T, typename U>
-using PMap = std::unordered_map<T, U, ObjectPtrHash, ObjectPtrEqual>;
+using PMap = std::unordered_map<T, U, ffi::ObjectPtrHash, ffi::ObjectPtrEqual>;
 
 /* \brief Describes the modifications to be made for a function */
 struct CalleeAnalysis {
@@ -85,15 +85,14 @@ std::optional<CalleeAnalysis> AnalyzeCallee(Function func) {
   // symbolic variables.  We still want to remove the relax variable
   // to reduce computational steps in the parent, but we need to
   // provide the symbolic variables the other steps.
-  auto defined_tir_params = [&]() -> PSet<tir::Var> {
-    auto param_sinfo =
-        TupleStructInfo(params.Map([](const auto& var) { return GetStructInfo(var); }));
-    auto arr = DefinableTIRVarsInStructInfo(param_sinfo);
+  auto defined_tir_params = [&]() -> PSet<tirx::Var> {
+    auto param_ty = TupleType(params.Map([](const auto& var) { return GetType(var); }));
+    auto arr = DefinableTIRVarsInType(param_ty);
     return {arr.begin(), arr.end()};
   }();
 
   // Use an array to define the order of the symbolic variables
-  ffi::Array<tir::Var> free_tir_vars;
+  ffi::Array<tirx::Var> free_tir_vars;
   for (const auto& tir_var : FreeSymbolicVars(func->body)) {
     if (!defined_tir_params.count(tir_var)) {
       free_tir_vars.push_back(tir_var);
@@ -101,17 +100,16 @@ std::optional<CalleeAnalysis> AnalyzeCallee(Function func) {
   }
 
   for (const auto& tir_var : free_tir_vars) {
-    Var relax_var("param_" + tir_var->name_hint, PrimStructInfo(tir_var));
+    Var relax_var("param_" + tir_var->name_hint, PrimType(tir_var.ty()));
     params.push_back(relax_var);
   }
 
-  FuncStructInfo new_sinfo(params.Map([](const auto& var) { return GetStructInfo(var); }),
-                           func->ret_struct_info,
-                           Downcast<FuncStructInfo>(func->struct_info_)->purity);
+  FuncType new_ty(params.Map([](const auto& var) { return GetType(var); }), func->ret_ty,
+                  func->ty.as_or_throw<FuncType>()->purity);
 
   auto arg_updater = [parameter_mask, old_relax_params = func->params,
                       free_tir_vars](ffi::Array<Expr> old_args) -> ffi::Array<Expr> {
-    ICHECK_EQ(old_args.size(), parameter_mask.size())
+    TVM_FFI_ICHECK_EQ(old_args.size(), parameter_mask.size())
         << "Call provides " << old_args.size() << ", but the callee accepts "
         << parameter_mask.size() << " parameters";
 
@@ -128,10 +126,10 @@ std::optional<CalleeAnalysis> AnalyzeCallee(Function func) {
         old_binding.Set(old_relax_params[i], old_args[i]);
       }
       arith::Analyzer analyzer;
-      auto tir_binding = InferSymbolicVarMap(old_binding, &analyzer);
+      auto tir_binding = InferSymbolicVarMap(old_binding, analyzer);
 
       for (const auto& tir_var : free_tir_vars) {
-        new_args.push_back(PrimValue(tir_binding.at(tir_var)));
+        new_args.push_back(PrimExpr(tir_binding.at(tir_var)));
       }
     }
 
@@ -140,7 +138,7 @@ std::optional<CalleeAnalysis> AnalyzeCallee(Function func) {
 
   auto write_ptr = func.CopyOnWrite();
   write_ptr->params = params;
-  write_ptr->struct_info_ = new_sinfo;
+  write_ptr->ty = new_ty;
 
   return CalleeAnalysis{func, arg_updater};
 }
@@ -166,7 +164,7 @@ class CallSiteMutator : public ExprMutator {
   }
 
   Expr VisitExpr_(const CallNode* op) override {
-    auto node = Downcast<Call>(ExprMutator::VisitExpr_(op));
+    auto node = ExprMutator::VisitExpr_(op).as_or_throw<Call>();
 
     if (auto gvar = node->op.as<GlobalVar>()) {
       if (auto it = callsite_updaters_.find(gvar.value()); it != callsite_updaters_.end()) {
@@ -196,14 +194,14 @@ Pass RemoveUnusedParameters() {
           if (auto callee_res = AnalyzeCallee(func.value())) {
             auto new_func = callee_res->func;
             GlobalVar new_gvar(gvar->name_hint);
-            new_gvar->struct_info_ = new_func->struct_info_;
+            new_gvar->ty = new_func->ty;
             new_callees->Add(new_gvar, new_func);
 
             callsite_updaters[gvar] = [old_gvar = gvar, new_gvar,
                                        arg_updater = callee_res->arg_updater](Call call) -> Call {
-              ICHECK(call->op.same_as(old_gvar)) << "InternalError: "
-                                                 << "Updater should be applied to " << old_gvar
-                                                 << ", but was applied to " << call->op;
+              TVM_FFI_CHECK(call->op.same_as(old_gvar), InternalError)
+                  << "Updater should be applied to " << old_gvar << ", but was applied to "
+                  << call->op;
               auto write_ptr = call.CopyOnWrite();
               write_ptr->op = new_gvar;
               write_ptr->args = arg_updater(call->args);
@@ -221,7 +219,7 @@ Pass RemoveUnusedParameters() {
       // Remove any private subroutines that have unused parameters,
       // then add the updated versions.  The new private functions
       // have the same name, but require a new GlobalVar to hold the
-      // updated StructInfo.  As a result, calling `Update()` without
+      // updated Type.  As a result, calling `Update()` without
       // first calling `Remove()` introduce a duplicate name and
       // produce an error.
       for (const auto& it : callsite_updaters) {
@@ -236,7 +234,7 @@ Pass RemoveUnusedParameters() {
 
     for (const auto& [gvar, base_func] : mod->functions) {
       if (auto func = base_func.as<Function>()) {
-        auto mutated = Downcast<Function>(mutator.VisitExpr(func.value()));
+        auto mutated = mutator.VisitExpr(func.value()).as_or_throw<Function>();
         if (!mutated.same_as(base_func)) {
           caller_updates->Add(gvar, mutated);
         }

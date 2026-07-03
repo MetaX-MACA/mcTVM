@@ -24,11 +24,15 @@
  *
  * Currently it removes common subexpressions within a Function.
  */
+#include <tvm/ffi/cast.h>
+#include <tvm/ffi/extra/structural_equal.h>
+#include <tvm/ffi/extra/structural_hash.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/analysis.h>
 #include <tvm/relax/expr_functor.h>
 #include <tvm/relax/transform.h>
 #include <tvm/relax/utils.h>
+#include <tvm/runtime/logging.h>
 
 #include "../../support/utils.h"
 
@@ -38,27 +42,27 @@ namespace {
 /* \brief Lookup key for subexpression replacements
  *
  * The lookup key must contain the expression being bound, along with
- * the struct info used for a match cast, if applicable.  Using
+ * the type used for a match cast, if applicable.  Using
  * `MatchCast` with StructuralEqual and StructuralHash would be almost
  * correct, but acts as a point of definition for symbolic variables
- * within the output struct info.  As a result, it would erroneously
+ * within the output type.  As a result, it would erroneously
  * de-duplicate `R.match_cast(A, R.Tensor([m,n]))` and
  * `R.match_cast(A, R.Tensor([p,q]))`, even though they define
  * different symbolic variables.
  */
 struct ReplacementKey {
   tvm::relax::Expr bound_value;
-  tvm::ffi::Optional<tvm::relax::StructInfo> match_cast = std::nullopt;
+  tvm::ffi::Optional<tvm::Type> match_cast = std::nullopt;
 
   explicit ReplacementKey(const tvm::relax::Binding& binding)
       : bound_value(GetBoundValue(binding)) {
     if (const auto* ptr = binding.as<tvm::relax::MatchCastNode>()) {
-      match_cast = ptr->struct_info;
+      match_cast = ptr->ty;
     }
   }
 
   friend bool operator==(const ReplacementKey& a, const ReplacementKey& b) {
-    tvm::StructuralEqual eq;
+    ffi::StructuralEqual eq;
     return eq(a.bound_value, b.bound_value) && eq(a.match_cast, b.match_cast);
   }
 };
@@ -76,7 +80,7 @@ struct ReplacementKey {
 template <>
 struct std::hash<tvm::relax::ReplacementKey> {
   std::size_t operator()(const tvm::relax::ReplacementKey& key) const {
-    tvm::StructuralHash hasher;
+    tvm::ffi::StructuralHash hasher;
     return tvm::support::HashCombine(hasher(key.bound_value), hasher(key.match_cast));
   }
 };
@@ -112,10 +116,10 @@ class CommonSubexprEliminator : public ExprMutator {
       if (binding.as<VarBindingNode>()) {
         return VarBinding(binding->var, bound_value);
       } else if (auto match_cast = binding.as<MatchCastNode>()) {
-        return MatchCast(binding->var, bound_value, match_cast->struct_info);
+        return MatchCast(binding->var, bound_value, match_cast->ty);
       } else {
-        LOG(FATAL) << "Binding must be either VarBinding or MatchCast, "
-                   << "but was " << binding->GetTypeKey();
+        TVM_FFI_THROW(InternalError) << "Binding must be either VarBinding or MatchCast, "
+                                     << "but was " << binding->GetTypeKey();
       }
     }();
 
@@ -166,8 +170,7 @@ class CommonSubexprEliminator : public ExprMutator {
     Expr true_branch = VisitWithInnerScope(op->true_branch);
     Expr false_branch = VisitWithInnerScope(op->false_branch);
     if (op->cond.same_as(cond) && op->true_branch.same_as(true_branch) &&
-        op->false_branch.same_as(false_branch) &&
-        VisitAndCheckStructInfoFieldUnchanged(op->struct_info_)) {
+        op->false_branch.same_as(false_branch) && VisitAndCheckTypeFieldUnchanged(op->ty)) {
       return ffi::GetRef<Expr>(op);
     } else {
       return If(cond, true_branch, false_branch, op->span);
@@ -190,10 +193,10 @@ class CommonSubexprEliminator : public ExprMutator {
   }
 
   bool IsAllocatorCall(const Expr& expr) {
-    static const auto& allocator_attr_map = Op::GetAttrMap<Bool>("TAllocator");
+    static const auto& allocator_attr_map = Op::GetAttrMap<bool>("TAllocator");
     if (const auto* call = expr.as<CallNode>()) {
       if (const auto* op = call->op.as<OpNode>()) {
-        bool is_allocator = allocator_attr_map.get(ffi::GetRef<Op>(op), Bool(false))->value;
+        bool is_allocator = allocator_attr_map.get(ffi::GetRef<Op>(op), false);
         if (is_allocator) {
           return true;
         }
@@ -217,7 +220,7 @@ namespace transform {
 
 Pass EliminateCommonSubexpr(bool call_only) {
   auto pass_func = [=](Function func, IRModule m, PassContext pc) {
-    return Downcast<Function>(EliminateCommonSubexpr(func, call_only));
+    return EliminateCommonSubexpr(func, call_only).as_or_throw<Function>();
   };
   return CreateFunctionPass(pass_func, 1, "EliminateCommonSubexpr", {});
 }

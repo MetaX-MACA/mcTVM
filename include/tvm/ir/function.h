@@ -83,13 +83,13 @@ enum class LinkageType : int {
 /*!
  * \brief Generic attribute names that can be attached to any function.
  *
- * \sa tvm::tir::attr, tvm::relax::attr
+ * \sa tvm::tirx::attr, tvm::relax::attr
  */
 namespace attr {
 /*!
  * \brief Indicates the special calling convention.
  *
- * Type: Integer
+ * Type: IntImm
  *
  * \sa tvm::CallingConv
  */
@@ -125,6 +125,23 @@ constexpr const char* kTarget = "target";
  */
 constexpr const char* kGlobalSymbol = "global_symbol";
 
+/*!
+ * \brief The function uses s_tir (apache-derived TIR) semantics:
+ *        parser fills layout=None, ScriptComplete wraps body in a root SBlock,
+ *        and printer emits `s_tir=True` on the decorator.
+ *        Default (attr absent or False) is tirx semantics.
+ *
+ * Type: IntImm (bool dtype)
+ */
+constexpr const char* kSTir = "s_tir";
+
+/*!
+ * \brief Number of inputs of the Primfunc
+ *
+ * Type: Int
+ */
+constexpr const char* kNumInputs = "num_inputs";
+
 }  // namespace attr
 
 /*!
@@ -136,7 +153,7 @@ constexpr const char* kGlobalSymbol = "global_symbol";
  *
  * \sa BaseFunc
  */
-class BaseFuncNode : public RelaxExprNode {
+class BaseFuncNode : public ExprNode {
  public:
   /*! \brief Additional attributes storing the meta-data */
   DictAttrs attrs;
@@ -155,7 +172,7 @@ class BaseFuncNode : public RelaxExprNode {
    * \code
    *
    *  void GetAttrExample(const BaseFunc& f) {
-   *    auto value = f->GetAttr<Integer>("AttrKey", 0);
+   *    auto value = f->GetAttr<int64_t>("AttrKey", 0);
    *  }
    *
    * \endcode
@@ -223,16 +240,16 @@ class BaseFuncNode : public RelaxExprNode {
   }
 
   static constexpr const uint32_t _type_child_slots = 2;
-  TVM_FFI_DECLARE_OBJECT_INFO("ir.BaseFunc", BaseFuncNode, RelaxExprNode);
+  TVM_FFI_DECLARE_OBJECT_INFO("ir.BaseFunc", BaseFuncNode, ExprNode);
 };
 
 /*!
  * \brief Managed reference to BaseFuncNode.
  * \sa BaseFuncNode
  */
-class BaseFunc : public RelaxExpr {
+class BaseFunc : public Expr {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(BaseFunc, RelaxExpr, BaseFuncNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(BaseFunc, Expr, BaseFuncNode);
 };
 
 }  // namespace tvm

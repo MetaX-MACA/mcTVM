@@ -30,17 +30,17 @@ namespace tvm {
 namespace relax {
 
 /*! \brief Attributes used in multinomial_from_uniform operator */
-struct MultinomialFromUniformAttrs : public AttrsNodeReflAdapter<MultinomialFromUniformAttrs> {
-  DataType dtype;
+struct MultinomialFromUniformAttrs : public AttrsNode {
+  DLDataType dtype;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<MultinomialFromUniformAttrs>().def_ro(
         "dtype", &MultinomialFromUniformAttrs::dtype, "Data type of the output indices.",
-        refl::DefaultValue(DataType::Int(64)));
+        refl::DefaultValue((DLDataType{kDLInt, 64, 1})));
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.MultinomialFromUniformAttrs",
-                                    MultinomialFromUniformAttrs, BaseAttrsNode);
+                                    MultinomialFromUniformAttrs, AttrsNode);
 };  // struct MultinomialFromUniformAttrs
 
 }  // namespace relax

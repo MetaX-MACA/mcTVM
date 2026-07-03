@@ -24,7 +24,8 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/expr_functor.h>
 #include <tvm/relax/transform.h>
-#include <tvm/tir/stmt_functor.h>
+#include <tvm/s_tir/transform.h>
+#include <tvm/tirx/stmt_functor.h>
 
 namespace tvm {
 namespace relax {
@@ -37,7 +38,7 @@ class AttrAttacher : public ExprMutator {
       if (func->IsInstance<relax::FunctionNode>()) {
         // clear the layout_free_exprs_ for each function
         mutator.layout_free_exprs_.clear();
-        mutator.builder_->UpdateFunction(gvar, Downcast<BaseFunc>(mutator.VisitExpr(func)));
+        mutator.builder_->UpdateFunction(gvar, mutator.VisitExpr(func).as_or_throw<BaseFunc>());
       }
     }
     return mutator.builder_->GetContextIRModule();
@@ -48,9 +49,10 @@ class AttrAttacher : public ExprMutator {
 
   using ExprMutator::VisitExpr_;
   Expr VisitExpr_(const FunctionNode* op) final {
-    if (auto opt_num_input = op->attrs.GetAttr<Integer>(attr::kNumInput)) {
-      ICHECK(layout_free_exprs_.empty()) << "meet a non-global function with num_input attr";
-      size_t num_input = opt_num_input.value()->value;
+    if (auto opt_num_input = op->attrs.GetAttr<int64_t>(attr::kNumInput)) {
+      TVM_FFI_ICHECK(layout_free_exprs_.empty())
+          << "meet a non-global function with num_input attr";
+      size_t num_input = opt_num_input.value();
       for (size_t i = num_input; i < op->params.size(); i++) {
         layout_free_exprs_.insert(op->params[i].get());
       }
@@ -65,12 +67,12 @@ class AttrAttacher : public ExprMutator {
 
   Expr VisitExpr_(const CallNode* op) final {
     static const Op& call_tir_op_ = Op::Get("relax.call_tir");
-    Call call = Downcast<Call>(ExprMutator::VisitExpr_(op));
+    Call call = ExprMutator::VisitExpr_(op).as_or_throw<Call>();
     if (call->op != call_tir_op_) {
       return call;
     }
-    GlobalVar gv = Downcast<GlobalVar>(call->args[0]);
-    ffi::Array<Expr> call_tir_args = Downcast<Tuple>(call->args[1])->fields;
+    GlobalVar gv = call->args[0].as_or_throw<GlobalVar>();
+    ffi::Array<Expr> call_tir_args = call->args[1].as_or_throw<Tuple>()->fields;
     // Compute the layout free buffers
     ffi::Array<int64_t> layout_free_buffers;
     for (size_t i = 0; i < call_tir_args.size(); i++) {
@@ -78,16 +80,16 @@ class AttrAttacher : public ExprMutator {
         layout_free_buffers.push_back(i);
       }
     }
-    // Attach the layout free buffers to the tir::PrimFunc
-    tir::PrimFunc func = WithAttr(Downcast<tir::PrimFunc>(mod_->Lookup(gv)), "layout_free_buffers",
-                                  layout_free_buffers);
+    // Attach the layout free buffers to the tirx::PrimFunc
+    tirx::PrimFunc func = WithAttr(mod_->Lookup(gv).as_or_throw<tirx::PrimFunc>(),
+                                   "layout_free_buffers", layout_free_buffers);
     // Renew defs
-    func = tir::RenewDefs(func);
-    // Add the updated tir::PrimFunc in the IRModule
-    // Note the blockbuilder would automatically combine the same tir function
+    func = s_tir::RenewDefs(func);
+    // Add the updated tirx::PrimFunc in the IRModule
+    // Note the blockbuilder would automatically combine the same tirx function
     // So we don't need to worry about the duplicate insertion
     GlobalVar new_gv = builder_->AddFunction(func, gv->name_hint);
-    // Create a new call node with the updated tir::PrimFunc
+    // Create a new call node with the updated tirx::PrimFunc
     auto n = ffi::make_object<CallNode>(*op);
     n->args = {new_gv, Tuple(call_tir_args)};
     return Call(n);
@@ -102,7 +104,7 @@ namespace transform {
 Pass AttachAttrLayoutFreeBuffers() {
   auto pass_func = [=](IRModule mod, PassContext pc) { return AttrAttacher::Transform(mod); };
   auto pass = CreateModulePass(pass_func, 0, "_AttachAttrLayoutFreeBuffers", {});
-  // Apply DeadCodeElimination to remove unused tir::PrimFunc
+  // Apply DeadCodeElimination to remove unused tirx::PrimFunc
   return tvm::transform::Sequential({pass, DeadCodeElimination()}, "AttachAttrLayoutFreeBuffers");
 }
 

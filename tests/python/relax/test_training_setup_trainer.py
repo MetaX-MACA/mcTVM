@@ -14,17 +14,18 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: E501
 import pytest
 
 import tvm
 import tvm.testing
-
-from tvm import relax, TVMError
+from tvm import relax
 from tvm.ir.base import assert_structural_equal
 from tvm.relax.training import SetupTrainer
-from tvm.relax.training.optimizer import SGD, MomentumSGD
 from tvm.relax.training.loss import MSELoss
-from tvm.script import ir as I, relax as R
+from tvm.relax.training.optimizer import SGD, MomentumSGD
+from tvm.script import ir as I
+from tvm.script import relax as R
 
 
 def test_simple():
@@ -92,8 +93,8 @@ def test_simple():
             return (params_new, optim_states_new)
     # fmt: on
 
-    sinfo = relax.TensorStructInfo((2, 2), "float64")
-    setup_trainer = SetupTrainer(MSELoss(reduction="sum"), SGD(0.1), [sinfo, sinfo], legalize=False)
+    ty = relax.TensorType((2, 2), "float64")
+    setup_trainer = SetupTrainer(MSELoss(reduction="sum"), SGD(0.1), [ty, ty], legalize=False)
     train_mod = setup_trainer(Backbone)
     assert_structural_equal(train_mod.without_attr("optim_state"), Expected)
 
@@ -171,9 +172,9 @@ def test_states():
 
     # fmt: on
 
-    sinfo = relax.TensorStructInfo((2, 2), "float64")
+    ty = relax.TensorType((2, 2), "float64")
     setup_trainer = SetupTrainer(
-        MSELoss(reduction="sum"), MomentumSGD(0.1, 0.1), [sinfo, sinfo], legalize=False
+        MSELoss(reduction="sum"), MomentumSGD(0.1, 0.1), [ty, ty], legalize=False
     )
     train_mod = setup_trainer(Backbone)
     assert_structural_equal(train_mod.without_attr("optim_state"), Expected)
@@ -195,18 +196,18 @@ def test_invalid_mod():
                 R.output(gv, out)
             return gv, out
 
-    pred_sinfo = relax.TensorStructInfo((1, 5), "float32")
+    pred_ty = relax.TensorType((1, 5), "float32")
     setup_trainer = SetupTrainer(
         MSELoss(reduction="sum"),
         SGD(0.001),
-        [pred_sinfo, pred_sinfo],
+        [pred_ty, pred_ty],
     )
 
-    with pytest.raises((TVMError, ValueError)):
+    with pytest.raises((RuntimeError, ValueError)):
         SetupTrainer(
             MSELoss(reduction="sum"),
             SGD(0.001),
-            [pred_sinfo, pred_sinfo],
+            [pred_ty, pred_ty],
         )(NoAttr)
 
     @I.ir_module

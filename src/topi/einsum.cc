@@ -25,6 +25,9 @@
 #include <tvm/topi/broadcast.h>
 #include <tvm/topi/einsum.h>
 
+#include <map>
+#include <set>
+
 namespace tvm {
 namespace topi {
 
@@ -41,8 +44,8 @@ EinsumEquation EinsumEquation::FromString(const std::string& equation) {
         break;
       case '-':
         // Arrow
-        CHECK(!has_arrow) << "Equation can only have one arrow";
-        CHECK(i + 1 < n && equation[i + 1] == '>')
+        TVM_FFI_ICHECK(!has_arrow) << "Equation can only have one arrow";
+        TVM_FFI_ICHECK(i + 1 < n && equation[i + 1] == '>')
             << "Cannot parse the Einsum equation: invalid arrow";
         i++;
         has_arrow = true;
@@ -55,8 +58,8 @@ EinsumEquation EinsumEquation::FromString(const std::string& equation) {
         break;
       case '.':
         // Ellipsis
-        CHECK(!has_ellipsis) << "Ellipsis can only appear once for each input and output";
-        CHECK(i + 2 < n && equation[i + 1] == '.' && equation[i + 2] == '.')
+        TVM_FFI_ICHECK(!has_ellipsis) << "Ellipsis can only appear once for each input and output";
+        TVM_FFI_ICHECK(i + 2 < n && equation[i + 1] == '.' && equation[i + 2] == '.')
             << "Cannot parse the Einsum equation: invalid ellipsis";
         current.push_back(kEllipsis);
         has_ellipsis = true;
@@ -64,8 +67,9 @@ EinsumEquation EinsumEquation::FromString(const std::string& equation) {
         break;
       default:
         // Default case: current character is a subscript label
-        CHECK(std::isalpha(equation[i])) << "Cannot parse the Einsum equation: invalid character "
-                                         << equation[i] << " in equation " << equation;
+        TVM_FFI_ICHECK(std::isalpha(equation[i]))
+            << "Cannot parse the Einsum equation: invalid character " << equation[i]
+            << " in equation " << equation;
         current.emplace_back(equation[i]);
         break;
     }
@@ -105,9 +109,9 @@ PrimExpr GetBroadcastedExtent(const PrimExpr& extent1, const PrimExpr& extent2) 
     if (extent1_imm->value == extent2_imm->value) {
       return extent1;
     } else if (extent1_imm->value == 1 || extent2_imm->value == 1) {
-      return Integer(std::max(extent1_imm->value, extent2_imm->value));
+      return IntImm::Int32(std::max(extent1_imm->value, extent2_imm->value));
     }
-    LOG(FATAL) << "Cannot broadcast extents " << extent1 << " and " << extent2;
+    TVM_FFI_THROW(InternalError) << "Cannot broadcast extents " << extent1 << " and " << extent2;
     throw;
   } else if (extent1_imm != nullptr) {
     return extent2;
@@ -123,7 +127,7 @@ PrimExpr GetIndexForBroadcastedDim(const Var& index, const PrimExpr& extent,
   // Check if current dimension is being broadcasted to `broadcasted_extent` (symbolic shape is
   // handled)
   if (is_one(extent) && !is_one(broadcasted_extent)) {
-    return make_zero(index.dtype());
+    return IntImm(index.ty(), 0);
   }
   return index;
 }
@@ -144,7 +148,7 @@ class EinsumBuilder {
    * \return The inferred shape of the output
    */
   ffi::Array<PrimExpr> InferShape() {
-    CHECK_EQ(equation_.inputs.size(), input_shapes_.size())
+    TVM_FFI_ICHECK_EQ(equation_.inputs.size(), input_shapes_.size())
         << "Number of operands does not match the "
            "equation";
 
@@ -176,7 +180,7 @@ class EinsumBuilder {
           }
         }
       }
-      ICHECK_EQ(current_dim, input_shape.size());
+      TVM_FFI_ICHECK_EQ(current_dim, input_shape.size());
     }
 
     // Step 2: Infer the shape of the ellipsis if exists
@@ -215,7 +219,7 @@ class EinsumBuilder {
     PrepareOutputIndicesMapping(indices, &label_to_index, &ellipsis_indices);
     PrepareReductionIndicesMapping(indices, &label_to_index, &ellipsis_indices, &reduce_axes);
 
-    auto zero = make_zero(inputs[0]->dtype);
+    auto zero = MakeConst(PrimType(inputs[0]->dtype), 0);
 
     PrimExpr result = zero;
     for (int i = 0, n = static_cast<int>(inputs.size()); i < n; ++i) {
@@ -250,7 +254,7 @@ class EinsumBuilder {
         label_to_index->emplace(label, indices[i++]);
       }
     }
-    ICHECK_EQ(i, indices.size());
+    TVM_FFI_ICHECK_EQ(i, indices.size());
   }
 
   /*!
@@ -284,9 +288,9 @@ class EinsumBuilder {
         }
       } else {
         // Normal label
-        reduction_axes->push_back(IterVar(
-            Range(0, label_to_extent_[label]),
-            Var(std::string(1, label), label_to_extent_[label].dtype()), IterVarType::kCommReduce));
+        reduction_axes->push_back(IterVar(Range(0, label_to_extent_[label]),
+                                          Var(std::string(1, label), label_to_extent_[label].ty()),
+                                          IterVarType::kCommReduce));
         label_to_index->emplace(label, reduction_axes->back()->var);
       }
     }
@@ -318,8 +322,8 @@ class EinsumBuilder {
                                                     label_to_extent_.at(label)));
       }
     }
-    ICHECK_EQ(i, input_shape.size());
-    ICHECK_EQ(indices.size(), input_shape.size());
+    TVM_FFI_ICHECK_EQ(i, input_shape.size());
+    TVM_FFI_ICHECK_EQ(indices.size(), input_shape.size());
     return indices;
   }
 

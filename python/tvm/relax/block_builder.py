@@ -15,25 +15,28 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=no-else-return, invalid-name, unused-argument, import-outside-toplevel
+# ruff: noqa: RUF012
 """Developer API of constructing Relax AST."""
 
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional
+
+import tvm_ffi
 
 import tvm
-import tvm_ffi
 from tvm import relax as rx
-from tvm import tir
+from tvm import tirx
 from tvm.ir.module import IRModule
 from tvm.runtime import Object
 
 from . import _ffi_api
 from .expr import BaseFunc, Binding, BindingBlock, Expr, GlobalVar, Tuple, Var
 from .op.base import call_tir, call_tir_with_grad
-from .struct_info import StructInfo
+from .type import Type
 from .utils import gen_call_tir_inputs
 
 
-class FunctionScope(object):
+class FunctionScope:
     """Auxiliary scope for function"""
 
     def __init__(self, block_builder, name, params, attrs, is_pure):
@@ -58,7 +61,7 @@ class FunctionScope(object):
         self._bb._exit_function_scope(exc_type, exc_val, exc_tb)
 
 
-class DataflowScope(object):
+class DataflowScope:
     """Auxiliary scope for Dataflow block"""
 
     def __init__(self, block_builder):
@@ -77,19 +80,19 @@ class DataflowScope(object):
         self._bb._begin_binding_block()
 
 
-class TestingScope(object):
+class TestingScope:
     """Auxiliary scope for testing purposes"""
 
     def __init__(self, block_builder, def_vars):
         self._bb = block_builder
         shape_vars = []
         for var in def_vars:
-            if isinstance(var, tvm.tir.Var):
+            if isinstance(var, tvm.tirx.Var):
                 shape_vars.append(var)
             else:
-                raise ValueError("def_vars only can take tir.Var")
+                raise ValueError("def_vars only can take tirx.Var")
         # setup a dummy var so shape is in scope.
-        sparam = rx.Var("sparam", rx.ShapeStructInfo(shape_vars))
+        sparam = rx.Var("sparam", rx.ShapeType(shape_vars))
         self._scope_params = [sparam]
 
     def __enter__(self):
@@ -109,10 +112,10 @@ class BlockBuilder(Object):
     --------
     .. code-block:: python
 
-        m = tir.Var("m", "int32")
-        n = tir.Var("n", "int32")
-        x = rx.Var("x", rx.TensorStructInfo([m, n], "float16"))
-        y = rx.Var("y", rx.TensorStructInfo([n], "float16")
+        m = tirx.Var("m", "int32")
+        n = tirx.Var("n", "int32")
+        x = rx.Var("x", rx.TensorType([m, n], "float16"))
+        y = rx.Var("y", rx.TensorType([n], "float16"))
         bb = rx.BlockBuilder()
         with bb.function([x, y], "func"):
             with bb.dataflow() as df:
@@ -128,7 +131,7 @@ class BlockBuilder(Object):
 
         from tvm.relax.testing import nn
 
-        n = tir.Var("n", "int64")
+        n = tirx.Var("n", "int64")
         input_size = 784
         hidden_sizes = [128, 32]
         output_size = 10
@@ -150,6 +153,8 @@ class BlockBuilder(Object):
         mod = bb.get()
     """
 
+    __slots__ = ("__dict__",)
+
     _stack = []
 
     @staticmethod
@@ -162,7 +167,7 @@ class BlockBuilder(Object):
 
     def __init__(self, mod: IRModule = None):
         # Which functions are currently being defined
-        self._func_stack: List[FunctionScope] = []
+        self._func_stack: list[FunctionScope] = []
         self.__init_handle_by_constructor__(_ffi_api.BlockBuilderCreate, mod)  # type: ignore
 
     def _begin_dataflow_block(self) -> None:
@@ -208,8 +213,8 @@ class BlockBuilder(Object):
     def function(
         self,
         name: str,
-        params: Optional[Union[Var, Tuple, List[Var]]] = None,
-        attrs: Optional[Dict[str, Object]] = None,
+        params: Var | Tuple | list[Var] | None = None,
+        attrs: dict[str, Object] | None = None,
         pure: bool = True,
         private: bool = False,
     ) -> FunctionScope:
@@ -244,14 +249,12 @@ class BlockBuilder(Object):
         """
         if isinstance(params, rx.Var):
             params = [params]
-        elif isinstance(params, (list, tuple)):
+        elif isinstance(params, list | tuple):
             for param in params:
                 if not isinstance(param, rx.Var):
                     raise TypeError(
-                        "each element of function parameters must be of type tvm.relax.Var,\
-                                    but got: {}".format(
-                            type(param)
-                        )
+                        f"each element of function parameters must be of type tvm.relax.Var,\
+                                    but got: {type(param)}"
                     )
         if attrs is None:
             attrs = {}
@@ -262,12 +265,12 @@ class BlockBuilder(Object):
 
         return FunctionScope(self, name, params, attrs, is_pure=pure)
 
-    def testing_scope(self, def_vars: List[tir.Var]) -> TestingScope:
+    def testing_scope(self, def_vars: list[tirx.Var]) -> TestingScope:
         """Start a scope for unit-testing purposes.
 
         Parameters
         ----------
-        def_vars: List[tir.Var]
+        def_vars: List[tirx.Var]
             List of symbolic variables that are marked as defined in scope.
 
         Returns
@@ -287,17 +290,17 @@ class BlockBuilder(Object):
         """
         return DataflowScope(self)
 
-    def _normalize_python_tuple(self, expr: Union[Expr, Sequence[Expr]]):
+    def _normalize_python_tuple(self, expr: Expr | Sequence[Expr]):
         """Internal utility function to convert to relax.Tuple
 
         The `emit`, `emit_output`, and `emit_func_output` can be
         called with python `list` or `tuple` objects.  These objects
         should be converted to `relax.Tuple` prior to calling an FFI
         function, as they would otherwise be converted to
-        `tvm.runtime.Array`.  In addition, any nested tuple objects
+        `tvm_ffi.Array`.  In addition, any nested tuple objects
         should be converted.
         """
-        if isinstance(expr, (list, tuple)):
+        if isinstance(expr, list | tuple):
             return Tuple([self._normalize_python_tuple(element) for element in expr])
         elif expr is None:
             from . import op
@@ -358,20 +361,20 @@ class BlockBuilder(Object):
         """
 
         primfunc_name = kwargs.pop("primfunc_name_hint", None)
-        tir_func, call_args, output_sinfo, tir_vars = gen_call_tir_inputs(func, *args, **kwargs)
+        tir_func, call_args, output_ty, tir_vars = gen_call_tir_inputs(func, *args, **kwargs)
 
         if not primfunc_name:
             primfunc_name = func.__name__
         gvar = self.add_func(tir_func, primfunc_name)
 
-        return call_tir(gvar, call_args, output_sinfo, tir_vars)
+        return call_tir(gvar, call_args, output_ty, tir_vars)
 
     def call_te_with_grad(
         self,
         func: Callable,
         *args: Any,
         te_grad_name: str,
-        te_grad_kwargs: Dict[str, Object] = None,
+        te_grad_kwargs: dict[str, Object] | None = None,
         **kwargs: Any,
     ) -> Expr:
         """Generate a call node according to the te function.
@@ -410,7 +413,7 @@ class BlockBuilder(Object):
         """
 
         primfunc_name = kwargs.pop("primfunc_name_hint", None)
-        tir_func, call_args, output_sinfo, tir_vars = gen_call_tir_inputs(func, *args, **kwargs)
+        tir_func, call_args, output_ty, tir_vars = gen_call_tir_inputs(func, *args, **kwargs)
 
         if te_grad_kwargs is None:
             te_grad_kwargs = {}
@@ -420,7 +423,7 @@ class BlockBuilder(Object):
         gvar = self.add_func(tir_func, primfunc_name)
 
         return call_tir_with_grad(
-            gvar, call_args, output_sinfo, te_grad_name, te_grad_kwargs, tir_vars
+            gvar, call_args, output_ty, te_grad_name, te_grad_kwargs, tir_vars
         )
 
     def emit_te(self, func: Callable, *args: Any, **kwargs: Any) -> Var:
@@ -452,9 +455,9 @@ class BlockBuilder(Object):
         .. code-block:: python
 
             bb = rx.BlockBuilder()
-            n, m = tir.Var("n", "int64"), tir.Var("m", "int64")
-            x = rx.Var("x", rx.TensorStructInfo([n, m], "float32"))
-            y = rx.Var("y", rx.TensorStructInfo([n, m], "float32"))
+            n, m = tirx.Var("n", "int64"), tirx.Var("m", "int64")
+            x = rx.Var("x", rx.TensorType([n, m], "float32"))
+            y = rx.Var("y", rx.TensorType([n, m], "float32"))
 
             def te_func(args, args_dict, msg):
                 A = args[0]
@@ -471,20 +474,20 @@ class BlockBuilder(Object):
 
             @tvm.script.ir_module
             class Module:
-                @T.prim_func
+                @T.prim_func(s_tir=True)
                 def te_func(var_rxplaceholder: T.handle, var_rxplaceholder_1: T.handle,
                             var_compute: T.handle) -> None:
                     # function attr dict
-                    T.func_attr({"tir.noalias": True})
+                    T.func_attr({"tirx.noalias": True})
                     m = T.int64()
                     n = T.int64()
                     rxplaceholder = T.match_buffer(var_rxplaceholder, [n, m], dtype="float32")
                     rxplaceholder_1 = T.match_buffer(var_rxplaceholder_1, [n, m], dtype="float32")
                     compute = T.match_buffer(var_compute, [128, 128], dtype="float32")
                     # body
-                    # with T.block("root")
+                    # with T.sblock("root")
                     for i0, i1 in T.grid(128, 128):
-                        with T.block("compute"):
+                        with T.sblock("compute"):
                             i, j = T.axis.remap("SS", [i0, i1])
                             T.reads([rxplaceholder[i, j], rxplaceholder_1[i, j]])
                             T.writes([compute[i, j]])
@@ -502,9 +505,9 @@ class BlockBuilder(Object):
         .. code-block:: python
 
             bb = relax.BlockBuilder()
-            n = tir.Var("n", "int64")
-            x = relax.Var("x", relax.TensorStructInfo([n], "float32"))
-            y = relax.Var("y", relax.TensorStructInfo([n + 1], "float32"))
+            n = tirx.Var("n", "int64")
+            x = relax.Var("x", relax.TensorType([n], "float32"))
+            y = relax.Var("y", relax.TensorType([n + 1], "float32"))
 
             def te_func(A):
                 C = te.compute((n + 1), lambda i: A[i])
@@ -520,15 +523,15 @@ class BlockBuilder(Object):
 
             @tvm.script.ir_module
             class Module:
-                @T.prim_func
+                @T.prim_func(s_tir=True)
                 def te_func(var_rxplaceholder: T.handle, var_compute: T.handle, n: T.int64) -> None:
                     rxplaceholder = T.match_buffer(var_rxplaceholder, [n + T.int64(1)],
                                                    dtype="float32")
                     compute = T.match_buffer(var_compute, [n + T.int64(1)], dtype="float32")
                     # body
-                    # with T.block("root")
+                    # with T.sblock("root")
                     for i0 in T.serial(0, n + T.int64(1)):
-                        with T.block("compute"):
+                        with T.sblock("compute"):
                             i = T.axis.spatial(n + T.int64(1), i0)
                             T.reads([rxplaceholder[i]])
                             T.writes([compute[i]])
@@ -544,7 +547,7 @@ class BlockBuilder(Object):
         name_hint = kwargs.pop("name_hint", "")
         return self.emit(self.call_te(func, *args, **kwargs), name_hint=name_hint)
 
-    def match_cast(self, value: Expr, struct_info: StructInfo, name_hint: str = "") -> Var:
+    def match_cast(self, value: Expr, ty: Type, name_hint: str = "") -> Var:
         """Emit a MatchCast.
 
         Parameters
@@ -552,8 +555,8 @@ class BlockBuilder(Object):
         value : tvm.relax.Expr
             The value of the MatchCast to be emitted.
 
-        struct_info : StructInfo
-            The struct info to be matched.
+        ty : Type
+            The type to be matched.
 
         name_hint : str
             The name of the match cast
@@ -566,11 +569,11 @@ class BlockBuilder(Object):
         return _ffi_api.BlockBuilderEmitMatchCast(
             self,
             value,
-            struct_info,
+            ty,
             name_hint,
         )  # type: ignore
 
-    def emit_output(self, output: Union[Expr, Tuple, List[Expr]], name_hint: str = "") -> Var:
+    def emit_output(self, output: Expr | Tuple | list[Expr], name_hint: str = "") -> Var:
         """Emit output for the current dataflow block or function.
 
         Parameters
@@ -591,8 +594,8 @@ class BlockBuilder(Object):
 
     def emit_func_output(
         self,
-        output: Union[Expr, Tuple, List[Expr]],
-        params: Optional[Union[Var, Tuple, List[Var]]] = None,
+        output: Expr | Tuple | list[Expr],
+        params: Var | Tuple | list[Var] | None = None,
     ) -> GlobalVar:
         """Emit output for the function.
 
@@ -648,8 +651,8 @@ class BlockBuilder(Object):
         finally:
             self.end_scope()
 
-        # do not specify ret_struct_info and let constructor deduce
-        # from seqe.struct_info
+        # do not specify ret_ty and let constructor deduce
+        # from seqe.ty
         func = rx.Function(self._func._params, seqe, is_pure=self._func._is_pure)
         for key, value in self._func._attrs.items():
             func = func.with_attr(key, value)
@@ -765,7 +768,7 @@ class BlockBuilder(Object):
         """
         _ffi_api.BlockBuilderEmitNormalized(self, binding)  # type: ignore
 
-    def lookup_binding(self, var: Var) -> Optional[Expr]:
+    def lookup_binding(self, var: Var) -> Expr | None:
         """Lookup a var in the binding table.
 
         Parameters
@@ -780,7 +783,7 @@ class BlockBuilder(Object):
         """
         return _ffi_api.BlockBuilderLookupBinding(self, var)  # type: ignore
 
-    def begin_scope(self, params: Optional[List[Var]] = None) -> None:
+    def begin_scope(self, params: list[Var] | None = None) -> None:
         """Begin a new scope, with optional parameters that
         are visible within the scope.
 

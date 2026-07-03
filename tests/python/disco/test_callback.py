@@ -21,14 +21,17 @@ import pathlib
 import tempfile
 
 import numpy as np
+import pytest
 
 import tvm
 import tvm.testing
+from tvm.script import relax as R
+from tvm.script import tirx as T
+from tvm.testing import env
 
-from tvm.script import relax as R, tir as T
 
-
-@tvm.testing.requires_nccl
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_nccl(), reason="need nccl")
 def test_callback():
     """Simulate lazy loading of parameters in a callback
 
@@ -39,7 +42,7 @@ def test_callback():
     @R.function
     def transform_params(
         rank_arg: R.Prim(value="rank"),
-        fget_item: R.Callable([R.Object, R.Prim("int64")], R.Object),
+        fget_item: R.Callable([R.Any, R.Prim("int64")], R.Any),
     ):
         rank = T.int64()
 
@@ -56,7 +59,7 @@ def test_callback():
     pipeline = tvm.ir.transform.Sequential(
         [
             tvm.relax.transform.LegalizeOps(),
-            tvm.dlight.ApplyDefaultSchedule(tvm.dlight.gpu.Fallback()),
+            tvm.s_tir.dlight.ApplyDefaultSchedule(tvm.s_tir.dlight.gpu.Fallback()),
         ],
         name="pipeline",
     )

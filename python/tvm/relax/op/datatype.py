@@ -15,15 +15,19 @@
 # specific language governing permissions and limitations
 # under the License.
 """Datatype operators."""
-from typing import Union
 
 from tvm import DataType
+from tvm.ir import PrimType
 
-from . import _ffi_api
 from ..expr import Expr
+from . import _ffi_api
 
 
-def astype(x: Expr, dtype: Union[str, DataType]) -> Expr:
+def _raw_dtype(dtype):
+    return dtype.dtype if isinstance(dtype, PrimType) else dtype
+
+
+def astype(x: Expr, dtype: str | DataType | PrimType) -> Expr:
     """Cast input tensor to the given data type.
 
     Parameters
@@ -39,10 +43,10 @@ def astype(x: Expr, dtype: Union[str, DataType]) -> Expr:
     result : relax.Expr
         The casted result.
     """
-    return _ffi_api.astype(x, dtype)  # type: ignore
+    return _ffi_api.astype(x, _raw_dtype(dtype))  # type: ignore
 
 
-def wrap_param(data: Expr, dtype: Union[str, DataType] = "float32") -> Expr:
+def wrap_param(data: Expr, dtype: str | DataType | PrimType = "float32") -> Expr:
     """Cast input tensor which is model param to data type if the dtype of the input data is not
     the same as the given dtype.
     Parameters
@@ -56,4 +60,4 @@ def wrap_param(data: Expr, dtype: Union[str, DataType] = "float32") -> Expr:
     result : relax.Expr
         The casted result.
     """
-    return _ffi_api.wrap_param(data, dtype)  # type: ignore
+    return _ffi_api.wrap_param(data, _raw_dtype(dtype))  # type: ignore

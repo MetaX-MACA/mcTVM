@@ -49,6 +49,7 @@
 
 #include "gradient_simplifier.h"
 
+#include <tvm/ffi/cast.h>
 #include <tvm/relax/analysis.h>
 #include <tvm/relax/attrs/manipulate.h>
 #include <tvm/relax/expr.h>
@@ -75,7 +76,7 @@ class GradientSimplifier : private ExprMutator {
    * VarIdSet containing all checkpointed vars.
    */
   static Function Transform(const Function& func) {
-    return Downcast<Function>(RemoveAllUnused(GradientSimplifier().VisitExpr(func)));
+    return RemoveAllUnused(GradientSimplifier().VisitExpr(func)).as_or_throw<Function>();
   }
 
  private:
@@ -83,11 +84,11 @@ class GradientSimplifier : private ExprMutator {
     if (call_node->op != Op::Get("relax.permute_dims")) {
       return false;
     }
-    auto sinfo = MatchStructInfo<TensorStructInfo>(call_node->args[0]);
-    if (!sinfo) {
+    auto ty = MatchType<TensorType>(call_node->args[0]);
+    if (!ty) {
       return false;
     }
-    auto ndim = sinfo.value()->ndim;
+    auto ndim = ty.value()->ndim;
     if (ndim == kUnknownNDim || ndim == 1) {
       return false;
     }
@@ -95,7 +96,7 @@ class GradientSimplifier : private ExprMutator {
       return ndim == 2;
     }
     auto axes = call_node->attrs.as<PermuteDimsAttrs>()->axes.value();
-    ICHECK(static_cast<int>(axes.size()) == ndim);
+    TVM_FFI_ICHECK(static_cast<int>(axes.size()) == ndim);
     for (int i = 0; i < ndim - 2; ++i) {
       if (axes[i] != i) {
         return false;
@@ -106,13 +107,13 @@ class GradientSimplifier : private ExprMutator {
 
   // Return permute_dims(expr). Generate the axes needed.
   static Expr GetTransposeOf(const Expr& expr) {
-    auto sinfo = MatchStructInfo<TensorStructInfo>(expr);
-    ICHECK(sinfo);
-    auto ndim = sinfo.value()->ndim;
+    auto ty = MatchType<TensorType>(expr);
+    TVM_FFI_ICHECK(ty);
+    auto ndim = ty.value()->ndim;
     if (ndim == 1) {
       return expr;
     }
-    auto axes = ffi::Array<Integer>();
+    auto axes = ffi::Array<int64_t>();
     for (int i = 0; i < ndim - 2; ++i) {
       axes.push_back(i);
     }
@@ -128,7 +129,7 @@ class GradientSimplifier : private ExprMutator {
     if (!expr->IsInstance<VarNode>()) {
       return GetTransposeOf(expr);
     }
-    auto prev_expr = builder_->LookupBinding(Downcast<Var>(expr));
+    auto prev_expr = builder_->LookupBinding(expr.as_or_throw<Var>());
     if (!prev_expr || !prev_expr->IsInstance<CallNode>()) {
       return GetTransposeOf(expr);
     }
@@ -156,7 +157,7 @@ class GradientSimplifier : private ExprMutator {
       return reemit_and_return();
     }
 
-    auto prev_expr = builder_->LookupBinding(Downcast<Var>(arg));
+    auto prev_expr = builder_->LookupBinding(arg.as_or_throw<Var>());
     if (!prev_expr || !prev_expr->IsInstance<CallNode>()) {
       return reemit_and_return();
     }
@@ -165,7 +166,7 @@ class GradientSimplifier : private ExprMutator {
     if (IsTransposeOp(prev_call_node)) {
       // rewrite rule #1: permute_dims(permute_dims(a)) -> a
       if (prev_call_node->args[0]->IsInstance<VarNode>()) {
-        var_remap_[binding->var->vid] = Downcast<Var>(prev_call_node->args[0]);
+        var_remap_[binding->var->vid] = prev_call_node->args[0].as_or_throw<Var>();
         return;
       } else {
         return reemit_and_return();
@@ -176,8 +177,8 @@ class GradientSimplifier : private ExprMutator {
       // operation should be eliminated
 
       // Skip matmuls with 1-dim input because in these cases we cannot simply transpose the input
-      auto a_dim = MatchStructInfo<TensorStructInfo>(prev_call_node->args[0]).value()->ndim;
-      auto b_dim = MatchStructInfo<TensorStructInfo>(prev_call_node->args[1]).value()->ndim;
+      auto a_dim = MatchType<TensorType>(prev_call_node->args[0]).value()->ndim;
+      auto b_dim = MatchType<TensorType>(prev_call_node->args[1]).value()->ndim;
       if (a_dim == 1 || b_dim == 1) {
         return reemit_and_return();
       }

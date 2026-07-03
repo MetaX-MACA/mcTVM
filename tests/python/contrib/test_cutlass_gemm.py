@@ -14,14 +14,15 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from typing import Tuple
 
 import ml_dtypes
 import numpy as np
+import pytest
 
 import tvm
 import tvm.testing
 from tvm.contrib.pickle_memoize import memoize
+from tvm.testing import env
 
 
 def get_random_tensor(shape, dtype):
@@ -72,8 +73,9 @@ def verify_group_gemm(
     tvm.testing.assert_allclose(c_nd.numpy(), c_np, rtol=rtol, atol=atol)
 
 
-@tvm.testing.requires_cutlass
-@tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.skipif(not env.build_flag_enabled("USE_CUTLASS"), reason="need cutlass")
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 def test_group_gemm_sm90():
     verify_group_gemm(
         "cutlass.group_gemm",
@@ -116,8 +118,9 @@ def test_group_gemm_sm90():
     )
 
 
-@tvm.testing.requires_cutlass
-@tvm.testing.requires_cuda_compute_version(10)
+@pytest.mark.skipif(not env.build_flag_enabled("USE_CUTLASS"), reason="need cutlass")
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_group_gemm_sm100():
     verify_group_gemm(
         "cutlass.group_gemm",
@@ -134,7 +137,7 @@ def test_group_gemm_sm100():
     )
 
 
-def rowwise_quant_fp8_e4m3(shape: Tuple[int, int], block_size: Tuple[int, int], dtype: str):
+def rowwise_quant_fp8_e4m3(shape: tuple[int, int], block_size: tuple[int, int], dtype: str):
     x_full_np = (np.random.rand(*shape) * 2 - 1).astype(dtype)
     x_scale_shape = (
         *shape[:-1],
@@ -172,7 +175,7 @@ def rowwise_quant_fp8_e4m3(shape: Tuple[int, int], block_size: Tuple[int, int], 
     return x_np, x_scale_np
 
 
-def blockwise_quant_fp8_e4m3(shape: Tuple[int, int], block_size: Tuple[int, int], dtype: str):
+def blockwise_quant_fp8_e4m3(shape: tuple[int, int], block_size: tuple[int, int], dtype: str):
     w_full_np = (np.random.rand(*shape) * 2 - 1).astype(dtype)
     w_scale_shape = (
         *shape[:-2],
@@ -247,7 +250,7 @@ def blockwise_matmul(
     x_scale_np: np.ndarray,
     w_np: np.ndarray,
     w_scale_np: np.ndarray,
-    block_size: Tuple[int, int],
+    block_size: tuple[int, int],
     dtype: str,
 ):
     o_np = np.zeros((x_fp8_np.shape[0], w_np.shape[0]), dtype=dtype)
@@ -274,7 +277,7 @@ def blockwise_bmm(
     x_scale_np: np.ndarray,
     w_np: np.ndarray,
     w_scale_np: np.ndarray,
-    block_size: Tuple[int, int],
+    block_size: tuple[int, int],
     dtype: str,
 ):
     o_np = np.zeros((x_fp8_np.shape[0], x_fp8_np.shape[1], w_np.shape[1]), dtype=dtype)
@@ -299,8 +302,9 @@ def blockwise_bmm(
     return o_np
 
 
-@tvm.testing.requires_cutlass
-@tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.skipif(not env.build_flag_enabled("USE_CUTLASS"), reason="need cutlass")
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 def test_fp8_e4m3_groupwise_scaled_gemm():
     M = 16
     N = 4608
@@ -332,8 +336,9 @@ def test_fp8_e4m3_groupwise_scaled_gemm():
     tvm.testing.assert_allclose(o_tvm, o_np, rtol=1e-4, atol=0.5)
 
 
-@tvm.testing.requires_cutlass
-@tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.skipif(not env.build_flag_enabled("USE_CUTLASS"), reason="need cutlass")
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 def test_fp8_e4m3_groupwise_scaled_bmm():
     B = 16
     M = 40

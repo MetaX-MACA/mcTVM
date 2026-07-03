@@ -16,10 +16,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import os
-import sys
-import subprocess
 import datetime
+import os
+import subprocess
+import sys
 
 
 def get_changes(base_commit, flag):
@@ -64,7 +64,7 @@ def update_notice_file(added, deleted, modified):
         )
         content.extend(map(lambda x: f"    modified: {x}\n", modified))
         content.append(
-            f"Modification copyright {year} MetaX Integrated Circuits (Shanghai)" f" Co., Ltd.\n"
+            f"Modification copyright {year} MetaX Integrated Circuits (Shanghai) Co., Ltd.\n"
         )
 
     if len(deleted):
@@ -114,8 +114,7 @@ def main():
             f"git cat-file -e {base_commit}^0",
             shell=True,
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
     except subprocess.CalledProcessError:
         print(f"ERROR: Invalid commit ID: {base_commit}")

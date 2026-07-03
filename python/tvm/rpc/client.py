@@ -15,7 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=used-before-assignment,broad-exception-caught
+# ruff: noqa: F401
 """RPC client tools"""
+
 import os
 import socket
 import stat
@@ -26,13 +28,12 @@ import tvm_ffi
 from tvm_ffi import DLDeviceType
 
 import tvm.runtime
-from tvm.base import TVMError
-from tvm.contrib import utils
+from tvm.support import utils
 
 from . import _ffi_api, base, server
 
 
-class RPCSession(object):
+class RPCSession:
     """RPC Client session module
 
     Do not directly create the object, call connect
@@ -268,7 +269,7 @@ class LocalSession(RPCSession):
 def _popen_session(binary):
     temp = utils.tempdir()
 
-    if isinstance(binary, (bytes, bytearray)):
+    if isinstance(binary, bytes | bytearray):
         path_exec = temp.relpath("server.minrpc")
         with open(path_exec, "wb") as outfile:
             outfile.write(binary)
@@ -298,7 +299,7 @@ class PopenSession(RPCSession):
         RPCSession.__init__(self, _popen_session(binary))
 
 
-class TrackerSession(object):
+class TrackerSession:
     """Tracker client session.
 
     Parameters
@@ -320,7 +321,7 @@ class TrackerSession(object):
         self._sock.sendall(struct.pack("<i", base.RPC_TRACKER_MAGIC))
         magic = struct.unpack("<i", base.recvall(self._sock, 4))[0]
         if magic != base.RPC_TRACKER_MAGIC:
-            raise RuntimeError(f"{str(self._addr)} is not RPC Tracker")
+            raise RuntimeError(f"{self._addr!s} is not RPC Tracker")
 
     def close(self):
         """Close the tracker connection."""
@@ -333,7 +334,7 @@ class TrackerSession(object):
         base.sendjson(self._sock, [base.TrackerCode.SUMMARY])
         value = base.recvjson(self._sock)
         if value[0] != base.TrackerCode.SUCCESS:
-            raise RuntimeError(f"Invalid return value {str(value)}")
+            raise RuntimeError(f"Invalid return value {value!s}")
         return value[1]
 
     def text_summary(self):
@@ -350,7 +351,7 @@ class TrackerSession(object):
         sorted_server = sorted(data["server_info"], key=lambda x: x["key"])
         for item in sorted_server:
             addr = item["addr"]
-            res += "%21s    " % ":".join(map(str, addr))
+            res += f"{':'.join(map(str, addr)):21s}    "
             res += item["key"] + "\n"
             key = item["key"].split(":")[1]  # 'server:rasp3b` -> 'rasp3b'
             if key not in total_ct:
@@ -419,7 +420,7 @@ class TrackerSession(object):
                 base.sendjson(self._sock, [base.TrackerCode.REQUEST, key, "", priority])
                 value = base.recvjson(self._sock)
                 if value[0] != base.TrackerCode.SUCCESS:
-                    raise RuntimeError(f"Invalid return value {str(value)}")
+                    raise RuntimeError(f"Invalid return value {value!s}")
                 url, port, matchkey = value[1]
                 return connect(
                     url,
@@ -428,14 +429,12 @@ class TrackerSession(object):
                     session_timeout,
                     session_constructor_args=session_constructor_args,
                 )
-            except socket.error as err:
+            except OSError as err:
                 self.close()
                 last_err = err
-            except TVMError as err:
+            except RuntimeError as err:
                 last_err = err
-        raise RuntimeError(
-            f"Cannot request {key} after {max_retry} retry, last_error:{str(last_err)}"
-        )
+        raise RuntimeError(f"Cannot request {key} after {max_retry} retry, last_error:{last_err!s}")
 
     def request_and_run(self, key, func, priority=1, session_timeout=0, max_retry=2):
         """Request a resource from tracker and run the func.
@@ -468,14 +467,14 @@ class TrackerSession(object):
                 sess = self.request(key, priority=priority, session_timeout=session_timeout)
                 tstart = time.time()
                 return func(sess)
-            except TVMError as err:
+            except RuntimeError as err:
                 duration = time.time() - tstart
                 # roughly estimate if the error is due to timeout termination
                 if session_timeout and duration >= session_timeout * 0.95:
                     raise RuntimeError(f"Session timeout when running {func.__name__}")
                 last_err = err
         raise RuntimeError(
-            f"Failed to run on {key} after {max_retry} retry, last_error:{str(last_err)}"
+            f"Failed to run on {key} after {max_retry} retry, last_error:{last_err!s}"
         )
 
 
@@ -542,7 +541,7 @@ def connect(
         if session_timeout:
             key += f" -timeout={session_timeout}"
         session_constructor_args = session_constructor_args if session_constructor_args else []
-        if not isinstance(session_constructor_args, (list, tuple)):
+        if not isinstance(session_constructor_args, list | tuple):
             raise TypeError("Expect the session constructor to be a list or tuple")
         sess = _ffi_api.Connect(url, port, key, enable_logging, *session_constructor_args)
     except NameError:

@@ -15,17 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=missing-docstring,
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import numpy as np
 import pytest
+from tvm_ffi import Shape
 
 import tvm
 import tvm.testing
-from tvm import dlight as dl
-from tvm import tir
-from tvm.runtime import ShapeTuple
-from tvm.script import tir as T
+from tvm import tirx
+from tvm.s_tir import dlight as dl
+from tvm.script import tirx as T
+from tvm.testing import env
 
 # pylint: disable=invalid-name
 
@@ -80,7 +81,7 @@ def set_global_func():
         mod = tvm.IRModule({"main": tir_func})
         with target:
             mod = dl.ApplyDefaultSchedule(dl.gpu.Fallback())(mod)  # pylint: disable=not-callable
-        f = tvm.tir.build(mod["main"], target=target)
+        f = tvm.tirx.build(mod["main"], target=target)
         return f.main
 
     _f_tir_gets, _f_tir_sets = [], []
@@ -116,12 +117,13 @@ def verify_state(state, seq_ids, expected_values):
             tvm.testing.assert_allclose(state_value.numpy(), expected_value)
 
 
-@tvm.testing.requires_cuda
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_rnn_state_get(rnn_state):  # pylint: disable=redefined-outer-name
     state = rnn_state
     f_clear(state)
     f_add_sequence(state, 0)
-    f_begin_forward(state, ShapeTuple([0]), ShapeTuple([1]))
+    f_begin_forward(state, Shape([0]), Shape([1]))
     tvm_nd_0 = tvm.runtime.tensor(np.empty((1, 16, 16), "float16"), device=device)
     tvm_nd_1 = tvm.runtime.tensor(np.empty((1, 32, 32), "float32"), device=device)
     f_get(state, 0, 0, tvm_nd_0)
@@ -131,13 +133,14 @@ def test_rnn_state_get(rnn_state):  # pylint: disable=redefined-outer-name
     tvm.testing.assert_allclose(tvm_nd_1.numpy(), np.ones((1, 32, 32), "float32"))
 
 
-@tvm.testing.requires_cuda
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_rnn_state_set(rnn_state):  # pylint: disable=redefined-outer-name
     state = rnn_state
     f_clear(state)
     for seq_id in range(3):
         f_add_sequence(state, seq_id)
-    f_begin_forward(state, ShapeTuple([0, 2]), ShapeTuple([1, 1]))
+    f_begin_forward(state, Shape([0, 2]), Shape([1, 1]))
 
     f_set(state, 0, 0, tvm.runtime.tensor(np.full((2, 16, 16), 2.0, "float16"), device=device))
     f_set(state, 0, 1, tvm.runtime.tensor(np.full((2, 32, 32), 3.0, "float32"), device=device))
@@ -147,13 +150,14 @@ def test_rnn_state_set(rnn_state):  # pylint: disable=redefined-outer-name
     verify_state(state, [0, 1, 2], expected_values)
 
 
-@tvm.testing.requires_cuda
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_rnn_state_popn(rnn_state):  # pylint: disable=redefined-outer-name
     state = rnn_state
     f_clear(state)
 
     f_add_sequence(state, 0)
-    f_begin_forward(state, ShapeTuple([0]), ShapeTuple([1]))
+    f_begin_forward(state, Shape([0]), Shape([1]))
     f_set(state, 0, 0, tvm.runtime.tensor(np_two.reshape(1, 16, 16), device=device))
     f_set(state, 0, 1, tvm.runtime.tensor(np_three.reshape(1, 32, 32), device=device))
     f_end_forward(state)
@@ -161,17 +165,18 @@ def test_rnn_state_popn(rnn_state):  # pylint: disable=redefined-outer-name
     verify_state(state, [0], [[np_two, np_three]])
     f_popn(state, 0, 1)
     verify_state(state, [0], [[np_zero, np_one]])
-    with pytest.raises(tvm.error.TVMError):
+    with pytest.raises(RuntimeError):
         f_popn(state, 0, 1)  # no available history to pop
 
 
-@tvm.testing.requires_cuda
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_rnn_state_fork_sequence(rnn_state):  # pylint: disable=redefined-outer-name
     state = rnn_state
     f_clear(state)
 
     f_add_sequence(state, 0)
-    f_begin_forward(state, ShapeTuple([0]), ShapeTuple([1]))
+    f_begin_forward(state, Shape([0]), Shape([1]))
     f_set(state, 0, 0, tvm.runtime.tensor(np_two.reshape(1, 16, 16), device=device))
     f_set(state, 0, 1, tvm.runtime.tensor(np_three.reshape(1, 32, 32), device=device))
     f_end_forward(state)
@@ -187,7 +192,7 @@ def rnn_state_get(
     dtype: str,
 ):
     # fmt: off
-    @T.prim_func
+    @T.prim_func(s_tir=True)
     def _rnn_state_get(
         var_storage: T.handle,
         var_seq_slot_ids: T.handle,
@@ -203,10 +208,10 @@ def rnn_state_get(
 
         for i in range(batch_size):
             for s in T.grid(*shape):
-                with T.block("copy"):
+                with T.sblock("copy"):
                     vi, *vs = T.axis.remap("S" * (len(shape) + 1), [i, *s])
-                    seq_id: T.int32 = seq_slot_ids[vi]
-                    history_id: T.int32 = history_slot_ids[vi]
+                    seq_id: T.let[T.int32] = seq_slot_ids[vi]
+                    history_id: T.let[T.int32] = history_slot_ids[vi]
                     # The following line is equivalent to:
                     # `output[vi, *vs] = storage[seq_id, history_id, *vs]`
                     # However, unpacking operator in subscript requires Python 3.11 or newer
@@ -218,11 +223,11 @@ def rnn_state_get(
 
 
 def rnn_state_set(
-    shape: Sequence[Union[int, tir.Var]],
+    shape: Sequence[int | tirx.Var],
     dtype: str,
 ):
     # fmt: off
-    @T.prim_func
+    @T.prim_func(s_tir=True)
     def _rnn_state_set(
         var_storage: T.handle,
         var_seq_slot_ids: T.handle,
@@ -238,10 +243,10 @@ def rnn_state_set(
 
         for i in range(batch_size):
             for s in T.grid(*shape):
-                with T.block("copy"):
+                with T.sblock("copy"):
                     vi, *vs = T.axis.remap("S" * (len(shape) + 1), [i, *s])
-                    seq_id: T.int32 = seq_slot_ids[vi]
-                    history_id: T.int32 = (history_slot_ids[vi] + 1) % T.cast(
+                    seq_id: T.let[T.int32] = seq_slot_ids[vi]
+                    history_id: T.let[T.int32] = (history_slot_ids[vi] + 1) % T.cast(
                         max_history, "int32"
                     )
                     # The following line is equivalent to:

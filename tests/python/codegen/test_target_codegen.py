@@ -14,29 +14,46 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: F841
 
-import pytest
 import numpy as np
+import pytest
+
 import tvm
-from tvm.script import tir as T
+import tvm.testing
+from tvm.script import tirx as T
 
 
-@tvm.testing.parametrize_targets("c")
-def test_buffer_store_predicate_not_supported(target):
-    @T.prim_func
+def test_buffer_store_predicate_not_supported():
+    target = "c"
+
+    @T.prim_func(s_tir=True)
     def func(b: T.handle):
         B = T.match_buffer(b, (8,), "float32")
         B.vstore([T.Ramp(0, 2, 4)], T.Broadcast(1.0, 4), predicate=T.Broadcast(T.bool(True), 4))
 
     err_msg = "Predicated buffer store is not supported."
-    with pytest.raises(tvm.TVMError, match=err_msg):
+    with pytest.raises(RuntimeError, match=err_msg):
         with tvm.target.Target(target):
             tvm.compile(func)
 
 
-@tvm.testing.parametrize_targets("cuda", "opencl", "metal", "rocm", "vulkan -from_device=0", "maca")
+@pytest.mark.parametrize(
+    "target",
+    [
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param("maca", marks=pytest.mark.gpu),
+        pytest.param("opencl", marks=pytest.mark.gpu),
+        pytest.param("metal", marks=pytest.mark.gpu),
+        pytest.param("rocm", marks=pytest.mark.gpu),
+        pytest.param({"kind": "vulkan", "from_device": 0}, marks=pytest.mark.gpu),
+    ],
+)
 def test_buffer_store_predicate_not_supported_gpu(target):
-    @T.prim_func
+    if not tvm.testing.device_enabled(target):
+        pytest.skip(f"{target} not enabled")
+
+    @T.prim_func(s_tir=True)
     def func(a: T.handle, b: T.handle):
         A = T.match_buffer(a, (2, 3), "float32")
         B = T.match_buffer(b, (6,), "float32")
@@ -47,14 +64,15 @@ def test_buffer_store_predicate_not_supported_gpu(target):
             )
 
     err_msg = "Predicated buffer store is not supported."
-    with pytest.raises(tvm.TVMError, match=err_msg):
+    with pytest.raises(RuntimeError, match=err_msg):
         with tvm.target.Target(target):
             tvm.compile(func)
 
 
-@tvm.testing.parametrize_targets("c")
-def test_buffer_load_predicate_not_supported(target):
-    @T.prim_func
+def test_buffer_load_predicate_not_supported():
+    target = "c"
+
+    @T.prim_func(s_tir=True)
     def func(a: T.handle, b: T.handle):
         A = T.match_buffer(a, (8,), "float32")
         B = T.match_buffer(b, (8,), "float32")
@@ -65,14 +83,27 @@ def test_buffer_load_predicate_not_supported(target):
             )
 
     err_msg = "Predicated buffer load is not supported."
-    with pytest.raises(tvm.TVMError, match=err_msg):
+    with pytest.raises(RuntimeError, match=err_msg):
         with tvm.target.Target(target):
             tvm.compile(func)
 
 
-@tvm.testing.parametrize_targets("cuda", "opencl", "metal", "rocm", "vulkan -from_device=0", "maca")
+@pytest.mark.parametrize(
+    "target",
+    [
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param("maca", marks=pytest.mark.gpu),
+        pytest.param("opencl", marks=pytest.mark.gpu),
+        pytest.param("metal", marks=pytest.mark.gpu),
+        pytest.param("rocm", marks=pytest.mark.gpu),
+        pytest.param({"kind": "vulkan", "from_device": 0}, marks=pytest.mark.gpu),
+    ],
+)
 def test_buffer_load_predicate_not_supported_gpu(target):
-    @T.prim_func
+    if not tvm.testing.device_enabled(target):
+        pytest.skip(f"{target} not enabled")
+
+    @T.prim_func(s_tir=True)
     def func(a: T.handle, b: T.handle):
         A = T.match_buffer(a, (8,), "float32")
         B = T.match_buffer(b, (8,), "float32")
@@ -83,14 +114,17 @@ def test_buffer_load_predicate_not_supported_gpu(target):
             )
 
     err_msg = "Predicated buffer load is not supported."
-    with pytest.raises(tvm.TVMError, match=err_msg):
+    with pytest.raises(RuntimeError, match=err_msg):
         with tvm.target.Target(target):
             tvm.compile(func)
 
 
-@tvm.testing.parametrize_targets("c", "llvm")
+@pytest.mark.parametrize("target", ["c", "llvm"])
 def test_codegen_loop_step(target):
-    @T.prim_func
+    if target != "c" and not tvm.testing.device_enabled(target):
+        pytest.skip(f"{target} not enabled")
+
+    @T.prim_func(s_tir=True)
     def test_loop_step(
         A: T.Buffer((1024,), "float32"),
         B: T.Buffer((1024,), "float32"),
@@ -99,7 +133,7 @@ def test_codegen_loop_step(target):
         for i in T.serial(3, 1024, step=96):
             C[i] = A[i] + B[i]
 
-    with tvm.transform.PassContext(disabled_pass=["tir.CanonicalizeLoop"]):
+    with tvm.transform.PassContext(disabled_pass=["s_tir.CanonicalizeLoop"]):
         lib = tvm.compile(test_loop_step, target=target)
 
     src = lib.mod.inspect_source()

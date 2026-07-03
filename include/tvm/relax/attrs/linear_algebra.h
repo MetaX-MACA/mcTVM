@@ -30,19 +30,19 @@ namespace tvm {
 namespace relax {
 
 /*! \brief Attributes for matmul operator */
-struct MatmulAttrs : public AttrsNodeReflAdapter<MatmulAttrs> {
-  DataType out_dtype;
+struct MatmulAttrs : public AttrsNode {
+  ffi::Optional<DLDataType> out_dtype;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<MatmulAttrs>().def_ro("out_dtype", &MatmulAttrs::out_dtype,
                                           "The data type of the output tensor");
   }
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.MatmulAttrs", MatmulAttrs, BaseAttrsNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.MatmulAttrs", MatmulAttrs, AttrsNode);
 };  // struct MatmulAttrs
 
 /*! \brief Attributes used in einsum operator */
-struct EinsumAttrs : public AttrsNodeReflAdapter<EinsumAttrs> {
+struct EinsumAttrs : public AttrsNode {
   ffi::String subscripts;
 
   static void RegisterReflection() {
@@ -50,7 +50,7 @@ struct EinsumAttrs : public AttrsNodeReflAdapter<EinsumAttrs> {
     refl::ObjectDef<EinsumAttrs>().def_ro("subscripts", &EinsumAttrs::subscripts,
                                           "The einsum expression string");
   }
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.EinsumAttrs", EinsumAttrs, BaseAttrsNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.EinsumAttrs", EinsumAttrs, AttrsNode);
 };  // struct EinsumAttrs
 
 }  // namespace relax

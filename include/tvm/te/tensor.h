@@ -26,8 +26,8 @@
 
 #include <tvm/arith/bound.h>
 #include <tvm/ffi/reflection/registry.h>
-#include <tvm/tir/expr.h>
-#include <tvm/tir/op.h>
+#include <tvm/tirx/expr.h>
+#include <tvm/tirx/op.h>
 
 #include <string>
 #include <type_traits>
@@ -38,19 +38,19 @@ namespace tvm {
 namespace te {
 
 using arith::IntSet;
-using namespace tvm::tir;
+using namespace tvm::tirx;
 
 // internal node container for Operation
 class OperationNode;
 class Tensor;
 
 /*! \brief Operation that produces tensors */
-class Operation : public ObjectRef {
+class Operation : public ffi::ObjectRef {
  public:
   /*! \brief default constructor  */
   Operation() {}
-  explicit Operation(ObjectPtr<Object> n) : ObjectRef(n) {}
-  explicit Operation(ffi::UnsafeInit tag) : ObjectRef(tag) {}
+  explicit Operation(ffi::ObjectPtr<ffi::Object> n) : ffi::ObjectRef(n) {}
+  explicit Operation(ffi::UnsafeInit tag) : ffi::ObjectRef(tag) {}
   /*!
    * \brief access the internal node container
    * \return the pointer to the internal node container
@@ -71,8 +71,8 @@ class TensorNode : public DataProducerNode {
  public:
   /*! \brief The shape of the tensor */
   ffi::Array<PrimExpr> shape;
-  /*! \brief data type in the content of the tensor */
-  DataType dtype;
+  /*! \brief dtype in the content of the tensor */
+  PrimType dtype = PrimType::Void();
   /*! \brief the source operation, can be None */
   Operation op;
   /*! \brief the output index from source operation */
@@ -82,7 +82,7 @@ class TensorNode : public DataProducerNode {
 
   ffi::Array<PrimExpr> GetShape() const final { return shape; }
 
-  DataType GetDataType() const final { return dtype; }
+  PrimType GetDataType() const final { return dtype; }
 
   TVM_DLL PrimExpr ToPrimExpr() const final;
 
@@ -108,7 +108,7 @@ class Tensor : public DataProducer {
   inline PrimExpr IndexTensor(ffi::Array<PrimExpr> indices, bool support_negative_indices) const;
 
  public:
-  TVM_DLL Tensor(ffi::Array<PrimExpr> shape, DataType dtype, Operation op, int value_index);
+  TVM_DLL Tensor(ffi::Array<PrimExpr> shape, PrimType dtype, Operation op, int value_index);
   /*!
    * \brief check if two tensors equals each other.
    * \param other tensor to be checked.
@@ -261,12 +261,12 @@ DEFINE_OVERLOAD_SLICE_BINARY_OP(<);  // NOLINT(*)
 
 namespace std {
 template <>
-struct hash<::tvm::te::Operation> : public ::tvm::ObjectPtrHash {};
+struct hash<::tvm::te::Operation> : public ::tvm::ffi::ObjectPtrHash {};
 
 template <>
 struct hash<::tvm::te::Tensor> {
   std::size_t operator()(const ::tvm::te::Tensor& k) const {
-    ::tvm::ObjectPtrHash hasher;
+    ::tvm::ffi::ObjectPtrHash hasher;
     if (k.defined() && k->op.defined()) {
       return hasher(k->op);
     } else {

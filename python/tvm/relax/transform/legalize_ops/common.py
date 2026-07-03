@@ -15,14 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 """Common functionality for legalization."""
-from typing import Callable, Optional, Union
+
+from collections.abc import Callable
 
 import tvm
 from tvm import te
-from tvm.tir import FloatImm, IntImm
-from ...block_builder import BlockBuilder
-from ...expr import Call, Expr, Constant
+from tvm.runtime import DataTypeCode
+from tvm.tirx import FloatImm, IntImm, PrimExpr
 
+from ...block_builder import BlockBuilder
+from ...expr import Call, Constant, Expr
 
 ##################### Types #####################
 
@@ -37,12 +39,13 @@ TEFunc = Callable[..., te.Tensor]
 LegalizeFunc = Callable[[BlockBuilder, Call], Expr]
 
 
-##################### Utilities #####################
+def _is_relax_expr(expr: object) -> bool:
+    return isinstance(expr, Expr) and not isinstance(expr, PrimExpr)
 
 
 def _try_convert_to_scalar_const(
     expr: Expr, python_native: bool = False
-) -> Union[Expr, FloatImm, IntImm, bool, float, int]:
+) -> Expr | FloatImm | IntImm | bool | float | int:
     """Check if the input Expr is a scalar constant.
     If it is, return its plain value with the same data type or in native python type.
     If it is not, return the input expr.
@@ -64,21 +67,22 @@ def _try_convert_to_scalar_const(
         if the python native flag is True.
         Or return the input itself if it is not a scalar constant.
     """
-    if isinstance(expr, Constant) and expr.struct_info.ndim == 0:
+    if isinstance(expr, Constant) and expr.ty.ndim == 0:
         # get the value of the scalar constant
         value = expr.data.numpy()[()].item()
-        dtype = expr.struct_info.dtype
+        dtype = expr.ty.dtype
+        dtype_str = str(dtype.dtype)
         if python_native:
             return value
         # preserve the data type of the constant
-        if dtype.startswith("float"):
-            return tvm.tir.FloatImm(dtype, value)
-        elif dtype.startswith("int") or dtype.startswith("uint") or dtype.startswith("bool"):
-            return tvm.tir.IntImm(dtype, value)
+        if dtype.matches_code(DataTypeCode.FLOAT, DataTypeCode.BFLOAT):
+            return tvm.tirx.FloatImm(dtype_str, value)
+        elif dtype.matches_code(DataTypeCode.INT, DataTypeCode.UINT, DataTypeCode.BOOL):
+            return tvm.tirx.IntImm(dtype_str, value)
     return expr
 
 
-def _call_topi_without_attr(te_func: TEFunc, primfunc_name: Optional[str] = None) -> LegalizeFunc:
+def _call_topi_without_attr(te_func: TEFunc, primfunc_name: str | None = None) -> LegalizeFunc:
     """A common wrapper util for the ops who has no attributes and whose
     legalization is simply passing its arguments to some TE function.
 

@@ -15,53 +15,37 @@
 # specific language governing permissions and limitations
 # under the License.
 """Common expressions data structures in the IR."""
+
 from numbers import Number
-from typing import Optional
+
+import tvm_ffi
 
 import tvm
-import tvm_ffi
 
 from ..runtime import Object, Scriptable
 from . import _ffi_api
 from .base import Node, Span
 
 
-@tvm_ffi.register_object("ir.BaseExpr")
-class BaseExpr(Node):
+@tvm_ffi.register_object("ir.Expr")
+class Expr(Node):
     """Base class of all the expressions."""
 
-    span: Optional[Span]
+    span: Span | None
+    ty: "tvm.ir.Type | None"
 
 
 @tvm_ffi.register_object("ir.PrimExpr")
-class PrimExpr(BaseExpr):
+class PrimExpr(Expr):
     """Base class of all primitive expressions.
 
     PrimExpr is used in the low-level code
     optimizations and integer analysis.
     """
 
-    dtype: str
-
-
-@tvm_ffi.register_object("ir.RelaxExpr")
-class RelaxExpr(BaseExpr):
-    """Base class of all non-primitive expressions."""
-
-    @property
-    def struct_info(self) -> Optional["tvm.relax.StructInfo"]:
-        """Get the struct info field
-
-        Returns
-        -------
-        struct_info : tvm.relax.StructInfo
-            The struct info if available.
-        """
-        return _ffi_api.ExprStructInfo(self)
-
 
 @tvm_ffi.register_object("ir.GlobalVar")
-class GlobalVar(RelaxExpr):
+class GlobalVar(Expr):
     """A global variable in the IR.
 
     GlobalVar is used to refer to the global functions
@@ -78,29 +62,28 @@ class GlobalVar(RelaxExpr):
     def __init__(self, name_hint: str):
         self.__init_handle_by_constructor__(_ffi_api.GlobalVar, name_hint)
 
-    def __call__(self, *args: RelaxExpr) -> BaseExpr:
+    def __call__(self, *args: Expr) -> Expr:
         """Call the global variable.
 
         Parameters
         ----------
-        args: List[RelaxExpr]
+        args: List[Expr]
             The arguments to the call.
 
         Returns
         -------
-        call: BaseExpr
+        call: Expr
             A call taking the variable as a function.
         """
         # pylint: disable=import-outside-toplevel
 
-        # TODO(@relax-team): replace with Relax base class after it's introduced
-        if all(isinstance(x, RelaxExpr) for x in args):
+        if args and all(isinstance(x, Number | PrimExpr) for x in args):
+            return tvm.tirx.call_tir(self, *args)
+
+        if all(isinstance(x, Expr) for x in args):
             from tvm import relax
 
             return relax.Call(self, args)
-
-        elif all(isinstance(x, (Number, PrimExpr)) for x in args):
-            return tvm.tir.call_tir(self, *args)
 
         arg_types = [type(x) for x in args]
         raise RuntimeError(f"Do not know how to handle GlobalVar.__call__ for types {arg_types}")
@@ -133,17 +116,15 @@ class Range(Node, Scriptable):
 
     min: PrimExpr
     extent: PrimExpr
-    span: Optional[Span]
+    span: Span | None
 
     def __init__(
-        self, begin: PrimExpr, end: Optional[PrimExpr] = None, span: Optional[Span] = None
+        self, begin: PrimExpr, end: PrimExpr | None = None, span: Span | None = None
     ) -> None:
         self.__init_handle_by_constructor__(_ffi_api.Range, begin, end, span)
 
     @staticmethod
-    def from_min_extent(
-        min_value: PrimExpr, extent: PrimExpr, span: Optional[Span] = None
-    ) -> "Range":
+    def from_min_extent(min_value: PrimExpr, extent: PrimExpr, span: Span | None = None) -> "Range":
         """Construct a Range by min and extent.
 
         This constructs a range in [min_value, min_value + extent)
@@ -167,7 +148,7 @@ class Range(Node, Scriptable):
         return _ffi_api.Range_from_min_extent(min_value, extent, span)
 
     def __eq__(self, other: Object) -> bool:
-        return tvm.ir.structural_equal(self, other)
+        return tvm_ffi.structural_equal(self, other)
 
     def __ne__(self, other: Object) -> bool:
         return not self.__eq__(other)

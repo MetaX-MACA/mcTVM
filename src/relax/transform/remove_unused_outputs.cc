@@ -17,6 +17,7 @@
  * under the License.
  */
 
+#include <tvm/ffi/cast.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/analysis.h>
 #include <tvm/relax/expr_functor.h>
@@ -24,6 +25,7 @@
 #include <tvm/relax/utils.h>
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 #include <tuple>
 
@@ -33,10 +35,10 @@ namespace relax {
 namespace {
 
 template <typename T>
-using PSet = std::unordered_set<T, ObjectPtrHash, ObjectPtrEqual>;
+using PSet = std::unordered_set<T, ffi::ObjectPtrHash, ffi::ObjectPtrEqual>;
 
 template <typename T, typename U>
-using PMap = std::unordered_map<T, U, ObjectPtrHash, ObjectPtrEqual>;
+using PMap = std::unordered_map<T, U, ffi::ObjectPtrHash, ffi::ObjectPtrEqual>;
 
 class PartialTupleUsageCollector : ExprVisitor {
  public:
@@ -48,7 +50,7 @@ class PartialTupleUsageCollector : ExprVisitor {
 
       if (!is_exposed) {
         if (auto relax_func = base_func.as<FunctionNode>()) {
-          if (auto out_tuple = relax_func->ret_struct_info.as<TupleStructInfoNode>()) {
+          if (auto out_tuple = relax_func->ret_ty.as<TupleTypeNode>()) {
             num_outputs[gvar] = out_tuple->fields.size();
           }
         }
@@ -96,14 +98,12 @@ class PartialTupleUsageCollector : ExprVisitor {
     if (auto* usage_mask_ptr = GetCalleeUsageMask(op->tuple)) {
       auto& used_indices = *usage_mask_ptr;
 
-      CHECK_GE(op->index, 0) << "IndexError: "
-                             << "Indices for TupleGetItem must be non-negative, "
-                             << "but expression " << ffi::GetRef<Expr>(op)
-                             << " uses a tuple index of " << op->index;
+      TVM_FFI_CHECK_GE(op->index, 0, IndexError)
+          << "Indices for TupleGetItem must be non-negative, "
+          << "but expression " << ffi::GetRef<Expr>(op) << " uses a tuple index of " << op->index;
       size_t index = op->index;
 
-      CHECK_LT(index, used_indices.size())
-          << "IndexError: "
+      TVM_FFI_CHECK_LT(index, used_indices.size(), IndexError)
           << "Indices for TupleGetItem must be less than the size of the tuple, "
           << "but expression " << ffi::GetRef<Expr>(op) << " uses a tuple index of " << op->index
           << " for a tuple of size " << used_indices.size();
@@ -121,7 +121,7 @@ class PartialTupleUsageCollector : ExprVisitor {
   }
 
   std::vector<bool>* GetCalleeUsageMask(Expr expr) {
-    if (!expr->struct_info_.as<TupleStructInfoNode>()) {
+    if (!expr->ty.as<TupleTypeNode>()) {
       return nullptr;
     }
 
@@ -158,17 +158,17 @@ class PartialTupleUsageCollector : ExprVisitor {
 };
 
 Function UpdateCallee(Function func, const std::vector<bool>& usage_mask) {
-  auto old_func_sinfo = func->struct_info_.as<FuncStructInfoNode>();
+  auto old_func_ty = func->ty.as<FuncTypeNode>();
 
-  auto old_ret_sinfo = func->ret_struct_info.as<TupleStructInfoNode>();
-  ICHECK(old_ret_sinfo) << "All functions returning non-tuple outputs "
-                        << "should have been pruned already by PartialTupleUsageCollector";
+  auto old_ret_ty = func->ret_ty.as<TupleTypeNode>();
+  TVM_FFI_ICHECK(old_ret_ty) << "All functions returning non-tuple outputs "
+                             << "should have been pruned already by PartialTupleUsageCollector";
 
   ffi::Array<Expr> outputs;
 
   // This helper variable will be removed by the post-proc of
   // CanonicalizeBindings and DeadCodeElimination.
-  Var previous_outputs("previous_outputs", func->ret_struct_info);
+  Var previous_outputs("previous_outputs", func->ret_ty);
 
   for (size_t i = 0; i < usage_mask.size(); i++) {
     if (usage_mask[i]) {
@@ -177,19 +177,17 @@ Function UpdateCallee(Function func, const std::vector<bool>& usage_mask) {
   }
 
   Expr new_output = outputs.size() == 1 ? outputs[0] : Tuple(outputs);
-  StructInfo new_return_sinfo =
-      outputs.size() == 1 ? GetStructInfo(outputs[0]) : TupleStructInfo(outputs.Map(GetStructInfo));
+  Type new_return_ty = outputs.size() == 1 ? GetType(outputs[0]) : TupleType(outputs.Map(GetType));
 
   VarBinding binding(previous_outputs, func->body);
   BindingBlock binding_block({binding});
   SeqExpr new_body({binding_block}, new_output);
 
-  auto old_sinfo = Downcast<FuncStructInfo>(func->struct_info_);
-  FuncStructInfo new_sinfo(old_func_sinfo->params.value(), new_return_sinfo,
-                           old_func_sinfo->purity);
+  auto old_ty = func->ty.as_or_throw<FuncType>();
+  FuncType new_ty(old_func_ty->params.value(), new_return_ty, old_func_ty->purity);
 
   auto write_ptr = func.CopyOnWrite();
-  write_ptr->struct_info_ = new_sinfo;
+  write_ptr->ty = new_ty;
   write_ptr->body = new_body;
 
   return func;
@@ -203,7 +201,7 @@ class CallSiteMutator : public ExprMutator {
   using ExprMutator::VisitExpr_;
 
   Expr VisitExpr_(const CallNode* op) override {
-    auto node = Downcast<Call>(ExprMutator::VisitExpr_(op));
+    auto node = ExprMutator::VisitExpr_(op).as_or_throw<Call>();
 
     if (auto gvar = node->op.as<GlobalVar>()) {
       if (auto it = callsite_updaters_.find(gvar.value()); it != callsite_updaters_.end()) {
@@ -242,23 +240,22 @@ Pass RemoveUnusedOutputs() {
             auto new_func = UpdateCallee(func.value(), usage_mask);
 
             GlobalVar new_gvar(gvar->name_hint);
-            new_gvar->struct_info_ = new_func->struct_info_;
+            new_gvar->ty = new_func->ty;
             new_callees->Add(new_gvar, new_func);
 
             callsite_updaters[gvar] = [old_gvar = gvar, new_gvar, usage_mask](Call call) -> Expr {
-              ICHECK(call->op.same_as(old_gvar)) << "InternalError: "
-                                                 << "Updater should be applied to " << old_gvar
-                                                 << ", but was applied to " << call->op;
+              TVM_FFI_CHECK(call->op.same_as(old_gvar), InternalError)
+                  << "Updater should be applied to " << old_gvar << ", but was applied to "
+                  << call->op;
 
-              auto old_call_sinfo = call->struct_info_.as<TupleStructInfoNode>();
-              ICHECK(old_call_sinfo)
-                  << "InternalError: "
+              auto old_call_ty = call->ty.as<TupleTypeNode>();
+              TVM_FFI_CHECK(old_call_ty, InternalError)
                   << "Updater should be applied to Call producing an output tuple, "
-                  << "but " << call << " has struct info " << call->struct_info_;
-              CHECK_EQ(usage_mask.size(), old_call_sinfo->fields.size())
+                  << "but " << call << " has type " << call->ty;
+              TVM_FFI_ICHECK_EQ(usage_mask.size(), old_call_ty->fields.size())
                   << "Function " << call->op << " produces " << usage_mask.size() << " outputs, "
                   << "but " << call << " was used in a context expecting "
-                  << old_call_sinfo->fields.size() << " outputs.";
+                  << old_call_ty->fields.size() << " outputs.";
 
               Call new_call(new_gvar, call->args);
 
@@ -291,8 +288,7 @@ Pass RemoveUnusedOutputs() {
                   // could remember the index mapping and re-index any access
                   // into the old tuple, but it's simpler to just let
                   // CanonicalizeBindings and DCE handle it.
-                  new_results.push_back(
-                      relax::PrimValue(FloatImm(DataType::Float(64), std::nan(""))));
+                  new_results.push_back(PrimExpr(FloatImm(tvm::PrimType::Float(64), std::nan(""))));
                 }
               }
 
@@ -315,7 +311,7 @@ Pass RemoveUnusedOutputs() {
 
     for (const auto& [gvar, base_func] : mod->functions) {
       if (auto func = base_func.as<Function>()) {
-        auto mutated = Downcast<Function>(mutator.VisitExpr(func.value()));
+        auto mutated = mutator.VisitExpr(func.value()).as_or_throw<Function>();
         if (!mutated.same_as(base_func)) {
           caller_updates->Add(gvar, mutated);
         }

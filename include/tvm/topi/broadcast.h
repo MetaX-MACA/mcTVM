@@ -49,46 +49,46 @@ inline tvm::te::Tensor broadcast_to(const tvm::te::Tensor& t,
                                     const tvm::ffi::Array<tvm::PrimExpr>& output_shape,
                                     std::string name = "T_broadcast_to",
                                     std::string tag = kBroadcast) {
-  ICHECK_GE(output_shape.size(), t->shape.size())
+  TVM_FFI_ICHECK_GE(output_shape.size(), t->shape.size())
       << "Not a broadcast, output dimensionality smaller than input.\noutput: " << output_shape
       << "\nvs\ninput: " << t;
   auto bh = detail::BroadcastShape(output_shape, t->shape);
-  ICHECK_EQ(output_shape.size(), bh.common_shape.size());
+  TVM_FFI_ICHECK_EQ(output_shape.size(), bh.common_shape.size());
   ffi::Array<PrimExpr> oshape;
   for (size_t i = 0; i < output_shape.size(); ++i) {
-    if (output_shape[i].as<tir::IntImmNode>() == nullptr) {
+    if (output_shape[i].as<tirx::IntImmNode>() == nullptr) {
       oshape.push_back(output_shape[i]);
     } else {
-      ICHECK(topi::detail::EqualCheck(output_shape[i], bh.common_shape[i]));
+      TVM_FFI_ICHECK(topi::detail::EqualCheck(output_shape[i], bh.common_shape[i]));
       oshape.push_back(bh.common_shape[i]);
     }
   }
-  auto l = [&](tvm::ffi::Array<tvm::tir::Var> ovars) {
+  auto l = [&](tvm::ffi::Array<tvm::tirx::Var> ovars) {
     return t(detail::InputIndexFromBroadcast(ovars, t, bh.vars2, bh.all_vars));
   };
   return tvm::te::compute(oshape, l, name, tag);
 }
 
-#define TOPI_DEFINE_BCAST_OP(Name, ComputeRule)                                                  \
-  inline tvm::PrimExpr Name(const tvm::PrimExpr& a, const tvm::PrimExpr& b) { ComputeRule; }     \
-  inline tvm::te::Tensor Name(const tvm::te::Tensor& A, const tvm::te::Tensor& B,                \
-                              std::string name = "T_" #Name, std::string tag = kBroadcast) {     \
-    auto l = [](tvm::PrimExpr a, tvm::PrimExpr b) { ComputeRule; };                              \
-    return detail::WithBroadcast(l, A, B, name, tag);                                            \
-  }                                                                                              \
-  inline tvm::te::Tensor Name(const tvm::te::Tensor& A, const tvm::PrimExpr& B,                  \
-                              std::string name = "T_" #Name, std::string tag = kElementWise) {   \
-    auto l = [](tvm::PrimExpr a, tvm::PrimExpr b) { ComputeRule; };                              \
-    return tvm::te::compute(                                                                     \
-        A->shape, [&](const ::tvm::ffi::Array<::tvm::tir::Var>& i) { return l(A(i), B); }, name, \
-        tag);                                                                                    \
-  }                                                                                              \
-  inline tvm::te::Tensor Name(const tvm::PrimExpr& A, const tvm::te::Tensor& B,                  \
-                              std::string name = "T_" #Name, std::string tag = kElementWise) {   \
-    auto l = [&](tvm::PrimExpr a, tvm::PrimExpr b) { ComputeRule; };                             \
-    return tvm::te::compute(                                                                     \
-        B->shape, [&](const ::tvm::ffi::Array<::tvm::tir::Var>& i) { return l(A, B(i)); }, name, \
-        tag);                                                                                    \
+#define TOPI_DEFINE_BCAST_OP(Name, ComputeRule)                                                   \
+  inline tvm::PrimExpr Name(const tvm::PrimExpr& a, const tvm::PrimExpr& b) { ComputeRule; }      \
+  inline tvm::te::Tensor Name(const tvm::te::Tensor& A, const tvm::te::Tensor& B,                 \
+                              std::string name = "T_" #Name, std::string tag = kBroadcast) {      \
+    auto l = [](tvm::PrimExpr a, tvm::PrimExpr b) { ComputeRule; };                               \
+    return detail::WithBroadcast(l, A, B, name, tag);                                             \
+  }                                                                                               \
+  inline tvm::te::Tensor Name(const tvm::te::Tensor& A, const tvm::PrimExpr& B,                   \
+                              std::string name = "T_" #Name, std::string tag = kElementWise) {    \
+    auto l = [](tvm::PrimExpr a, tvm::PrimExpr b) { ComputeRule; };                               \
+    return tvm::te::compute(                                                                      \
+        A->shape, [&](const ::tvm::ffi::Array<::tvm::tirx::Var>& i) { return l(A(i), B); }, name, \
+        tag);                                                                                     \
+  }                                                                                               \
+  inline tvm::te::Tensor Name(const tvm::PrimExpr& A, const tvm::te::Tensor& B,                   \
+                              std::string name = "T_" #Name, std::string tag = kElementWise) {    \
+    auto l = [&](tvm::PrimExpr a, tvm::PrimExpr b) { ComputeRule; };                              \
+    return tvm::te::compute(                                                                      \
+        B->shape, [&](const ::tvm::ffi::Array<::tvm::tirx::Var>& i) { return l(A, B(i)); }, name, \
+        tag);                                                                                     \
   }
 
 #define TOPI_DEFINE_OP_OVERLOAD(Name, OpName)                                       \
@@ -252,7 +252,8 @@ TOPI_DEFINE_BCAST_OP(divide, { return div(a, b); });
  * \return The result.
  */
 TOPI_DEFINE_BCAST_OP(floor_divide, {
-  if (a.dtype().is_int() || a.dtype().is_uint()) {
+  PrimType a_ty = a.ty();
+  if (a_ty.MatchesCode(DLDataTypeCode::kDLInt, DLDataTypeCode::kDLUInt)) {
     return floordiv(a, b);
   } else {
     return floor(div(a, b));
@@ -287,7 +288,8 @@ TOPI_DEFINE_BCAST_OP(log_add_exp, { return logaddexp(a, b); });
  * \return The result.
  */
 TOPI_DEFINE_BCAST_OP(trunc_divide, {
-  if (a.dtype().is_int() || a.dtype().is_uint()) {
+  PrimType a_ty = a.ty();
+  if (a_ty.MatchesCode(DLDataTypeCode::kDLInt, DLDataTypeCode::kDLUInt)) {
     return truncdiv(a, b);
   } else {
     return trunc(div(a, b));
@@ -319,7 +321,8 @@ TOPI_DEFINE_BCAST_OP(mod, { return truncmod(a, b); });
  * \return The result.
  */
 TOPI_DEFINE_BCAST_OP(floor_mod, {
-  if (a.dtype().is_int() || a.dtype().is_uint()) {
+  PrimType a_ty = a.ty();
+  if (a_ty.MatchesCode(DLDataTypeCode::kDLInt, DLDataTypeCode::kDLUInt)) {
     return floormod(a, b);
   } else {
     return a - floor_divide(a, b) * b;
@@ -338,7 +341,8 @@ TOPI_DEFINE_BCAST_OP(floor_mod, {
  * \return The result.
  */
 TOPI_DEFINE_BCAST_OP(trunc_mod, {
-  if (a.dtype().is_int() || a.dtype().is_uint()) {
+  PrimType a_ty = a.ty();
+  if (a_ty.MatchesCode(DLDataTypeCode::kDLInt, DLDataTypeCode::kDLUInt)) {
     return truncmod(a, b);
   } else {
     return a - trunc_divide(a, b) * b;
@@ -383,6 +387,19 @@ TOPI_DEFINE_BCAST_OP(minimum, { return tvm::min(a, b); });
  * \return The result.
  */
 TOPI_DEFINE_BCAST_OP(power, { return tvm::pow(a, b); });
+
+/*!
+ * \fn atan2
+ * \brief Compute atan2(y, x) with auto-broadcasting.
+ *
+ * \param A The first tensor, or Expr (y-coordinates).
+ * \param B The second tensor, or Expr (x-coordinates).
+ * \param name The name of the operation
+ * \param tag The tag to mark the operation
+ *
+ * \return The result.
+ */
+TOPI_DEFINE_BCAST_OP(atan2, { return tvm::atan2(a, b); });
 
 /*!
  * \fn left_shift

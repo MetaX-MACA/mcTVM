@@ -25,13 +25,16 @@
 #define TVM_ARITH_ANALYZER_H_
 
 #include <tvm/arith/int_set.h>
+#include <tvm/ffi/cast.h>
 #include <tvm/ffi/reflection/registry.h>
+#include <tvm/ffi/string.h>
 #include <tvm/ir/expr.h>
-#include <tvm/support/with.h>
+#include <tvm/ir/with_context.h>
 
 #include <limits>
 #include <memory>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace tvm {
@@ -48,10 +51,12 @@ namespace arith {
 // another analyzer.
 //-------------------------------------------------------
 
-// Forward declare Analyzer
+// Forward declare the analyzer object and its reference handle.
+class AnalyzerObj;
 class Analyzer;
+class ConstraintContext;
 
-using tir::Var;
+using tirx::Var;
 
 enum DivMode {
   /*! \brief Truncated division. */
@@ -82,7 +87,7 @@ enum class ProofStrength : int {
  *
  *  set = [min_value, max_value]
  */
-class ConstIntBoundNode : public Object {
+class ConstIntBoundNode : public ffi::Object {
  public:
   int64_t min_value;
   int64_t max_value;
@@ -103,14 +108,14 @@ class ConstIntBoundNode : public Object {
   static const constexpr int64_t kNegInf = -kPosInf;
 
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("arith.ConstIntBound", ConstIntBoundNode, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("arith.ConstIntBound", ConstIntBoundNode, ffi::Object);
 };
 
 /*!
  * \brief reference class to ConstIntBoundNode
  * \sa ConstIntBoundNode
  */
-class ConstIntBound : public ObjectRef {
+class ConstIntBound : public ffi::ObjectRef {
  public:
   /*!
    * \brief constructor by fields.
@@ -121,7 +126,7 @@ class ConstIntBound : public ObjectRef {
 
   static const constexpr int64_t kPosInf = ConstIntBoundNode::kPosInf;
   static const constexpr int64_t kNegInf = ConstIntBoundNode::kNegInf;
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ConstIntBound, ObjectRef, ConstIntBoundNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ConstIntBound, ffi::ObjectRef, ConstIntBoundNode);
 };
 
 /*!
@@ -129,7 +134,8 @@ class ConstIntBound : public ObjectRef {
  */
 class ConstIntBoundAnalyzer {
  public:
-  using BoundMapType = std::unordered_map<PrimExpr, ConstIntBound, ObjectPtrHash, ObjectPtrEqual>;
+  using BoundMapType =
+      std::unordered_map<PrimExpr, ConstIntBound, ffi::ObjectPtrHash, ffi::ObjectPtrEqual>;
   /*!
    * \brief analyze the expr
    * \param expr The expression of interest.
@@ -171,10 +177,11 @@ class ConstIntBoundAnalyzer {
   TVM_DLL bool IsBound(const Var& var) const;
 
  private:
-  friend class Analyzer;
+  friend class AnalyzerObj;
   friend class ConstraintContext;
-  explicit ConstIntBoundAnalyzer(Analyzer* parent);
+  explicit ConstIntBoundAnalyzer(AnalyzerObj* parent);
   TVM_DLL ~ConstIntBoundAnalyzer();
+  void CopyFrom(const ConstIntBoundAnalyzer& other);
   /*!
    * \brief Update the internal state to enter constraint.
    * \param constraint A constraint expression.
@@ -200,7 +207,7 @@ class ConstIntBoundAnalyzer {
  *  This is useful to decide if the index is dividable by certain value.
  *  For example, if index = 0 + 4 x, then we know it can be divided by 4.
  */
-class ModularSetNode : public Object {
+class ModularSetNode : public ffi::Object {
  public:
   /*! \brief linear co-efficient */
   int64_t coeff;
@@ -215,18 +222,18 @@ class ModularSetNode : public Object {
   }
 
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("arith.ModularSet", ModularSetNode, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("arith.ModularSet", ModularSetNode, ffi::Object);
 };
 
 /*!
  * \brief reference of ModularSetNode
  * \sa ModularSetNode
  */
-class ModularSet : public ObjectRef {
+class ModularSet : public ffi::ObjectRef {
  public:
   TVM_DLL ModularSet(int64_t coeff, int64_t base);
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ModularSet, ObjectRef, ModularSetNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ModularSet, ffi::ObjectRef, ModularSetNode);
 };
 
 /*!
@@ -250,10 +257,11 @@ class ModularSetAnalyzer {
   TVM_DLL void Update(const Var& var, const ModularSet& info, bool allow_override = false);
 
  private:
-  friend class Analyzer;
+  friend class AnalyzerObj;
   friend class ConstraintContext;
-  explicit ModularSetAnalyzer(Analyzer* parent);
+  explicit ModularSetAnalyzer(AnalyzerObj* parent);
   TVM_DLL ~ModularSetAnalyzer();
+  void CopyFrom(const ModularSetAnalyzer& other);
   /*!
    * \brief Update the internal state to enter constraint.
    * \param constraint A constraint expression.
@@ -381,7 +389,7 @@ class RewriteSimplifier {
   TVM_DLL Extension GetEnabledExtensions() const;
 
   /*! \brief Return the statistics counters */
-  TVM_DLL ObjectRef GetStatsCounters() const;
+  TVM_DLL ffi::ObjectRef GetStatsCounters() const;
 
   /*! \brief Reset the statistics counters */
   TVM_DLL void ResetStatsCounters();
@@ -396,17 +404,19 @@ class RewriteSimplifier {
    * Note: To maintain accurate usage counters, `Analyzer` instances
    * should be re-used wherever possible.  For example, TIR
    * transformations should declare a single `Analyzer` that is used
-   * throughout the pass, and utility functions should receive an
-   * `Analyzer*` from their calling scope.
+   * throughout the pass.  Internal helper functions that only borrow
+   * the analyzer temporarily may receive the underlying `AnalyzerObj*`
+   * from their calling scope.
    */
   TVM_DLL void SetMaximumRewriteSteps(int64_t maximum);
 
  private:
-  friend class Analyzer;
+  friend class AnalyzerObj;
   friend class ConstraintContext;
   friend class CanonicalSimplifier;
-  explicit RewriteSimplifier(Analyzer* parent);
+  explicit RewriteSimplifier(AnalyzerObj* parent);
   TVM_DLL ~RewriteSimplifier();
+  void CopyFrom(const RewriteSimplifier& other);
   class Impl;
   /*! \brief Internal impl */
   Impl* impl_;
@@ -434,10 +444,11 @@ class CanonicalSimplifier {
   TVM_DLL void Update(const Var& var, const PrimExpr& new_expr, bool allow_override = false);
 
  private:
-  friend class Analyzer;
+  friend class AnalyzerObj;
   friend class ConstraintContext;
-  explicit CanonicalSimplifier(Analyzer* parent);
+  explicit CanonicalSimplifier(AnalyzerObj* parent);
   TVM_DLL ~CanonicalSimplifier();
+  void CopyFrom(const CanonicalSimplifier& other);
   class Impl;
   /*! \brief Internal impl */
   Impl* impl_;
@@ -519,52 +530,14 @@ class TransitiveComparisonAnalyzer {
   TVM_DLL std::function<void()> EnterConstraint(const PrimExpr& constraint);
 
  private:
-  friend class Analyzer;
+  friend class AnalyzerObj;
   friend class ConstraintContext;
   TransitiveComparisonAnalyzer();
   TVM_DLL ~TransitiveComparisonAnalyzer();
+  void CopyFrom(const TransitiveComparisonAnalyzer& other);
   class Impl;
   /*! \brief Internal impl */
   std::unique_ptr<Impl> impl_;
-};
-
-/*!
- * \brief Constraint context.
- *
- * \code
- *
- *  Var("x");
- *  arith::Analyzer analyzer;
- *  {
- *    With<arith::ConstraintContext> scope(&analyzer, x % 3 == 0);
- *    ICHECK_EQ(analyzer.modular_set(x)->coeff, 3);
- *  }
- *  // constraint no longer in effect.
- *  ICHECK_NE(analyzer.modular_set(x)->coeff, 3);
- *
- * \endcode
- */
-class ConstraintContext {
- private:
-  // declare friend to enable with.
-  friend class With<ConstraintContext>;
-  /*!
-   * \brief Construct a constraint context.
-   * \param analyzer The analyzer.
-   * \param constraint The constraint to be applied.
-   */
-  ConstraintContext(Analyzer* analyzer, PrimExpr constraint)
-      : analyzer_(analyzer), constraint_(constraint) {}
-  // enter the scope.
-  void EnterWithScope();
-  // exit the scope.
-  void ExitWithScope();
-  /*! \brief The analyzer */
-  Analyzer* analyzer_;
-  /*! \brief The constraint */
-  PrimExpr constraint_;
-  /*! \brief function to be called in recovery */
-  std::vector<std::function<void()>> recovery_functions_;
 };
 
 /*!
@@ -613,11 +586,116 @@ class IntSetAnalyzer {
   std::function<void()> EnterConstraint(const PrimExpr& constraint);
 
  private:
-  friend class Analyzer;
-  explicit IntSetAnalyzer(Analyzer* parent);
+  friend class AnalyzerObj;
+  explicit IntSetAnalyzer(AnalyzerObj* parent);
   TVM_DLL ~IntSetAnalyzer();
+  void CopyFrom(const IntSetAnalyzer& other);
   class Impl;
   /*! \brief Internal impl */
+  Impl* impl_;
+};
+
+class Z3Prover {
+ public:
+  /*!
+   * \brief Update binding of var to a new expression.
+   *
+   * \param var The variable of interest.
+   * \param new_range The range of allowed values for this var.
+   * \param allow_override whether we allow override of existing information.
+   */
+  TVM_DLL void Bind(const Var& var, const Range& new_range, bool allow_override = false);
+
+  /*!
+   * \brief Update binding of var to a new expression.
+   *
+   * \param var The variable of interest.
+   * \param expr The bound expression.
+   * \param allow_override whether we allow override of existing information.
+   */
+  TVM_DLL void Bind(const Var& var, const PrimExpr& expr, bool allow_override = false);
+
+  /*!
+   * \brief Whether the Z3 backend is compiled into this build (USE_Z3=ON).
+   *
+   * \return true if the real Z3 prover is available, false for the stub.
+   */
+  TVM_DLL bool IsEnabled() const;
+
+  /*!
+   * \brief Whether can we prove expr is always true.
+   *
+   * \param expr The expression.
+   * \return Whether we can prove it.
+   */
+  TVM_DLL bool CanProve(const PrimExpr& expr);
+
+  /*!
+   * \brief Update the internal state to enter constraint.
+   *
+   * \param constraint A constraint expression.
+   * \return an exit function that must be called to cleanup the constraint can be nullptr.
+   */
+  std::function<void()> EnterConstraint(const PrimExpr& constraint);
+
+  /*!
+   * \brief Get the SMTLIB2 representation of the current context.
+   *
+   * \param expr The optional expression to check.
+   * \return The SMTLIB2 string.
+   */
+  ffi::String GetSMTLIB2(const ffi::Optional<PrimExpr> expr);
+
+  /*!
+   * \brief Get statistics about Z3 prover.
+   *
+   * \return The statistics string.
+   */
+  ffi::String GetStats();
+
+  /*!
+   * \brief Set timeout in milliseconds for Z3 prover.
+   *
+   * \param timeout_ms The timeout in milliseconds.
+   */
+  void SetTimeoutMs(unsigned timeout_ms);
+
+  /*!
+   * \brief Set resource limitation for Z3 prover.
+   *
+   * \param rlimit the resource limitation.
+   */
+  void SetRLimit(unsigned rlimit);
+
+  /*!
+   * \brief Get the Z3 model for the given expression if satisfiable.
+   *
+   * \param expr The expression to get the model for.
+   * \return The model as a string.
+   */
+  ffi::String GetModel(const PrimExpr& expr);
+
+  /*!
+   * \brief Count the number of integer values that satisfy the current constraints.
+   *
+   * This method uses Z3's model enumeration to count how many distinct values of
+   * the given variable satisfy all current constraints.
+   *
+   * \param var The variable to count satisfying values for.
+   * \param max_count Maximum number of solutions to enumerate.
+   * \param min_consecutive Minimum consecutive count requirement.
+   * \return The number of distinct values that satisfy the constraints, or a negative error code.
+   */
+  TVM_DLL int64_t CountSatisfyingValues(const Var& var, int64_t max_count = 2048,
+                                        int64_t min_consecutive = 1);
+
+ private:
+  friend class AnalyzerObj;
+  friend class Analyzer;
+  explicit Z3Prover(AnalyzerObj* parent);
+  TVM_DLL ~Z3Prover();
+  void CopyFrom(const Z3Prover& other);
+  class Impl;
   Impl* impl_;
 };
 
@@ -631,13 +709,8 @@ class IntSetAnalyzer {
  * If the analyzer uses memoization, we need to clear the internal
  * cache when information about a Var has been overridden.
  */
-class TVM_DLL Analyzer {
+class TVM_DLL AnalyzerObj : public ffi::Object {
  public:
-  /*
-   * Disable copy constructor.
-   */
-  Analyzer(const Analyzer&) = delete;
-  Analyzer& operator=(const Analyzer&) = delete;
   /*! \brief sub-analyzer: const integer bound */
   ConstIntBoundAnalyzer const_int_bound;
   /*! \brief sub-analyzer: modular set */
@@ -650,8 +723,10 @@ class TVM_DLL Analyzer {
   IntSetAnalyzer int_set;
   /*! \brief sub-analyzer transitive comparisons */
   TransitiveComparisonAnalyzer transitive_comparisons;
+  /*! \brief sub-analyzer using Z3 */
+  Z3Prover z3_prover;
   /*! \brief constructor */
-  Analyzer();
+  AnalyzerObj();
   /*!
    * \brief Mark the value as non-negative value globally in analyzer.
    *
@@ -784,6 +859,129 @@ class TVM_DLL Analyzer {
    * \note Analyzer will call into sub-analyzers to get the result.
    */
   PrimExpr Simplify(const PrimExpr& expr, int steps = 2);
+
+  /*!
+   * \brief Deep-copy this analyzer into a new, independent Analyzer.
+   *
+   * The returned analyzer carries the same accumulated facts (variable
+   * bounds, modular sets, rewrite/canonical bindings, integer-set domains,
+   * literal constraints and transitive comparisons) as this one, but owns
+   * its own state: binding or simplifying on either analyzer afterwards does
+   * not affect the other. This is the deep copy that handle-copying an
+   * Analyzer does not provide.
+   *
+   * \note Do not call this while a `With<ConstraintContext>` scope is active
+   *       on this analyzer. The clone would inherit the scoped constraints
+   *       but not the recovery functions that pop them on scope exit, so the
+   *       constraints would leak as if they were global facts. Clone at a
+   *       point where no constraint scope is in effect.
+   *
+   * \return A new Analyzer holding an independent copy of the facts.
+   */
+  Analyzer Clone() const;
+
+  /*!
+   * \brief Analyzer methods update facts, constraints, caches, and stats.
+   *
+   * Marking the object mutable makes the `Analyzer` ObjectRef expose a
+   * non-const `operator->`, so APIs can take `const Analyzer&` while still
+   * allowing calls such as `analyzer->Bind(...)`.
+   * `const Analyzer&` keeps the handle itself from being rebound; it does
+   * not make the underlying AnalyzerObj immutable.
+   */
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("arith.Analyzer", AnalyzerObj, ffi::Object);
+};
+
+/*!
+ * \brief Managed reference to AnalyzerObj.
+ *
+ * Analyzer is a lightweight, reference-counted handle around a heap-allocated
+ * AnalyzerObj. Because it is now a first-class FFI object, an Analyzer can be
+ * passed across the tvm-ffi boundary (e.g. handed from Python into a C++ pass)
+ * and shared, so that accumulated bindings/constraints persist across calls.
+ * Copying an Analyzer copies the handle, and both handles share the same
+ * mutable AnalyzerObj state.
+ * This is not a deep copy of analyzer facts or caches.
+ *
+ * \sa AnalyzerObj
+ */
+class Analyzer : public ffi::ObjectRef {
+ public:
+  /*! \brief Default-construct a fresh analyzer (allocates an AnalyzerObj). */
+  Analyzer() : Analyzer(ffi::make_object<AnalyzerObj>()) {}
+  explicit Analyzer(ffi::ObjectPtr<AnalyzerObj> n) : ffi::ObjectRef(std::move(n)) {
+    TVM_FFI_ICHECK(this->get() != nullptr);
+  }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Analyzer, ffi::ObjectRef, AnalyzerObj);
+};
+
+/*!
+ * \brief Constraint context.
+ *
+ * \code
+ *
+ *  Var x("x");
+ *  arith::Analyzer analyzer;
+ *  {
+ *    With<arith::ConstraintContext> scope(analyzer, tvm::floormod(x, 3) == 0);
+ *    TVM_FFI_ICHECK_EQ(analyzer->modular_set(x)->coeff, 3);
+ *  }
+ *  // constraint no longer in effect.
+ *  TVM_FFI_ICHECK_NE(analyzer->modular_set(x)->coeff, 3);
+ *
+ * \endcode
+ */
+class ConstraintContext {
+ private:
+  // declare friend to enable with.
+  friend class With<ConstraintContext>;
+  /*!
+   * \brief Construct a constraint context.
+   * \param analyzer The analyzer whose context is updated. The context
+   *        keeps a reference to the analyzer while the scope is active.
+   * \param constraint The constraint to be applied.
+   */
+  ConstraintContext(const Analyzer& analyzer, PrimExpr constraint)
+      : ConstraintContext(analyzer, std::move(constraint), false) {}
+  /*!
+   * \brief Construct a constraint context.
+   * \param analyzer The analyzer whose context is updated. The context
+   *        keeps a reference to the analyzer while the scope is active.
+   * \param constraint The constraint to be applied.
+   * \param is_assume Whether the constraint comes from an assumption.
+   */
+  ConstraintContext(const Analyzer& analyzer, PrimExpr constraint, bool is_assume)
+      : analyzer_(analyzer), constraint_(std::move(constraint)), is_assume_(is_assume) {}
+  /*!
+   * \brief Construct a constraint context from a borrowed analyzer object.
+   * \param analyzer The borrowed analyzer object.
+   * \param constraint The constraint to be applied.
+   *
+   * This overload is for internal callers that already operate on AnalyzerObj*.
+   */
+  ConstraintContext(AnalyzerObj* analyzer, PrimExpr constraint)
+      : ConstraintContext(ffi::GetRef<Analyzer>(analyzer), std::move(constraint), false) {}
+  /*!
+   * \brief Construct a constraint context from a borrowed analyzer object.
+   * \param analyzer The borrowed analyzer object.
+   * \param constraint The constraint to be applied.
+   * \param is_assume Whether the constraint comes from an assumption.
+   */
+  ConstraintContext(AnalyzerObj* analyzer, PrimExpr constraint, bool is_assume)
+      : ConstraintContext(ffi::GetRef<Analyzer>(analyzer), std::move(constraint), is_assume) {}
+  // enter the scope.
+  void EnterWithScope();
+  // exit the scope.
+  void ExitWithScope();
+  /*! \brief Analyzer kept alive while the context is active. */
+  Analyzer analyzer_;
+  /*! \brief The constraint */
+  PrimExpr constraint_;
+  /*! \brief functions to be called in recovery */
+  std::vector<std::function<void()>> recovery_functions_;
+  /*! \brief Whether the constraint comes from an assumption. */
+  bool is_assume_;
 };
 
 }  // namespace arith

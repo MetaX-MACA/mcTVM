@@ -37,20 +37,20 @@ namespace nn {
 using namespace tvm::te;
 
 inline Tensor group_norm(const Tensor& data, const Tensor& gamma, const Tensor& beta,
-                         int num_groups, int channel_axis, const ffi::Array<Integer>& axes,
+                         int num_groups, int channel_axis, const ffi::Array<int64_t>& axes,
                          double epsilon, std::string name = "T_group_norm",
                          std::string tag = kInjective) {
   const auto& data_type = data->dtype;
   const auto& gamma_type = gamma.defined() ? gamma->dtype : data_type;
   const auto& beta_type = beta.defined() ? beta->dtype : data_type;
-  ICHECK(data_type == gamma_type && data_type == beta_type)
+  TVM_FFI_ICHECK(data_type == gamma_type && data_type == beta_type)
       << "group_norm: data, gamma and beta must have the same type";
-  ICHECK(data_type == DataType::Float(32) || data_type == DataType::Float(16))
+  TVM_FFI_ICHECK(data_type == PrimType::Float(32) || data_type == PrimType::Float(16))
       << "group_norm: only support float32 and float16 for now";
-  bool is_float16 = data_type == DataType::Float(16);
+  bool is_float16 = data_type == PrimType::Float(16);
   // reshape data C -> G, C/G
   int ndim = data->shape.size();
-  channel_axis = GetRealAxis(static_cast<int>(ndim), ffi::Array<Integer>({channel_axis}))[0];
+  channel_axis = GetRealAxis(static_cast<int>(ndim), ffi::Array<int64_t>({channel_axis}))[0];
 
   auto shape = data->shape;
   auto group_size = floordiv(shape[channel_axis], num_groups);
@@ -65,7 +65,7 @@ inline Tensor group_norm(const Tensor& data, const Tensor& gamma, const Tensor& 
   }
   Tensor data_reshaped;
   if (is_float16) {
-    data_reshaped = cast(reshape(data, new_shape), DataType::Float(32));
+    data_reshaped = cast(reshape(data, new_shape), PrimType::Float(32));
   } else {
     data_reshaped = reshape(data, new_shape);
   }
@@ -82,13 +82,13 @@ inline Tensor group_norm(const Tensor& data, const Tensor& gamma, const Tensor& 
   // get the new axes to normalize after reshape
   std::vector<int> new_axes{channel_axis + 1};
   for (auto axis : axes) {
-    int new_axis = GetRealAxis(static_cast<int>(ndim), ffi::Array<Integer>({axis}))[0];
+    int new_axis = GetRealAxis(static_cast<int>(ndim), ffi::Array<int64_t>({axis}))[0];
     if (new_axis < channel_axis) {
       new_axes.push_back(new_axis);
     } else if (new_axis > channel_axis) {
       new_axes.push_back(new_axis + 1);
     } else {
-      ICHECK(false) << "axes can not contain channel axis";
+      TVM_FFI_ICHECK(false) << "axes can not contain channel axis";
     }
   }
   std::sort(new_axes.begin(), new_axes.end());
@@ -126,7 +126,7 @@ inline Tensor group_norm(const Tensor& data, const Tensor& gamma, const Tensor& 
 
   auto temp_x = temp_x_x2[0];
   auto temp_x2 = temp_x_x2[1];
-  auto reduce_extent = make_const(DataType::Float(32), 1);
+  PrimExpr reduce_extent = FloatImm(PrimType::Float(32), 1);
   for (auto axis : new_axes) {
     reduce_extent *= data_reshaped->shape[axis];
   }
@@ -142,10 +142,10 @@ inline Tensor group_norm(const Tensor& data, const Tensor& gamma, const Tensor& 
     gamma_indices = {indices[channel_axis], indices[channel_axis + 1]};
     auto mean = temp_x(non_reduce_indices) / reduce_extent;
     auto var = temp_x2(non_reduce_indices) / reduce_extent - mean * mean;
-    PrimExpr group_norm =
-        (data_reshaped(indices) - mean) * tvm::rsqrt(var + make_const(data->dtype, epsilon));
+    PrimExpr group_norm = (data_reshaped(indices) - mean) *
+                          tvm::rsqrt(var + MakeConst(PrimType(data->dtype), epsilon));
     if (is_float16) {
-      group_norm = Cast(DataType::Float(16), group_norm);
+      group_norm = Cast(PrimType::Float(16), group_norm);
     }
     if (gamma.defined()) {
       group_norm = topi::multiply(group_norm, gamma_reshaped(gamma_indices));

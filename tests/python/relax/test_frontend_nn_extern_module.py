@@ -15,13 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=missing-docstring
+# ruff: noqa: F401
 import subprocess
 import tempfile
 from pathlib import Path
 
 import numpy as np
+import tvm_ffi
 
 import tvm
+import tvm.libinfo
 import tvm.testing
 from tvm import relax
 from tvm.relax.frontend import nn
@@ -39,7 +42,7 @@ def _infer_scalar_add(x, y):  # pylint: disable=invalid-name
 
 def _infer_test_sym(a, b):  # pylint: disable=invalid-name
     def _var_equal(a, b):  # pylint: disable=invalid-name
-        return tvm.ir.structural_equal(a, b, map_free_vars=True)
+        return tvm_ffi.structural_equal(a, b, map_free_vars=True)
 
     assert isinstance(a, nn.Tensor)
     assert isinstance(b, nn.Tensor)
@@ -79,7 +82,7 @@ def _check_ir_equality(mod):
     # pylint: disable=import-outside-toplevel
     from tvm.script import ir as I
     from tvm.script import relax as R
-    from tvm.script import tir as T
+    from tvm.script import tirx as T
 
     # pylint: enable=import-outside-toplevel
 
@@ -92,7 +95,7 @@ def _check_ir_equality(mod):
             R.func_attr({"num_input": 2})
             with R.dataflow():
                 ext_scalar_add = R.call_dps_packed(
-                    "ext_scalar_add", (a, b), out_sinfo=R.Tensor((), dtype="float32")
+                    "ext_scalar_add", (a, b), out_ty=R.Tensor((), dtype="float32")
                 )
                 gv: R.Tensor((), dtype="float32") = ext_scalar_add
                 R.output(gv)
@@ -108,7 +111,7 @@ def _check_ir_equality(mod):
             R.func_attr({"num_input": 2})
             with R.dataflow():
                 ext_test_sym = R.call_dps_packed(
-                    "ext_test_sym", (a, b), out_sinfo=R.Tensor((x, y, z, 9), dtype="float32")
+                    "ext_test_sym", (a, b), out_ty=R.Tensor((x, y, z, 9), dtype="float32")
                 )
                 gv1: R.Tensor((x, y, z, 9), dtype="float32") = ext_test_sym
                 R.output(gv1)
@@ -118,19 +121,17 @@ def _check_ir_equality(mod):
 
 
 def _compile_cc(src: Path, dst: Path):
-    # pylint: disable=import-outside-toplevel
-    from tvm.base import py_str
-    from tvm.libinfo import find_include_path
-
-    # pylint: enable=import-outside-toplevel
-
     cmd = ["g++", str(src)]
-    for include_path in find_include_path():
+    default_include_paths = [
+        tvm.libinfo.find_include_path(),
+        tvm_ffi.libinfo.find_include_path(),
+        tvm_ffi.libinfo.find_dlpack_include_path(),
+    ]
+    for include_path in default_include_paths:
         cmd += ["-I", include_path]
     cmd += [
-        "-DDMLC_USE_FOPEN64=0",
-        "-DDMLC_USE_LOGGING_LIBRARY=<tvm/runtime/logging.h>",
         "-c",
+        "-std=c++17",
         "-fPIC",
         "-o",
         str(dst),
@@ -139,7 +140,7 @@ def _compile_cc(src: Path, dst: Path):
         (out, _) = proc.communicate()
         if proc.returncode != 0:
             msg = "Compilation error:\n"
-            msg += py_str(out)
+            msg += out.decode("utf-8", errors="replace")
             msg += "\nCommand line: " + " ".join(cmd)
             raise RuntimeError(msg)
 

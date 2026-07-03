@@ -1,3 +1,4 @@
+# isort: skip_file
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -16,6 +17,7 @@
 # under the License.
 # pylint: disable=redefined-builtin, wildcard-import
 """TVM: Open Deep Learning Compiler Stack."""
+
 import multiprocessing
 import sys
 import os
@@ -24,13 +26,14 @@ import os
 from tvm_ffi import register_object, register_global_func, get_global_func
 
 # top-level alias
-from .base import TVMError, __version__, _RUNTIME_ONLY
+from .libinfo import __version__
+from .base import _RUNTIME_ONLY
 
-# top-level alias
 # tvm.runtime
-from .runtime.object import Object
+from .runtime import Object
 from .runtime._tensor import device, cpu, cuda, opencl, vulkan, metal
-from .runtime._tensor import vpi, rocm, ext_dev, hexagon, maca
+from .runtime._tensor import vpi, rocm, ext_dev, hexagon
+from .runtime._tensor import maca
 from .runtime import DataType, DataTypeCode
 
 # tvm.error
@@ -40,11 +43,17 @@ from . import error
 from .ir import IRModule
 from .ir import transform
 from .ir import instrument
-from .ir import container
 from . import ir
 
-# tvm.tir
-from . import tir
+# tvm.script — must be imported before any dialect package so that
+# tvm.script.register_dialect is reachable when dialect __init__.py files run.
+from . import script
+
+# tvm.tirx — registers itself via tvm.script.register_dialect in its __init__
+from . import tirx
+
+# tvm.backend — owns backend Python load hooks
+from . import backend
 
 # tvm.target
 from . import target
@@ -61,12 +70,13 @@ from . import arith
 # support infra
 from . import support
 
-# Contrib initializers
-from .contrib import rocm as _rocm, nvcc as _nvcc, mxcc as _mxcc
+# Side-effect imports: register CUDA/ROCm/MACA FFI callbacks at TVM startup
+from .support import mxcc as _mxcc, rocm as _rocm, nvcc as _nvcc
 
 # Relax contain modules that are only available in compiler package
 # Do not import them if TVM is built with runtime only
 if not _RUNTIME_ONLY:
+    # tvm.relax — registers itself via tvm.script.register_dialect in its __init__
     from . import relax
 
 # NOTE: This file should be python2 compatible so we can
@@ -81,9 +91,7 @@ def _should_print_backtrace():
     try:
         tvm_backtrace = bool(int(tvm_backtrace))
     except ValueError:
-        raise ValueError(
-            "invalid value for TVM_BACKTRACE {}, please set to 0 or 1.".format(tvm_backtrace)
-        )
+        raise ValueError(f"invalid value for TVM_BACKTRACE {tvm_backtrace}, please set to 0 or 1.")
 
     return in_pytest or tvm_backtrace
 
@@ -108,3 +116,12 @@ def tvm_wrap_excepthook(exception_hook):
 
 
 sys.excepthook = tvm_wrap_excepthook(sys.excepthook)
+
+# Autoload loads built-in and out-of-tree backends. Out-of-tree extensions opt
+# into being loaded automatically at ``import tvm`` time by declaring an entry
+# point in the ``tvm.backends`` group:
+# [project.entry-points."tvm.backends"] tvm_foo = "tvm_foo:_autoload".
+# Autoload can be disabled via ``TVM_DEVICE_BACKEND_AUTOLOAD=0``.
+from .backend._autoload_backends import _autoload_backends
+
+_autoload_backends()

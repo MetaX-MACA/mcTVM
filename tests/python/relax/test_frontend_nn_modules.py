@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from typing import List, Tuple
+# ruff: noqa: E501, F401, F841
 
 import numpy as np
 import pytest
@@ -26,20 +26,20 @@ from tvm.ir import assert_structural_equal
 from tvm.relax.frontend import nn
 from tvm.relax.frontend.nn import core, modules, spec
 from tvm.script import ir as I
-from tvm.script import tir as T
 from tvm.script import relax as R
+from tvm.script import tirx as T
 
 
 def test_relu():
     @R.function
     def forward(
         x: R.Tensor((3, 3), dtype="float32"),
-        _io: R.Object,
-    ) -> R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Object)):
+        _io: R.Any,
+    ) -> R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             relu: R.Tensor((3, 3), dtype="float32") = R.nn.relu(x)
-            gv1: R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Object)) = relu, (_io,)
+            gv1: R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Any)) = relu, (_io,)
             R.output(gv1)
         return gv1
 
@@ -52,12 +52,12 @@ def test_silu():
     @R.function
     def forward(
         x: R.Tensor((3, 3), dtype="float32"),
-        _io: R.Object,
-    ) -> R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Object)):
+        _io: R.Any,
+    ) -> R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             silu: R.Tensor((3, 3), dtype="float32") = R.nn.silu(x)
-            gv1: R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Object)) = silu, (_io,)
+            gv1: R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Any)) = silu, (_io,)
             R.output(gv1)
         return gv1
 
@@ -70,12 +70,12 @@ def test_gelu():
     @R.function
     def forward(
         x: R.Tensor((3, 3), dtype="float32"),
-        _io: R.Object,
-    ) -> R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Object)):
+        _io: R.Any,
+    ) -> R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             gelu: R.Tensor((3, 3), dtype="float32") = R.nn.gelu(x)
-            gv1: R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Object)) = gelu, (_io,)
+            gv1: R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Any)) = gelu, (_io,)
             R.output(gv1)
         return gv1
 
@@ -88,11 +88,11 @@ def test_identity():
     @R.function
     def forward(
         x: R.Tensor((3, 3), dtype="float32"),
-        _io: R.Object,
-    ) -> R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Object)):
+        _io: R.Any,
+    ) -> R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
-            gv1: R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Object)) = x, (_io,)
+            gv1: R.Tuple(R.Tensor((3, 3), dtype="float32"), R.Tuple(R.Any)) = x, (_io,)
             R.output(gv1)
         return gv1
 
@@ -105,16 +105,16 @@ def test_linear():
     @R.function
     def forward(
         x: R.Tensor((1, 4), dtype="float32"),
-        _io: R.Object,
+        _io: R.Any,
         weight: R.Tensor((8, 4), dtype="float32"),
         bias: R.Tensor((8,), dtype="float32"),
-    ) -> R.Tuple(R.Tensor((1, 8), dtype="float32"), R.Tuple(R.Object)):
+    ) -> R.Tuple(R.Tensor((1, 8), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             permute_dims: R.Tensor((4, 8), dtype="float32") = R.permute_dims(weight, axes=None)
-            matmul: R.Tensor((1, 8), dtype="float32") = R.matmul(x, permute_dims, out_dtype="void")
+            matmul: R.Tensor((1, 8), dtype="float32") = R.matmul(x, permute_dims)
             add: R.Tensor((1, 8), dtype="float32") = R.add(matmul, bias)
-            gv1: R.Tuple(R.Tensor((1, 8), dtype="float32"), R.Tuple(R.Object)) = add, (_io,)
+            gv1: R.Tuple(R.Tensor((1, 8), dtype="float32"), R.Tuple(R.Any)) = add, (_io,)
             R.output(gv1)
         return gv1
 
@@ -127,10 +127,10 @@ def test_conv1d():
     @R.function
     def forward(
         x: R.Tensor((1, 3, 32), dtype="float32"),
-        _io: R.Object,
+        _io: R.Any,
         weight: R.Tensor((32, 3, 3), dtype="float32"),
         bias: R.Tensor((32,), dtype="float32"),
-    ) -> R.Tuple(R.Tensor((1, 32, 30), dtype="float32"), R.Tuple(R.Object)):
+    ) -> R.Tuple(R.Tensor((1, 32, 30), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             lv1: R.Tensor((1, 32, 30), dtype="float32") = R.nn.conv1d(
@@ -143,11 +143,10 @@ def test_conv1d():
                 data_layout="NCW",
                 kernel_layout="OIW",
                 out_layout="NCW",
-                out_dtype="void",
             )
             lv2: R.Tensor((1, 32, 1), dtype="float32") = R.reshape(bias, R.shape([1, 32, 1]))
             conv1d: R.Tensor((1, 32, 30), dtype="float32") = R.add(lv1, lv2)
-            gv1: R.Tuple(R.Tensor((1, 32, 30), dtype="float32"), R.Tuple(R.Object)) = conv1d, (_io,)
+            gv1: R.Tuple(R.Tensor((1, 32, 30), dtype="float32"), R.Tuple(R.Any)) = conv1d, (_io,)
             R.output(gv1)
         return gv1
 
@@ -166,13 +165,13 @@ def test_conv1d():
 def test_conv1d_transpose():
     # fmt: off
     @R.function
-    def forward(x: R.Tensor((1, 3, 30), dtype="float32"), _io: R.Object, weight: R.Tensor((3, 32, 3), dtype="float32"), bias: R.Tensor((32,), dtype="float32")) -> R.Tuple(R.Tensor((1, 32, 32), dtype="float32"), R.Tuple(R.Object)):
+    def forward(x: R.Tensor((1, 3, 30), dtype="float32"), _io: R.Any, weight: R.Tensor((3, 32, 3), dtype="float32"), bias: R.Tensor((32,), dtype="float32")) -> R.Tuple(R.Tensor((1, 32, 32), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
-            lv1: R.Tensor((1, 32, 32), dtype="float32") = R.nn.conv1d_transpose(x, weight, strides=[1], padding=[0, 0], output_padding=[0], dilation=[1], groups=1, data_layout="NCW", kernel_layout="IOW", out_layout="NCW", out_dtype="void")
+            lv1: R.Tensor((1, 32, 32), dtype="float32") = R.nn.conv1d_transpose(x, weight, strides=[1], padding=[0, 0], output_padding=[0], dilation=[1], groups=1, data_layout="NCW", kernel_layout="IOW", out_layout="NCW")
             lv2: R.Tensor((1, 32, 1), dtype="float32") = R.reshape(bias, R.shape([1, 32, 1]))
             conv1d_transpose: R.Tensor((1, 32, 32), dtype="float32") = R.add(lv1, lv2)
-            gv1: R.Tuple(R.Tensor((1, 32, 32), dtype="float32"), R.Tuple(R.Object)) = conv1d_transpose, (_io,)
+            gv1: R.Tuple(R.Tensor((1, 32, 32), dtype="float32"), R.Tuple(R.Any)) = conv1d_transpose, (_io,)
             R.output(gv1)
         return gv1
     # fmt: on
@@ -193,17 +192,18 @@ def test_layer_norm():
     @R.function
     def forward(
         x: R.Tensor((2, 4, 8), dtype="float32"),
-        _io: R.Object,
+        _io: R.Any,
         weight: R.Tensor((8,), dtype="float32"),
         bias: R.Tensor((8,), dtype="float32"),
-    ) -> R.Tuple(R.Tensor((2, 4, 8), dtype="float32"), R.Tuple(R.Object)):
+    ) -> R.Tuple(R.Tensor((2, 4, 8), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             layer_norm: R.Tensor((2, 4, 8), dtype="float32") = R.nn.layer_norm(
                 x, weight, bias, axes=[-1], epsilon=1.0000000000000001e-05, center=True, scale=True
             )
-            gv1: R.Tuple(R.Tensor((2, 4, 8), dtype="float32"), R.Tuple(R.Object)) = layer_norm, (
-                _io,
+            gv1: R.Tuple(R.Tensor((2, 4, 8), dtype="float32"), R.Tuple(R.Any)) = (
+                layer_norm,
+                (_io,),
             )
             R.output(gv1)
         return gv1
@@ -219,17 +219,18 @@ def test_conv2d():
     @R.function
     def forward(
         x: R.Tensor((1, 3, 32, 32), dtype="float32"),
-        _io: R.Object,
+        _io: R.Any,
         weight: R.Tensor((32, 3, 3, 3), dtype="float32"),
         bias: R.Tensor((32,), dtype="float32"),
-    ) -> R.Tuple(R.Tensor((1, 32, 30, 30), dtype="float32"), R.Tuple(R.Object)):
+    ) -> R.Tuple(R.Tensor((1, 32, 30, 30), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             lv1: R.Tensor((1, 32, 30, 30), dtype="float32") = R.nn.conv2d(x, weight)
             lv2: R.Tensor((1, 32, 1, 1), dtype="float32") = R.reshape(bias, R.shape([1, 32, 1, 1]))
             conv2d: R.Tensor((1, 32, 30, 30), dtype="float32") = R.add(lv1, lv2)
-            gv1: R.Tuple(R.Tensor((1, 32, 30, 30), dtype="float32"), R.Tuple(R.Object)) = conv2d, (
-                _io,
+            gv1: R.Tuple(R.Tensor((1, 32, 30, 30), dtype="float32"), R.Tuple(R.Any)) = (
+                conv2d,
+                (_io,),
             )
             R.output(gv1)
         return gv1
@@ -250,10 +251,10 @@ def test_conv3d():
     @R.function
     def forward(
         x: R.Tensor((1, 3, 32, 32, 32), dtype="float32"),
-        _io: R.Object,
+        _io: R.Any,
         weight: R.Tensor((32, 3, 3, 3, 3), dtype="float32"),
         bias: R.Tensor((32,), dtype="float32"),
-    ) -> R.Tuple(R.Tensor((1, 32, 30, 30, 30), dtype="float32"), R.Tuple(R.Object)):
+    ) -> R.Tuple(R.Tensor((1, 32, 30, 30, 30), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             lv1: R.Tensor((1, 32, 30, 30, 30), dtype="float32") = R.nn.conv3d(x, weight)
@@ -261,9 +262,10 @@ def test_conv3d():
                 bias, R.shape([1, 32, 1, 1, 1])
             )
             conv3d: R.Tensor((1, 32, 30, 30, 30), dtype="float32") = R.add(lv1, lv2)
-            gv1: R.Tuple(
-                R.Tensor((1, 32, 30, 30, 30), dtype="float32"), R.Tuple(R.Object)
-            ) = conv3d, (_io,)
+            gv1: R.Tuple(R.Tensor((1, 32, 30, 30, 30), dtype="float32"), R.Tuple(R.Any)) = (
+                conv3d,
+                (_io,),
+            )
             R.output(gv1)
         return gv1
 
@@ -283,10 +285,10 @@ def test_conv2d_dynamic():
     @R.function
     def forward(
         x: R.Tensor(("n", "c", "h", "w"), dtype="float32"),
-        _io: R.Object,
+        _io: R.Any,
         weight: R.Tensor((32, "in_channels", 3, 3), dtype="float32"),
         bias: R.Tensor((32,), dtype="float32"),
-    ) -> R.Tuple(R.Tensor(("n", 32, "h - 2", "w - 2"), dtype="float32"), R.Tuple(R.Object)):
+    ) -> R.Tuple(R.Tensor(("n", 32, "h - 2", "w - 2"), dtype="float32"), R.Tuple(R.Any)):
         n = T.int64()
         h = T.int64()
         w = T.int64()
@@ -297,14 +299,14 @@ def test_conv2d_dynamic():
             lv1: R.Tensor((n, 32, h - 2, w - 2), dtype="float32") = R.nn.conv2d(x, weight)
             lv2: R.Tensor((1, 32, 1, 1), dtype="float32") = R.reshape(bias, R.shape([1, 32, 1, 1]))
             conv2d: R.Tensor((n, 32, h - 2, w - 2), dtype="float32") = R.add(lv1, lv2)
-            gv1: R.Tuple(R.Tensor((n, 32, h - 2, w - 2), dtype="float32"), R.Tuple(R.Object)) = (
+            gv1: R.Tuple(R.Tensor((n, 32, h - 2, w - 2), dtype="float32"), R.Tuple(R.Any)) = (
                 conv2d,
                 (_io,),
             )
             R.output(gv1)
         return gv1
 
-    mod = modules.Conv2D(tvm.tir.Var("in_channels", "int64"), 32, 3, bias=True)
+    mod = modules.Conv2D(tvm.tirx.Var("in_channels", "int64"), 32, 3, bias=True)
     tvm_mod, _ = mod.export_tvm(
         spec={
             "forward": {
@@ -320,15 +322,15 @@ def test_rms_norm():
     @R.function
     def forward(
         x: R.Tensor((2, 4, 8), dtype="float32"),
-        _io: R.Object,
+        _io: R.Any,
         weight: R.Tensor((8,), dtype="float32"),
-    ) -> R.Tuple(R.Tensor((2, 4, 8), dtype="float32"), R.Tuple(R.Object)):
+    ) -> R.Tuple(R.Tensor((2, 4, 8), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             rms_norm: R.Tensor((2, 4, 8), dtype="float32") = R.nn.rms_norm(
                 x, weight, axes=[2], epsilon=1.0000000000000001e-05
             )
-            gv1: R.Tuple(R.Tensor((2, 4, 8), dtype="float32"), R.Tuple(R.Object)) = rms_norm, (_io,)
+            gv1: R.Tuple(R.Tensor((2, 4, 8), dtype="float32"), R.Tuple(R.Any)) = rms_norm, (_io,)
             R.output(gv1)
         return gv1
 
@@ -343,17 +345,18 @@ def test_group_norm():
     @R.function
     def forward(
         x: R.Tensor((2, 4, 8), dtype="float32"),
-        _io: R.Object,
+        _io: R.Any,
         weight: R.Tensor((4,), dtype="float32"),
         bias: R.Tensor((4,), dtype="float32"),
-    ) -> R.Tuple(R.Tensor((2, 4, 8), dtype="float32"), R.Tuple(R.Object)):
+    ) -> R.Tuple(R.Tensor((2, 4, 8), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             group_norm: R.Tensor((2, 4, 8), dtype="float32") = R.nn.group_norm(
                 x, weight, bias, num_groups=2, channel_axis=1, axes=[2]
             )
-            gv1: R.Tuple(R.Tensor((2, 4, 8), dtype="float32"), R.Tuple(R.Object)) = group_norm, (
-                _io,
+            gv1: R.Tuple(R.Tensor((2, 4, 8), dtype="float32"), R.Tuple(R.Any)) = (
+                group_norm,
+                (_io,),
             )
             R.output(gv1)
         return gv1
@@ -365,19 +368,38 @@ def test_group_norm():
     assert_structural_equal(tvm_mod["forward"], forward, True)
 
 
-def test_embedding():
+def test_embedding_1d():
+    @R.function
+    def forward(
+        x: R.Tensor((4,), dtype="int32"),
+        _io: R.Any,
+        weight: R.Tensor((8, 16), dtype="float32"),
+    ) -> R.Tuple(R.Tensor((4, 16), dtype="float32"), R.Tuple(R.Any)):
+        R.func_attr({"num_input": 2})
+        with R.dataflow():
+            take: R.Tensor((4, 16), dtype="float32") = R.take(weight, x, axis=0)
+            gv1: R.Tuple(R.Tensor((4, 16), dtype="float32"), R.Tuple(R.Any)) = take, (_io,)
+            R.output(gv1)
+        return gv1
+
+    mod = modules.Embedding(8, 16, "float32")
+    tvm_mod, _ = mod.export_tvm(spec={"forward": {"x": spec.Tensor((4,), "int32")}}, debug=True)
+    assert_structural_equal(tvm_mod["forward"], forward, True)
+
+
+def test_embedding_2d():
     @R.function
     def forward(
         x: R.Tensor((1, 4), dtype="int32"),
-        _io: R.Object,
+        _io: R.Any,
         weight: R.Tensor((4, 8), dtype="float32"),
-    ) -> R.Tuple(R.Tensor((1, 4, 8), dtype="float32"), R.Tuple(R.Object)):
+    ) -> R.Tuple(R.Tensor((1, 4, 8), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             reshape: R.Tensor((4,), dtype="int32") = R.reshape(x, R.shape([4]))
             take: R.Tensor((4, 8), dtype="float32") = R.take(weight, reshape, axis=0)
             reshape1: R.Tensor((1, 4, 8), dtype="float32") = R.reshape(take, R.shape([1, 4, 8]))
-            gv1: R.Tuple(R.Tensor((1, 4, 8), dtype="float32"), R.Tuple(R.Object)) = reshape1, (_io,)
+            gv1: R.Tuple(R.Tensor((1, 4, 8), dtype="float32"), R.Tuple(R.Any)) = reshape1, (_io,)
             R.output(gv1)
         return gv1
 
@@ -391,38 +413,32 @@ def test_timestep_embedding():
     def forward(
         sample: R.Tensor((32, 32), dtype="float32"),
         condition: R.Tensor((32, 16), dtype="float32"),
-        _io: R.Object,
+        _io: R.Any,
         linear_1_weight: R.Tensor((32, 32), dtype="float32"),
         linear_1_bias: R.Tensor((32,), dtype="float32"),
         cond_proj_weight: R.Tensor((32, 16), dtype="float32"),
         linear_2_weight: R.Tensor((32, 32), dtype="float32"),
         linear_2_bias: R.Tensor((32,), dtype="float32"),
-    ) -> R.Tuple(R.Tensor((32, 32), dtype="float32"), R.Tuple(R.Object)):
+    ) -> R.Tuple(R.Tensor((32, 32), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 3})
         with R.dataflow():
             permute_dims: R.Tensor((16, 32), dtype="float32") = R.permute_dims(
                 cond_proj_weight, axes=None
             )
-            matmul: R.Tensor((32, 32), dtype="float32") = R.matmul(
-                condition, permute_dims, out_dtype="void"
-            )
+            matmul: R.Tensor((32, 32), dtype="float32") = R.matmul(condition, permute_dims)
             add: R.Tensor((32, 32), dtype="float32") = R.add(sample, matmul)
             permute_dims1: R.Tensor((32, 32), dtype="float32") = R.permute_dims(
                 linear_1_weight, axes=None
             )
-            matmul1: R.Tensor((32, 32), dtype="float32") = R.matmul(
-                add, permute_dims1, out_dtype="void"
-            )
+            matmul1: R.Tensor((32, 32), dtype="float32") = R.matmul(add, permute_dims1)
             add1: R.Tensor((32, 32), dtype="float32") = R.add(matmul1, linear_1_bias)
             silu: R.Tensor((32, 32), dtype="float32") = R.nn.silu(add1)
             permute_dims2: R.Tensor((32, 32), dtype="float32") = R.permute_dims(
                 linear_2_weight, axes=None
             )
-            matmul2: R.Tensor((32, 32), dtype="float32") = R.matmul(
-                silu, permute_dims2, out_dtype="void"
-            )
+            matmul2: R.Tensor((32, 32), dtype="float32") = R.matmul(silu, permute_dims2)
             add2: R.Tensor((32, 32), dtype="float32") = R.add(matmul2, linear_2_bias)
-            gv1: R.Tuple(R.Tensor((32, 32), dtype="float32"), R.Tuple(R.Object)) = add2, (_io,)
+            gv1: R.Tuple(R.Tensor((32, 32), dtype="float32"), R.Tuple(R.Any)) = add2, (_io,)
             R.output(gv1)
         return gv1
 
@@ -441,9 +457,9 @@ def test_timestep_embedding():
 
 def test_timesteps():
     @R.function
-    def forward(
-        x: R.Tensor((3,), dtype="float32"), _io: R.Object
-    ) -> R.Tuple(R.Tensor((3, 10), dtype="float32"), R.Tuple(R.Object)):
+    def forward(x: R.Tensor((3,), dtype="float32"), _io: R.Any) -> R.Tuple(
+        R.Tensor((3, 10), dtype="float32"), R.Tuple(R.Any)
+    ):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             lv1: R.Tensor((3,), dtype="float32") = R.astype(x, dtype="float32")
@@ -464,7 +480,7 @@ def test_timesteps():
             get_timestep_embedding: R.Tensor((3, 10), dtype="float32") = R.astype(
                 lv11, dtype="float32"
             )
-            gv1: R.Tuple(R.Tensor((3, 10), dtype="float32"), R.Tuple(R.Object)) = (
+            gv1: R.Tuple(R.Tensor((3, 10), dtype="float32"), R.Tuple(R.Any)) = (
                 get_timestep_embedding,
                 (_io,),
             )
@@ -480,18 +496,18 @@ def test_kv_cache():
     @I.ir_module
     class Module:
         @R.function
-        def _initialize_effect() -> R.Tuple(R.Object, R.Object):
+        def _initialize_effect() -> R.Tuple(R.Any, R.Any):
             with R.dataflow():
-                _io: R.Object = R.null_value()
+                _io: R.Any = R.null_value()
                 lv: R.Tensor((8, 2, 4), dtype="float32") = R.zeros(
                     R.shape([8, 2, 4]), dtype="float32"
                 )
-                cache: R.Object = R.call_pure_packed(
+                cache: R.Any = R.call_pure_packed(
                     "vm.builtin.attention_kv_cache_create",
                     lv,
                     R.shape([8, 2, 4]),
                     R.prim_value(0),
-                    sinfo_args=[R.Object()],
+                    ty_args=[R.Any()],
                 )
                 lv1 = _io, cache
                 gv = lv1
@@ -499,25 +515,25 @@ def test_kv_cache():
             return gv
 
         @R.function
-        def forward(
-            x: R.Tensor((2, 4), dtype="float32"), _io: R.Object, cache: R.Object
-        ) -> R.Tuple(R.Tensor((4, 2, 4), dtype="float32"), R.Tuple(R.Object, R.Object)):
+        def forward(x: R.Tensor((2, 4), dtype="float32"), _io: R.Any, cache: R.Any) -> R.Tuple(
+            R.Tensor((4, 2, 4), dtype="float32"), R.Tuple(R.Any, R.Any)
+        ):
             R.func_attr({"num_input": 3})
             with R.dataflow():
-                lv2: R.Object = R.call_inplace_packed(
+                lv2: R.Any = R.call_inplace_packed(
                     "vm.builtin.attention_kv_cache_append",
                     cache,
                     x,
                     inplace_indices=[0],
-                    sinfo_args=[R.Object()],
+                    ty_args=[R.Any()],
                 )
                 lv3: R.Tensor((4, 2, 4), dtype="float32") = R.call_pure_packed(
                     "vm.builtin.attention_kv_cache_view",
                     lv2,
                     R.shape([4, 2, 4]),
-                    sinfo_args=(R.Tensor((4, 2, 4), dtype="float32"),),
+                    ty_args=(R.Tensor((4, 2, 4), dtype="float32"),),
                 )
-                gv1: R.Tuple(R.Tensor((4, 2, 4), dtype="float32"), R.Tuple(R.Object, R.Object)) = (
+                gv1: R.Tuple(R.Tensor((4, 2, 4), dtype="float32"), R.Tuple(R.Any, R.Any)) = (
                     lv3,
                     (_io, lv2),
                 )
@@ -543,7 +559,7 @@ def test_attention():
     def forward(
         hidden_states: R.Tensor((2, 4096, 640), dtype="float32"),
         encoder_hidden_states: R.Tensor((2, 77, 2048), dtype="float32"),
-        _io: R.Object,
+        _io: R.Any,
         to_q_weight: R.Tensor((640, 640), dtype="float32"),
         to_k_weight: R.Tensor((640, 2048), dtype="float32"),
         to_v_weight: R.Tensor((640, 2048), dtype="float32"),
@@ -551,7 +567,7 @@ def test_attention():
         group_norm_bias: R.Tensor((640,), dtype="float32"),
         to_out_0_weight: R.Tensor((640, 640), dtype="float32"),
         to_out_0_bias: R.Tensor((640,), dtype="float32"),
-    ) -> R.Tuple(R.Tensor((2, 4096, 640), dtype="float32"), R.Tuple(R.Object)):
+    ) -> R.Tuple(R.Tensor((2, 4096, 640), dtype="float32"), R.Tuple(R.Any)):
         R.func_attr({"num_input": 3})
         with R.dataflow():
             group_norm: R.Tensor((2, 4096, 640), dtype="float32") = R.nn.group_norm(
@@ -568,20 +584,18 @@ def test_attention():
             permute_dims: R.Tensor((640, 640), dtype="float32") = R.permute_dims(
                 to_q_weight, axes=None
             )
-            matmul: R.Tensor((2, 4096, 640), dtype="float32") = R.matmul(
-                group_norm, permute_dims, out_dtype="void"
-            )
+            matmul: R.Tensor((2, 4096, 640), dtype="float32") = R.matmul(group_norm, permute_dims)
             permute_dims1: R.Tensor((2048, 640), dtype="float32") = R.permute_dims(
                 to_k_weight, axes=None
             )
             matmul1: R.Tensor((2, 77, 640), dtype="float32") = R.matmul(
-                encoder_hidden_states, permute_dims1, out_dtype="void"
+                encoder_hidden_states, permute_dims1
             )
             permute_dims2: R.Tensor((2048, 640), dtype="float32") = R.permute_dims(
                 to_v_weight, axes=None
             )
             matmul2: R.Tensor((2, 77, 640), dtype="float32") = R.matmul(
-                encoder_hidden_states, permute_dims2, out_dtype="void"
+                encoder_hidden_states, permute_dims2
             )
             reshape: R.Tensor((2, 4096, 10, 64), dtype="float32") = R.reshape(
                 matmul, R.shape([2, 4096, 10, 64])
@@ -592,20 +606,18 @@ def test_attention():
             reshape2: R.Tensor((2, 77, 10, 64), dtype="float32") = R.reshape(
                 matmul2, R.shape([2, 77, 10, 64])
             )
-            scaled_dot_product_attention: R.Tensor(
-                (2, 4096, 10, 64), dtype="float32"
-            ) = R.nn.attention(reshape, reshape1, reshape2, scale=None, causal_mask=None)
+            scaled_dot_product_attention: R.Tensor((2, 4096, 10, 64), dtype="float32") = (
+                R.nn.attention(reshape, reshape1, reshape2, scale=None, causal_mask=None)
+            )
             reshape3: R.Tensor((2, 4096, 640), dtype="float32") = R.reshape(
                 scaled_dot_product_attention, R.shape([2, 4096, 640])
             )
             permute_dims3: R.Tensor((640, 640), dtype="float32") = R.permute_dims(
                 to_out_0_weight, axes=None
             )
-            matmul3: R.Tensor((2, 4096, 640), dtype="float32") = R.matmul(
-                reshape3, permute_dims3, out_dtype="void"
-            )
+            matmul3: R.Tensor((2, 4096, 640), dtype="float32") = R.matmul(reshape3, permute_dims3)
             add: R.Tensor((2, 4096, 640), dtype="float32") = R.add(matmul3, to_out_0_bias)
-            gv1: R.Tuple(R.Tensor((2, 4096, 640), dtype="float32"), R.Tuple(R.Object)) = add, (_io,)
+            gv1: R.Tuple(R.Tensor((2, 4096, 640), dtype="float32"), R.Tuple(R.Any)) = add, (_io,)
             R.output(gv1)
         return gv1
 
@@ -627,7 +639,7 @@ def test_nn_module_tuple_input():
         def __init__(self):
             pass
 
-        def forward(self, x: Tuple[nn.Tensor, nn.Tensor]):
+        def forward(self, x: tuple[nn.Tensor, nn.Tensor]):
             x0 = x[0]
             x1 = x[1]
             y0 = nn.add(x0, x1)
@@ -636,14 +648,14 @@ def test_nn_module_tuple_input():
 
     # fmt: off
     @R.function
-    def forward(x: R.Tuple(R.Tensor((10, 5), dtype="float32"), R.Tensor((10, 5), dtype="float32")), _io: R.Object) -> R.Tuple(R.Tuple(R.Tensor((10, 5), dtype="float32"), R.Tensor((10, 5), dtype="float32")), R.Tuple(R.Object)):
+    def forward(x: R.Tuple(R.Tensor((10, 5), dtype="float32"), R.Tensor((10, 5), dtype="float32")), _io: R.Any) -> R.Tuple(R.Tuple(R.Tensor((10, 5), dtype="float32"), R.Tensor((10, 5), dtype="float32")), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             lv1: R.Tensor((10, 5), dtype="float32") = x[0]
             lv2: R.Tensor((10, 5), dtype="float32") = x[1]
             add: R.Tensor((10, 5), dtype="float32") = R.add(lv1, lv2)
             subtract: R.Tensor((10, 5), dtype="float32") = R.subtract(lv1, lv2)
-            gv1: R.Tuple(R.Tuple(R.Tensor((10, 5), dtype="float32"), R.Tensor((10, 5), dtype="float32")), R.Tuple(R.Object)) = (add, subtract), (_io,)
+            gv1: R.Tuple(R.Tuple(R.Tensor((10, 5), dtype="float32"), R.Tensor((10, 5), dtype="float32")), R.Tuple(R.Any)) = (add, subtract), (_io,)
             R.output(gv1)
         return gv1
     # fmt: on
@@ -666,7 +678,7 @@ def test_nn_module_list_input():
         def __init__(self):
             pass
 
-        def forward(self, x: List[nn.Tensor]):
+        def forward(self, x: list[nn.Tensor]):
             x0 = x[0]
             x1 = x[1]
             y0 = nn.add(x0, x1)
@@ -675,14 +687,14 @@ def test_nn_module_list_input():
 
     # fmt: off
     @R.function
-    def forward(x: R.Tuple(R.Tensor((10, 5), dtype="float32"), R.Tensor((10, 5), dtype="float32")), _io: R.Object) -> R.Tuple(R.Tuple(R.Tensor((10, 5), dtype="float32"), R.Tensor((10, 5), dtype="float32")), R.Tuple(R.Object)):
+    def forward(x: R.Tuple(R.Tensor((10, 5), dtype="float32"), R.Tensor((10, 5), dtype="float32")), _io: R.Any) -> R.Tuple(R.Tuple(R.Tensor((10, 5), dtype="float32"), R.Tensor((10, 5), dtype="float32")), R.Tuple(R.Any)):
         R.func_attr({"num_input": 2})
         with R.dataflow():
             lv1: R.Tensor((10, 5), dtype="float32") = x[0]
             lv2: R.Tensor((10, 5), dtype="float32") = x[1]
             add: R.Tensor((10, 5), dtype="float32") = R.add(lv1, lv2)
             subtract: R.Tensor((10, 5), dtype="float32") = R.subtract(lv1, lv2)
-            gv1: R.Tuple(R.Tuple(R.Tensor((10, 5), dtype="float32"), R.Tensor((10, 5), dtype="float32")), R.Tuple(R.Object)) = (add, subtract), (_io,)
+            gv1: R.Tuple(R.Tuple(R.Tensor((10, 5), dtype="float32"), R.Tensor((10, 5), dtype="float32")), R.Tuple(R.Any)) = (add, subtract), (_io,)
             R.output(gv1)
         return gv1
     # fmt: on

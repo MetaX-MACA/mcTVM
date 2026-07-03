@@ -17,6 +17,7 @@
 
 # pylint: disable=invalid-name, unused-argument
 """FFI for tvm.node"""
+
 import tvm_ffi
 import tvm_ffi.core
 
@@ -38,3 +39,6 @@ def LoadJSON(json_str):
 
 # Exports functions registered in node namespace.
 tvm_ffi.init_ffi_api("node", __name__)
+
+# Override the default repr function for tvm_ffi.core.Object.
+tvm_ffi.core.__object_repr__ = AsRepr

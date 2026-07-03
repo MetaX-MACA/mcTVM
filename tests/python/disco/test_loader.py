@@ -14,25 +14,38 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: F401, F841
 """Test sharded loader"""
+
 # pylint: disable=missing-docstring
 import json
 import tempfile
 
 import numpy as np
+import pytest
+from tvm_ffi import Shape, register_global_func
 
 import tvm
 import tvm.testing
-from tvm import dlight as dl
 from tvm import relax as rx
-from tvm_ffi import register_global_func
 from tvm.contrib import tvmjs
-from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
+from tvm.s_tir import dlight as dl
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.target import Target
-from tvm.contrib import tvmjs
+from tvm.testing import env
+
+# `runtime.disco.compiled_ccl` is registered together with the CCL runtime
+# functions, so its absence means the disco CCL runtime is not in this build.
+_compiled_ccl = tvm.get_global_func("runtime.disco.compiled_ccl", allow_missing=True)
+if _compiled_ccl is None or _compiled_ccl() != "nccl":
+    pytest.skip("Disco NCCL support is not available", allow_module_level=True)
+
+# All tests in this file shard across two GPUs.
+pytestmark = [
+    pytest.mark.skipif(not env.has_multi_gpu(), reason="need multiple gpus"),
+]
 
 
 @register_global_func("tests.disco.shard_dim_0", override=True)
@@ -84,7 +97,7 @@ def _shard_qkv_1(src, tgt):
 def _create_loader(sess, path, param_dict, shard_info):
     path_tensor_cache = path + "/tensor-cache.json"
     tvmjs.dump_tensor_cache(param_dict, path, encode_format="raw")
-    with open(path_tensor_cache, "r", encoding="utf-8") as i_f:
+    with open(path_tensor_cache, encoding="utf-8") as i_f:
         tensor_cache = i_f.read()
     loader_create = sess.get_global_func("runtime.disco.ShardLoader")
     loader = loader_create(path_tensor_cache, tensor_cache, json.dumps(shard_info), None)
@@ -109,7 +122,7 @@ def _simulate_presharded_weights(base_path, param_dict, num_shards, shard_info):
     # and avoids having *.bin files that must be accessed by more than
     # one worker.
     sharded_params = {
-        f"{key}_shard-{i+1}-of-{num_shards}": shards[i]
+        f"{key}_shard-{i + 1}-of-{num_shards}": shards[i]
         for i in range(num_shards)
         for key, shards in sharded_params.items()
     }
@@ -149,8 +162,8 @@ def test_load_shard():
         sess.init_ccl("nccl", *devices)
         loader = _create_loader(sess, path, param_dict, shard_info)
         loader_load = sess.get_global_func("runtime.disco.ShardLoaderLoad")
-        d_0 = loader_load(loader, ShapeTuple([0]))
-        d_1 = loader_load(loader, ShapeTuple([1]))
+        d_0 = loader_load(loader, Shape([0]))
+        d_1 = loader_load(loader, Shape([1]))
         np.testing.assert_equal(
             param_dict["x_0"][:, 0:64],
             d_0.debug_get_from_remote(0).numpy(),
@@ -171,7 +184,7 @@ def test_load_shard():
 
 def _create_presharded_loader(sess, path):
     path_tensor_cache = path + "/tensor-cache.json"
-    with open(path_tensor_cache, "r", encoding="utf-8") as i_f:
+    with open(path_tensor_cache, encoding="utf-8") as i_f:
         tensor_cache = i_f.read()
     loader_create = sess.get_global_func("runtime.disco.ShardLoader")
     loader = loader_create(path_tensor_cache, tensor_cache, json.dumps({}), None)
@@ -197,8 +210,8 @@ def test_load_presharded():
         loader = _create_presharded_loader(sess, path)
         loader_load = sess.get_global_func("runtime.disco.ShardLoaderLoadPresharded")
 
-        d_0 = loader_load(loader, ShapeTuple([0]))
-        d_1 = loader_load(loader, ShapeTuple([1]))
+        d_0 = loader_load(loader, Shape([0]))
+        d_1 = loader_load(loader, Shape([1]))
 
         np.testing.assert_equal(
             param_dict["x_0"][:, 0:64],
@@ -247,7 +260,7 @@ def test_load_shard_in_relax():
     class Module:  # pylint: disable=too-few-public-methods
         @R.function
         def main(
-            loader: R.Object,
+            loader: R.Any,
         ) -> R.Tuple(R.Tensor((64, 64), "float32"), R.Tensor((16, 128), "float32")):
             R.func_attr({"global_symbol": "main"})
             with R.dataflow():
@@ -255,13 +268,13 @@ def test_load_shard_in_relax():
                     "runtime.disco.ShardLoaderLoad",
                     loader,
                     R.shape([0]),
-                    sinfo_args=R.Tensor((64, 64), "float32"),
+                    ty_args=R.Tensor((64, 64), "float32"),
                 )
                 lv1: R.Tensor((16, 128), "float32") = R.call_pure_packed(
                     "runtime.disco.ShardLoaderLoad",
                     loader,
                     R.shape([1]),
-                    sinfo_args=R.Tensor((16, 128), "float32"),
+                    ty_args=R.Tensor((16, 128), "float32"),
                 )
                 lv2 = R.tuple(lv0, lv1)
                 R.output(lv2)
@@ -445,7 +458,7 @@ def test_load_qkv_proj_shard():  # pylint: disable=too-many-locals
         sess.init_ccl("nccl", *devices)
         loader = _create_loader(sess, path, param_dict, shard_info)
         loader_load = sess.get_global_func("runtime.disco.ShardLoaderLoad")
-        d_0 = loader_load(loader, ShapeTuple([0]))
+        d_0 = loader_load(loader, Shape([0]))
         np.testing.assert_equal(
             np_qkv[0],
             d_0.debug_get_from_remote(0).numpy(),

@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: E501
 
 # pylint: disable=invalid-name,unnecessary-comprehension,redefined-outer-name
 """TVM testing utilities
@@ -28,72 +29,66 @@ are in plugin.py.
 Testing Markers
 ***************
 
-We use pytest markers to specify the requirements of test functions. Currently
-there is a single distinction that matters for our testing environment: does
-the test require a gpu. For tests that require just a gpu or just a cpu, we
-have the decorator :py:func:`requires_gpu` that enables the test when a gpu is
-available. To avoid running tests that don't require a gpu on gpu nodes, this
-decorator also sets the pytest marker `gpu` so we can use select the gpu subset
-of tests (using `pytest -m gpu`).
+We use pytest markers to specify the requirements of test functions.
+Currently there is a single distinction that matters for our testing
+environment: does the test require a gpu.  Tests that require a gpu are
+tagged with the ``gpu`` pytest marker -- the only registered marker (see
+the ``markers`` entry in ``pyproject.toml``).  This lets us select the
+gpu subset of tests with ``pytest -m gpu`` (and exclude them on cpu-only
+nodes with ``pytest -m "not gpu"``).
 
-Unfortunately, many tests are written like this:
+The ``gpu`` marker only controls which testing node a test runs on; it
+does not check whether the required hardware or libraries are actually
+present.  To gate a test on a specific capability, combine the marker
+with a ``skipif`` that consults the memoized environment probes in
+:py:mod:`tvm.testing.env`:
 
-.. python::
+.. code-block:: python
 
-    def test_something():
-        for target in all_targets():
-            do_something()
+    @pytest.mark.gpu
+    @pytest.mark.skipif(not tvm.testing.env.has_cuda(), reason="need cuda")
+    def test_cuda_vectorize_add():
+        ...
 
-The test uses both gpu and cpu targets, so the test needs to be run on both cpu
-and gpu nodes. But we still want to only run the cpu targets on the cpu testing
-node. The solution is to mark these tests with the gpu marker so they will be
-run on the gpu nodes. But we also modify all_targets (renamed to
-enabled_targets) so that it only returns gpu targets on gpu nodes and cpu
-targets on cpu nodes (using an environment variable).
+There is one ``has_*`` (or ``is_*``) probe per capability -- for example
+:py:func:`tvm.testing.env.has_gpu`, :py:func:`tvm.testing.env.has_cuda`,
+and :py:func:`tvm.testing.env.has_vulkan`.  For optional Python packages,
+prefer ``pytest.importorskip("pkg_name")`` instead of a ``skipif``.
 
-Instead of using the all_targets function, future tests that would like to
-test against a variety of targets should use the
-:py:func:`tvm.testing.parametrize_targets` functionality. This allows us
-greater control over which targets are run on which testing nodes.
-
-If in the future we want to add a new type of testing node (for example
-fpgas), we need to add a new marker in `tests/python/pytest.ini` and a new
-function in this module. Then targets using this node should be added to the
-`TVM_TEST_TARGETS` environment variable in the CI.
+To run a test against a variety of targets, parametrize over ``target`` with
+``@pytest.mark.parametrize("target", [...])`` -- tag GPU targets with
+``pytest.mark.gpu`` so the CI routes them to GPU nodes, and skip an unavailable
+target with ``pytest.mark.skipif(not tvm.testing.device_enabled(target))``.  The
+set of enabled targets is controlled by the ``TVM_TEST_TARGETS`` environment
+variable, so the CI can run different targets on different testing nodes.
 
 """
-import inspect
+
 import copy
 import copyreg
 import ctypes
 import functools
-import itertools
+import inspect
 import logging
 import os
 import pickle
 import platform
 import sys
-import textwrap
 import time
-import shutil
-
 from pathlib import Path
-from typing import Optional, Callable, Union, List, Tuple
 
-import pytest
+import ml_dtypes
 import numpy as np
+import pytest
 
 import tvm
 import tvm.arith
-import tvm.tir
+import tvm.support.utils
 import tvm.te
-
-from tvm.target import codegen
-from tvm.contrib import nvcc, cudnn, rocm
-import tvm.contrib.hexagon._ci_env_check as hexagon
-from tvm.error import TVMError
-import tvm.contrib.utils
-
+import tvm.tirx
+from tvm.contrib import cudnn
+from tvm.support import nvcc
+from tvm.testing import env
 
 SKIP_SLOW_TESTS = os.getenv("SKIP_SLOW_TESTS", "").lower() in {"true", "1", "yes"}
 IS_IN_CI = os.getenv("CI", "") == "true"
@@ -193,9 +188,7 @@ def check_numerical_grads(
     for x_name, grad in grad_values.items():
         if grad.shape != input_values[x_name].shape:
             raise AssertionError(
-                "Gradient wrt '{}' has unexpected shape {}, expected {} ".format(
-                    x_name, grad.shape, input_values[x_name].shape
-                )
+                f"Gradient wrt '{x_name}' has unexpected shape {grad.shape}, expected {input_values[x_name].shape} "
             )
 
         ngrad = np.zeros_like(grad)
@@ -235,8 +228,8 @@ def check_numerical_grads(
 
         if not (np.isfinite(dist) and np.isfinite(grad_norm)):
             raise ValueError(
-                "NaN or infinity detected during numerical gradient checking wrt '{}'\n"
-                "analytical grad = {}\n numerical grad = {}\n".format(x_name, grad, ngrad)
+                f"NaN or infinity detected during numerical gradient checking wrt '{x_name}'\n"
+                f"analytical grad = {grad}\n numerical grad = {ngrad}\n"
             )
 
         # we multiply atol by this number to make it more universal for different sizes
@@ -244,22 +237,11 @@ def check_numerical_grads(
 
         if dist > atol * sqrt_n + rtol * grad_norm:
             raise AssertionError(
-                "Analytical and numerical grads wrt '{}' differ too much\n"
-                "analytical grad = {}\n numerical grad = {}\n"
-                "{}% of elements differ, first 10 of wrong positions: {}\n"
+                f"Analytical and numerical grads wrt '{x_name}' differ too much\n"
+                f"analytical grad = {grad}\n numerical grad = {ngrad}\n"
+                f"{wrong_percentage}% of elements differ, first 10 of wrong positions: {wrong_positions[:10]}\n"
                 "distance > atol*sqrt(n) + rtol*grad_norm\n"
-                "distance {} > {}*{} + {}*{}".format(
-                    x_name,
-                    grad,
-                    ngrad,
-                    wrong_percentage,
-                    wrong_positions[:10],
-                    dist,
-                    atol,
-                    sqrt_n,
-                    rtol,
-                    grad_norm,
-                )
+                f"distance {dist} > {atol}*{sqrt_n} + {rtol}*{grad_norm}"
             )
 
         max_diff = np.max(np.abs(ngrad - grad))
@@ -280,39 +262,41 @@ def assert_prim_expr_equal(lhs, rhs):
 
     Parameters
     ----------
-    lhs : tvm.tir.PrimExpr
+    lhs : tvm.tirx.PrimExpr
         The left operand.
 
-    rhs : tvm.tir.PrimExpr
+    rhs : tvm.tirx.PrimExpr
         The left operand.
     """
     ana = tvm.arith.Analyzer()
     if not ana.can_prove_equal(lhs, rhs):
-        raise ValueError("{} and {} are not equal".format(lhs, rhs))
+        raise ValueError(f"{lhs} and {rhs} are not equal")
 
 
 def check_bool_expr_is_true(bool_expr, vranges, cond=None):
     """Check that bool_expr holds given the condition cond
     for every value of free variables from vranges.
 
-    for example, 2x > 4y solves to x > 2y given x in (0, 10) and y in (0, 10)
-    here bool_expr is x > 2y, vranges is {x: (0, 10), y: (0, 10)}, cond is 2x > 4y
-    We creates iterations to check,
-    for x in range(10):
-      for y in range(10):
-        assert !(2x > 4y) || (x > 2y)
+    For example, ``2x > 4y`` solves to ``x > 2y`` given ``x in (0, 10)``
+    and ``y in (0, 10)``. Here bool_expr is ``x > 2y``,
+    vranges is ``{x: (0, 10), y: (0, 10)}``, cond is ``2x > 4y``.
+    We create iterations to check::
+
+        for x in range(10):
+            for y in range(10):
+                assert !(2x > 4y) || (x > 2y)
 
     Parameters
     ----------
     bool_expr : tvm.ir.PrimExpr
         Boolean expression to check
-    vranges: Dict[tvm.tir.expr.Var, tvm.ir.Range]
+    vranges: Dict[tvm.tirx.expr.Var, tvm.ir.Range]
         Free variables and their ranges
     cond: tvm.ir.PrimExpr
         extra conditions needs to be satisfied.
     """
     if cond is not None:
-        bool_expr = tvm.te.any(tvm.tir.Not(cond), bool_expr)
+        bool_expr = tvm.te.any(tvm.tirx.Not(cond), bool_expr)
 
     def _run_expr(expr, vranges):
         """Evaluate expr for every value of free variables
@@ -321,7 +305,7 @@ def check_bool_expr_is_true(bool_expr, vranges, cond=None):
 
         def _compute_body(*us):
             vmap = {v: u + r.min for (v, r), u in zip(vranges.items(), us)}
-            return tvm.tir.stmt_functor.substitute(expr, vmap)
+            return tvm.tirx.stmt_functor.substitute(expr, vmap)
 
         A = tvm.te.compute([r.extent.value for v, r in vranges.items()], _compute_body)
         args = [tvm.runtime.empty(A.shape, A.dtype)]
@@ -337,8 +321,8 @@ def check_bool_expr_is_true(bool_expr, vranges, cond=None):
         counterex = ", ".join([v + " = " + str(i) for v, i in counterex])
         ana = tvm.arith.Analyzer()
         raise AssertionError(
-            "Expression {}\nis not true on {}\n"
-            "Counterexample: {}".format(ana.simplify(bool_expr), vranges, counterex)
+            f"Expression {ana.simplify(bool_expr)}\nis not true on {vranges}\n"
+            f"Counterexample: {counterex}"
         )
 
 
@@ -349,7 +333,7 @@ def check_int_constraints_trans_consistency(constraints_trans, vranges=None):
     ----------
     constraints_trans : arith.IntConstraintsTransform
         Integer constraints transformation
-    vranges: Dict[tvm.tir.Var, tvm.ir.Range]
+    vranges: Dict[tvm.tirx.Var, tvm.ir.Range]
         Free variables and their ranges
     """
     if vranges is None:
@@ -361,28 +345,28 @@ def check_int_constraints_trans_consistency(constraints_trans, vranges=None):
         all_vranges.update({v: r for v, r in constraints1.ranges.items()})
 
         # Check that the transformation is injective
-        cond_on_vars = tvm.tir.const(1, "bool")
+        cond_on_vars = tvm.tirx.const(1, "bool")
         for v in constraints1.variables:
             if v in varmap:
                 # variable mapping is consistent
-                v_back = ana.simplify(tvm.tir.stmt_functor.substitute(varmap[v], backvarmap))
+                v_back = ana.simplify(tvm.tirx.stmt_functor.substitute(varmap[v], backvarmap))
                 cond_on_vars = tvm.te.all(cond_on_vars, v == v_back)
         # Also we have to check that the new relations are true when old relations are true
-        cond_subst = tvm.tir.stmt_functor.substitute(
-            tvm.te.all(tvm.tir.const(1, "bool"), *constraints2.relations), backvarmap
+        cond_subst = tvm.tirx.stmt_functor.substitute(
+            tvm.te.all(tvm.tirx.const(1, "bool"), *constraints2.relations), backvarmap
         )
         # We have to include relations from vranges too
         for v in constraints2.variables:
             if v in constraints2.ranges:
                 r = constraints2.ranges[v]
                 range_cond = tvm.te.all(v >= r.min, v < r.min + r.extent)
-                range_cond = tvm.tir.stmt_functor.substitute(range_cond, backvarmap)
+                range_cond = tvm.tirx.stmt_functor.substitute(range_cond, backvarmap)
                 cond_subst = tvm.te.all(cond_subst, range_cond)
         cond_subst = ana.simplify(cond_subst)
         check_bool_expr_is_true(
             tvm.te.all(cond_subst, cond_on_vars),
             all_vranges,
-            cond=tvm.te.all(tvm.tir.const(1, "bool"), *constraints1.relations),
+            cond=tvm.te.all(tvm.tirx.const(1, "bool"), *constraints1.relations),
         )
 
     _check_forward(
@@ -408,13 +392,24 @@ def _get_targets(target_names=None):
 
     targets = []
     for target in target_names:
-        target_kind = target.split()[0]
+        if isinstance(target, dict):
+            target_kind = target["kind"]
+        else:
+            target_kind = target.split()[0]
 
         if target_kind == "cuda" and "cudnn" in tvm.target.Target(target).attrs.get("libs", []):
-            is_enabled = tvm.support.libinfo()["USE_CUDNN"].lower() in ["on", "true", "1"]
+            is_enabled = tvm.support.libinfo().get("USE_CUDNN", "OFF").lower() in [
+                "on",
+                "true",
+                "1",
+            ]
             is_runnable = is_enabled and cudnn.exists()
         elif target_kind == "hexagon":
-            is_enabled = tvm.support.libinfo()["USE_HEXAGON"].lower() in ["on", "true", "1"]
+            is_enabled = tvm.support.libinfo().get("USE_HEXAGON", "OFF").lower() in [
+                "on",
+                "true",
+                "1",
+            ]
             # If Hexagon has compile-time support, we can always fall back
             is_runnable = is_enabled and "ANDROID_SERIAL_NUMBER" in os.environ
         else:
@@ -439,7 +434,7 @@ def _get_targets(target_names=None):
             )
             return _get_targets(["llvm"])
 
-        raise TVMError(
+        raise RuntimeError(
             "None of the following targets are supported by this build of TVM: %s."
             " Try setting TVM_TEST_TARGETS to a supported target."
             " Cannot default to llvm, as it is not enabled." % target_names
@@ -452,10 +447,10 @@ DEFAULT_TEST_TARGETS = [
     "llvm",
     "cuda",
     "nvptx",
-    "vulkan -from_device=0",
+    {"kind": "vulkan", "from_device": 0},
     "opencl",
-    "opencl -device=mali",
-    "opencl -device=intel_graphics",
+    {"kind": "opencl", "device": "mali"},
+    {"kind": "opencl", "device": "intel_graphics"},
     "metal",
     "rocm",
     "hexagon",
@@ -466,8 +461,8 @@ DEFAULT_TEST_TARGETS = [
 def device_enabled(target):
     """Check if a target should be used when testing.
 
-    It is recommended that you use :py:func:`tvm.testing.parametrize_targets`
-    instead of manually checking if a target is enabled.
+    Gate a device-specific test on this with
+    ``@pytest.mark.skipif(not tvm.testing.device_enabled(target))``.
 
     This allows the user to control which devices they are testing against. In
     tests, this should be used to check if a device should be used when said
@@ -475,7 +470,7 @@ def device_enabled(target):
 
     Parameters
     ----------
-    target : str
+    target : str or Dict[str, Any] or tvm.target.Target
         Target string to check against
 
     Returns
@@ -485,7 +480,7 @@ def device_enabled(target):
 
     Example
     -------
-    >>> @tvm.testing.uses_gpu
+    >>> @pytest.mark.gpu
     >>> def test_mytest():
     >>>     for target in ["cuda", "llvm"]:
     >>>         if device_enabled(target):
@@ -494,17 +489,22 @@ def device_enabled(target):
     Here, `test_body` will only be reached by with `target="cuda"` on gpu test
     nodes and `target="llvm"` on cpu test nodes.
     """
-    assert isinstance(target, str), "device_enabled requires a target as a string"
-    # only check if device name is found, sometime there are extra flags
-    target_kind = target.split(" ")[0]
+    if isinstance(target, dict):
+        target_kind = target["kind"]
+    elif hasattr(target, "kind"):
+        target_kind = target.kind.name
+    else:
+        assert isinstance(target, str), "device_enabled requires a target as a string"
+        # Target strings may include extra flags; only compare the kind.
+        target_kind = target.split(" ")[0]
     return any(target_kind == t["target_kind"] for t in _get_targets() if t["is_runnable"])
 
 
 def enabled_targets():
     """Get all enabled targets with associated devices.
 
-    In most cases, you should use :py:func:`tvm.testing.parametrize_targets` instead of
-    this function.
+    In most cases, parametrize over the specific targets you need with
+    ``@pytest.mark.parametrize`` instead of iterating this function.
 
     In this context, enabled means that TVM was built with support for
     this target, the target name appears in the TVM_TEST_TARGETS
@@ -512,8 +512,8 @@ def enabled_targets():
     target exists.  If TVM_TEST_TARGETS is not set, it defaults to
     variable DEFAULT_TEST_TARGETS in this module.
 
-    If you use this function in a test, you **must** decorate the test with
-    :py:func:`tvm.testing.uses_gpu` (otherwise it will never be run on the gpu).
+    If you use this function in a test, you **must** mark the test with
+    ``@pytest.mark.gpu`` (otherwise it will never be run on the gpu).
 
     Returns
     -------
@@ -521,595 +521,84 @@ def enabled_targets():
         A list of pairs of all enabled devices and the associated context
 
     """
-    return [(t["target"], tvm.device(t["target"])) for t in _get_targets() if t["is_runnable"]]
+    return [(t["target"], tvm.device(t["target_kind"])) for t in _get_targets() if t["is_runnable"]]
 
 
-class Feature:
-    """A feature that may be required to run a test.
+def _target_kind(target):
+    if isinstance(target, dict):
+        return target["kind"]
+    if hasattr(target, "kind"):
+        return target.kind.name
+    return str(target).split()[0]
 
-    Parameters
-    ----------
-    name: str
 
-        The short name of the feature.  Should match the name in the
-        requires_* decorator.  This is applied as a mark to all tests
-        using this feature, and can be used in pytests ``-m``
-        argument.
+def parametrize_targets(*targets):
+    """Backward-compatible target parametrization helper.
 
-    long_name: Optional[str]
-
-        The long name of the feature, to be used in error messages.
-
-        If None, defaults to the short name.
-
-    cmake_flag: Optional[str]
-
-        The flag that must be enabled in the config.cmake in order to
-        use this feature.
-
-        If None, no flag is required to use this feature.
-
-    target_kind_enabled: Optional[str]
-
-        The target kind that must be enabled to run tests using this
-        feature.  If present, the target_kind must appear in the
-        TVM_TEST_TARGETS environment variable, or in
-        tvm.testing.DEFAULT_TEST_TARGETS if TVM_TEST_TARGETS is
-        undefined.
-
-        If None, this feature does not require a specific target to be
-        enabled.
-
-    compile_time_check: Optional[Callable[[], Union[bool,str]]]
-
-        A check that returns True if the feature can be used at
-        compile-time.  (e.g. Validating the version number of the nvcc
-        compiler.)  If the feature does not have support to perform
-        compile-time tests, the check should returns False to display
-        a generic error message, or a string to display a more
-        specific error message.
-
-        If None, no additional check is performed.
-
-    target_kind_hardware: Optional[str]
-
-        The target kind that must have available hardware in order to
-        run tests using this feature.  This is checked using
-        tvm.device(target_kind_hardware).exist.  If a feature requires
-        a different check, this should be implemented using
-        run_time_check.
-
-        If None, this feature does not require a specific
-        tvm.device to exist.
-
-    run_time_check: Optional[Callable[[], Union[bool,str]]]
-
-        A check that returns True if the feature can be used at
-        run-time.  (e.g. Validating the compute version supported by a
-        GPU.)  If the feature does not have support to perform
-        run-time tests, the check should returns False to display a
-        generic error message, or a string to display a more specific
-        error message.
-
-        If None, no additional check is performed.
-
-    parent_features: Optional[Union[str,List[str]]]
-
-        The short name of a feature or features that are required in
-        order to use this feature.  (e.g. Using cuDNN requires using
-        CUDA) This feature should inherit all checks of the parent
-        feature, with the exception of the `target_kind_enabled`
-        checks.
-
-        If None, this feature does not require any other parent
-        features.
-
+    New tests should use plain ``pytest.mark.parametrize`` with
+    ``tvm.testing.device_enabled``.  This wrapper keeps older tests working.
     """
+    if not targets:
+        targets = tuple(DEFAULT_TEST_TARGETS)
 
-    _all_features = {}
-
-    def __init__(
-        self,
-        name: str,
-        long_name: Optional[str] = None,
-        cmake_flag: Optional[str] = None,
-        target_kind_enabled: Optional[str] = None,
-        compile_time_check: Optional[Callable[[], Union[bool, str]]] = None,
-        target_kind_hardware: Optional[str] = None,
-        run_time_check: Optional[Callable[[], Union[bool, str]]] = None,
-        parent_features: Optional[Union[str, List[str]]] = None,
-    ):
-        self.name = name
-        self.long_name = long_name or name
-        self.cmake_flag = cmake_flag
-        self.target_kind_enabled = target_kind_enabled
-        self.compile_time_check = compile_time_check
-        self.target_kind_hardware = target_kind_hardware
-        self.run_time_check = run_time_check
-
-        if parent_features is None:
-            self.parent_features = []
-        elif isinstance(parent_features, str):
-            self.parent_features = [parent_features]
-        else:
-            self.parent_features = parent_features
-
-        self._all_features[self.name] = self
-
-    def _register_marker(self, config):
-        config.addinivalue_line("markers", f"{self.name}: Mark a test as using {self.long_name}")
-
-    def _uses_marks(self):
-        for parent in self.parent_features:
-            yield from self._all_features[parent]._uses_marks()
-
-        yield getattr(pytest.mark, self.name)
-
-    def _compile_only_marks(self):
-        for parent in self.parent_features:
-            yield from self._all_features[parent]._compile_only_marks()
-
-        if self.compile_time_check is not None:
-            res = self.compile_time_check()
-            if isinstance(res, str):
-                yield pytest.mark.skipif(True, reason=res)
-            else:
-                yield pytest.mark.skipif(
-                    not res, reason=f"Compile-time support for {self.long_name} not present"
-                )
-
-        if self.target_kind_enabled is not None:
-            target_kind = self.target_kind_enabled.split()[0]
-            yield pytest.mark.skipif(
-                all(enabled.split()[0] != target_kind for enabled in _tvm_test_targets()),
-                reason=(
-                    f"{self.target_kind_enabled} tests disabled "
-                    f"by TVM_TEST_TARGETS environment variable"
-                ),
+    def decorator(func):
+        params = []
+        for target in targets:
+            target_kind = _target_kind(target)
+            marks = []
+            if target_kind != "llvm":
+                marks.append(pytest.mark.gpu)
+            marks.append(
+                pytest.mark.skipif(not device_enabled(target), reason=f"{target} not enabled")
             )
-
-        if self.cmake_flag is not None:
-            yield pytest.mark.skipif(
-                not _cmake_flag_enabled(self.cmake_flag),
-                reason=(
-                    f"{self.long_name} support not enabled.  "
-                    f"Set {self.cmake_flag} in config.cmake to enable."
-                ),
+            params.append(
+                pytest.param(target, tvm.device(target_kind), marks=marks, id=str(target))
             )
+        return pytest.mark.parametrize("target,dev", params)(func)
 
-    def _run_only_marks(self):
-        for parent in self.parent_features:
-            yield from self._all_features[parent]._run_only_marks()
+    return decorator
 
-        if self.run_time_check is not None:
-            res = self.run_time_check()
-            if isinstance(res, str):
-                yield pytest.mark.skipif(True, reason=res)
-            else:
-                yield pytest.mark.skipif(
-                    not res, reason=f"Run-time support for {self.long_name} not present"
-                )
 
-        if self.target_kind_hardware is not None:
-            yield pytest.mark.skipif(
-                not tvm.device(self.target_kind_hardware).exist,
-                reason=f"No device exists for target {self.target_kind_hardware}",
-            )
+requires_gpu = pytest.mark.gpu
 
-    def marks(self, support_required="compile-and-run"):
-        """Return a list of marks to be used
 
-        Parameters
-        ----------
+def _parse_target_entry(entry):
+    """Parse a target entry from TVM_TEST_TARGETS env var.
 
-        support_required: str
+    Entries can be plain kind names (e.g. "llvm") or JSON dicts
+    (e.g. '{"kind": "opencl", "device": "mali"}').
+    """
+    entry = entry.strip()
+    if entry.startswith("{"):
+        import json  # pylint: disable=import-outside-toplevel
 
-            Allowed values: "compile-and-run" (default),
-            "compile-only", or "optional".
-
-            See Feature.__call__ for details.
-        """
-        if support_required not in ["compile-and-run", "compile-only", "optional"]:
-            raise ValueError(f"Unknown feature support type: {support_required}")
-
-        if support_required == "compile-and-run":
-            marks = itertools.chain(
-                self._run_only_marks(), self._compile_only_marks(), self._uses_marks()
-            )
-        elif support_required == "compile-only":
-            marks = itertools.chain(self._compile_only_marks(), self._uses_marks())
-        elif support_required == "optional":
-            marks = self._uses_marks()
-        else:
-            raise ValueError(f"Unknown feature support type: {support_required}")
-
-        return list(marks)
-
-    def __call__(self, func=None, *, support_required="compile-and-run"):
-        """Mark a pytest function as requiring this feature
-
-        Can be used either as a bare decorator, or as a decorator with
-        arguments.
-
-        Parameters
-        ----------
-
-        func: Callable
-
-            The pytest test function to be marked
-
-        support_required: str
-
-            Allowed values: "compile-and-run" (default),
-            "compile-only", or "optional".
-
-            If "compile-and-run", the test case is marked as using the
-            feature, and is skipped if the environment lacks either
-            compile-time or run-time support for the feature.
-
-            If "compile-only", the test case is marked as using the
-            feature, and is skipped if the environment lacks
-            compile-time support.
-
-            If "optional", the test case is marked as using the
-            feature, but isn't skipped.  This is kept for backwards
-            compatibility for tests that use `enabled_targets()`, and
-            should be avoided in new test code.  Instead, prefer
-            parametrizing over the target using the `target` fixture.
-
-        Examples
-        --------
-
-        .. code-block:: python
-
-          @feature
-          def test_compile_and_run():
-              ...
-
-          @feature(compile_only=True)
-          def test_compile_only():
-              ...
-
-        """
-
-        if support_required not in ["compile-and-run", "compile-only", "optional"]:
-            raise ValueError(f"Unknown feature support type: {support_required}")
-
-        def wrapper(func):
-            for mark in self.marks(support_required=support_required):
-                func = mark(func)
-            return func
-
-        if func is None:
-            return wrapper
-
-        return wrapper(func)
-
-    @classmethod
-    def require(cls, name, support_required="compile-and-run"):
-        """Returns a decorator that marks a test as requiring a feature
-
-        Parameters
-        ----------
-
-        name: str
-
-            The name of the feature that is used by the test
-
-        support_required: str
-
-            Allowed values: "compile-and-run" (default),
-            "compile-only", or "optional".
-
-            See Feature.__call__ for details.
-
-        Examples
-        --------
-
-        .. code-block:: python
-
-          @Feature.require("cuda")
-          def test_compile_and_run():
-              ...
-
-          @Feature.require("cuda", compile_only=True)
-          def test_compile_only():
-              ...
-        """
-        return cls._all_features[name](support_required=support_required)
-
-
-def _any_gpu_exists():
-    return (
-        tvm.cuda().exist
-        or tvm.rocm().exist
-        or tvm.opencl().exist
-        or tvm.metal().exist
-        or tvm.vulkan().exist
-        or tvm.maca().exist
-    )
-
-
-def _multi_gpu_exists():
-    return (
-        (tvm.cuda(0).exist and tvm.cuda(1).exist)
-        or (tvm.rocm(0).exist and tvm.rocm(1).exist)
-        or (tvm.opencl(0).exist and tvm.opencl(1).exist)
-        or (tvm.metal(0).exist and tvm.metal(1).exist)
-        or (tvm.vulkan(0).exist and tvm.vulkan(1).exist)
-    )
-
-
-# Mark a test as requiring llvm to run
-requires_llvm = Feature(
-    "llvm", "LLVM", cmake_flag="USE_LLVM", target_kind_enabled="llvm", target_kind_hardware="llvm"
-)
-
-# Mark a test as requiring a GPU to run.
-requires_gpu = Feature("gpu", run_time_check=_any_gpu_exists)
-
-# Mark to differentiate tests that use the GPU in some capacity.
-#
-# These tests will be run on CPU-only test nodes and on test nodes with GPUs.
-# To mark a test that must have a GPU present to run, use
-# :py:func:`tvm.testing.requires_gpu`.
-uses_gpu = requires_gpu(support_required="optional")
-
-# Mark a test as requiring multiple GPUs to run.
-requires_multi_gpu = Feature("multi_gpu", run_time_check=_multi_gpu_exists)
-
-# Mark to differentiate tests that use multiple GPUs in some capacity.
-#
-# These tests will be run on test nodes with multiple GPUs.
-# To mark a test that must have multiple GPUs present to run, use
-# :py:func:`tvm.testing.requires_multi_gpu`.
-uses_multi_gpu = requires_multi_gpu(support_required="optional")
-
-# Mark a test as requiring the x86 Architecture to run.
-requires_x86 = Feature(
-    "x86", "x86 Architecture", run_time_check=lambda: platform.machine() == "x86_64"
-)
-
-# Mark a test as requiring the aarch64 Architecture to run.
-requires_aarch64 = Feature(
-    "AArch64", "AArch64 Architecture", run_time_check=lambda: platform.machine() == "aarch64"
-)
-
-# Mark a test as requiring the CUDA runtime.
-requires_cuda = Feature(
-    "cuda",
-    "CUDA",
-    cmake_flag="USE_CUDA",
-    target_kind_enabled="cuda",
-    target_kind_hardware="cuda",
-    parent_features="gpu",
-)
-
-# Mark a test as requiring a tensorcore to run
-requires_tensorcore = Feature(
-    "tensorcore",
-    "NVIDIA Tensor Core",
-    run_time_check=lambda: tvm.cuda().exist and nvcc.have_tensorcore(tvm.cuda().compute_version),
-    parent_features="cuda",
-)
-
-# Mark a test as requiring the cuDNN library.
-requires_cudnn = Feature("cudnn", "cuDNN", cmake_flag="USE_CUDNN", parent_features="cuda")
-
-# Mark a test as requiring the cuBLAS library.
-requires_cublas = Feature("cublas", "cuBLAS", cmake_flag="USE_CUBLAS", parent_features="cuda")
-
-# Mark a test as requiring NCCL support
-requires_nccl = Feature("nccl", "NCCL", cmake_flag="USE_NCCL", parent_features="cuda")
-
-# Mark a test as requiring the NVPTX compilation on the CUDA runtime
-requires_nvptx = Feature(
-    "nvptx",
-    "NVPTX",
-    target_kind_enabled="nvptx",
-    target_kind_hardware="nvptx",
-    parent_features=["llvm", "cuda"],
-)
-
-# Mark a test as requiring the CUDA Graph Feature
-requires_cudagraph = Feature(
-    "cudagraph",
-    "CUDA Graph",
-    target_kind_enabled="cuda",
-    compile_time_check=nvcc.have_cudagraph,
-    parent_features="cuda",
-)
-
-# Mark a test as requiring the OpenCL runtime
-requires_opencl = Feature(
-    "opencl",
-    "OpenCL",
-    cmake_flag="USE_OPENCL",
-    target_kind_enabled="opencl",
-    target_kind_hardware="opencl" if "RPC_TARGET" not in os.environ else None,
-    parent_features="gpu" if "RPC_TARGET" not in os.environ else None,
-)
-
-# Mark a test as requiring the rocm runtime
-requires_rocm = Feature(
-    "rocm",
-    "ROCm",
-    cmake_flag="USE_ROCM",
-    target_kind_enabled="rocm",
-    target_kind_hardware="rocm",
-    parent_features="gpu",
-)
-
-# Mark a test as requiring a matrixcore to run
-requires_matrixcore = Feature(
-    "matrixcore",
-    "AMD Matrix Core",
-    run_time_check=lambda: tvm.rocm().exist and rocm.have_matrixcore(tvm.rocm().compute_version),
-    parent_features="rocm",
-)
-
-# Mark a test as requiring the hipBLAS library.
-requires_hipblas = Feature("hipblas", "hipBLAS", cmake_flag="USE_HIPBLAS", parent_features="rocm")
-
-# Mark a test as requiring the metal runtime
-requires_metal = Feature(
-    "metal",
-    "Metal",
-    cmake_flag="USE_METAL",
-    target_kind_enabled="metal",
-    target_kind_hardware="metal",
-    parent_features="gpu",
-)
-
-# Mark a test as requiring the vulkan runtime
-requires_vulkan = Feature(
-    "vulkan",
-    "Vulkan",
-    cmake_flag="USE_VULKAN",
-    target_kind_enabled="vulkan",
-    target_kind_hardware="vulkan",
-    parent_features="gpu",
-)
-
-# Mark a test as requiring OpenCLML support in build.
-requires_openclml = Feature(
-    "OpenCLML",
-    "CLML",
-    cmake_flag="USE_CLML",
-    target_kind_enabled="opencl",
-)
-
-# Mark a test as requiring NNAPI support in build.
-requires_nnapi = Feature(
-    "NNAPI",
-    "NNAPI",
-    cmake_flag="USE_NNAPI_CODEGEN",
-)
-
-# Mark a test as requiring CUTLASS to run
-requires_cutlass = Feature("cutlass", "CUTLASS", cmake_flag="USE_CUTLASS")
-
-# Mark a test as requiring rpc to run
-requires_rpc = Feature("rpc", "RPC", cmake_flag="USE_RPC")
-
-# Mark a test as requiring libtorch to run
-requires_libtorch = Feature("libtorch", "LibTorch", cmake_flag="USE_LIBTORCH")
-
-# Mark a test as requiring the MRVL Library
-requires_mrvl = Feature("mrvl", "Marvell", cmake_flag="USE_MRVL")
-
-# Mark a test as requiring Hexagon to run
-requires_hexagon = Feature(
-    "hexagon",
-    "Hexagon",
-    cmake_flag="USE_HEXAGON",
-    target_kind_enabled="hexagon",
-    compile_time_check=hexagon._compile_time_check,
-    run_time_check=hexagon._run_time_check,
-    parent_features="llvm",
-)
-
-# Mark a test as requiring the maca runtime
-requires_maca = Feature(
-    "maca",
-    "MACA",
-    cmake_flag="USE_MACA",
-    target_kind_enabled="maca",
-    target_kind_hardware="maca",
-    parent_features="gpu",
-)
-
-
-def _aprofile_aem_fvp_compile_time_check():
-    if shutil.which("FVP_Base_RevC-2xAEMvA") is None:
-        return "AProfile AEM is not available"
-    return True
-
-
-requires_aprofile_aem_fvp = Feature(
-    "aprofile-aem-fvp",
-    "AProfile AEM FVP",
-    compile_time_check=_aprofile_aem_fvp_compile_time_check,
-)
-
-
-# check cpu features
-def _has_cpu_feat(features):
-    cpu = codegen.llvm_get_system_cpu()
-    triple = codegen.llvm_get_system_triple()
-    target = "llvm -mtriple=%s -mcpu=%s" % (triple, cpu)
-    has_feat = codegen.target_has_features(features, tvm.target.Target(target))
-
-    return has_feat
-
-
-requires_arm_dot = Feature(
-    "arm_dot",
-    "ARM dot product",
-    run_time_check=lambda: _has_cpu_feat("dotprod"),
-)
-
-
-requires_arm_fp16 = Feature(
-    "arm_fp16",
-    "Arm(R) Neon(TM) instructions for FP16",
-    run_time_check=lambda: _has_cpu_feat("fullfp16"),
-)
-
-
-requires_aarch64_sve = Feature(
-    "arm_sve",
-    "AArch64 SVE",
-    run_time_check=lambda: _has_cpu_feat("sve"),
-)
-
-
-requires_aarch64_sme = Feature(
-    "arm_sme",
-    "AArch64 SME",
-    run_time_check=lambda: _has_cpu_feat("sme"),
-)
-
-
-requires_x86_vnni = Feature(
-    "x86_vnni",
-    "x86 VNNI Extensions",
-    run_time_check=lambda: (_has_cpu_feat("avx512vnni") or _has_cpu_feat("avxvnni")),
-)
-
-
-requires_x86_avx512 = Feature(
-    "x86_avx512",
-    "x86 AVX512 Extensions",
-    run_time_check=lambda: _has_cpu_feat(
-        ["avx512bw", "avx512cd", "avx512dq", "avx512vl", "avx512f"]
-    ),
-)
-
-
-requires_x86_amx = Feature(
-    "x86_amx",
-    "x86 AMX Extensions",
-    run_time_check=lambda: _has_cpu_feat("amx-int8"),
-)
-
-
-def _cmake_flag_enabled(flag):
-    flag = tvm.support.libinfo()[flag]
-
-    # Because many of the flags can be library flags, we check if the
-    # flag is not disabled, rather than checking if it is enabled.
-    return flag.lower() not in ["off", "false", "0"]
+        return json.loads(entry)
+    return entry
 
 
 def _tvm_test_targets():
     target_str = os.environ.get("TVM_TEST_TARGETS", "").strip()
     if target_str:
-        # Use dict instead of set for de-duplication so that the
-        # targets stay in the order specified.
-        return list({t.strip(): None for t in target_str.split(";") if t.strip()})
+        # De-duplicate while preserving order. dict items can't be hashed
+        # directly, so use their str() form as the dedup key.
+        targets = []
+        seen = set()
+        for t in target_str.split(";"):
+            t = t.strip()
+            if not t:
+                continue
+            parsed = _parse_target_entry(t)
+            key = str(parsed)
+            if key in seen:
+                continue
+            seen.add(key)
+            targets.append(parsed)
+        return targets
 
     return DEFAULT_TEST_TARGETS
+
+
+requires_maca = pytest.mark.skipif(not env.has_maca(), reason="need maca")
 
 
 def _compose(args, decs):
@@ -1128,126 +617,6 @@ slow = pytest.mark.skipif(
 )
 
 
-def requires_llvm_minimum_version(major_version):
-    """Mark a test as requiring at least a specific version of LLVM.
-
-    Unit test marked with this decorator will run only if the
-    installed version of LLVM is at least `major_version`.
-
-    This also marks the test as requiring LLVM backend support.
-
-    Parameters
-    ----------
-    major_version: int
-
-
-    """
-
-    try:
-        llvm_version = tvm.target.codegen.llvm_version_major()
-    except RuntimeError:
-        llvm_version = 0
-
-    requires = [
-        pytest.mark.skipif(
-            llvm_version < major_version, reason=f"Requires LLVM >= {major_version}"
-        ),
-        *requires_llvm.marks(),
-    ]
-
-    def inner(func):
-        return _compose([func], requires)
-
-    return inner
-
-
-def requires_nvcc_version(major_version, minor_version=0, release_version=0):
-    """Mark a test as requiring at least a specific version of nvcc.
-
-    Unit test marked with this decorator will run only if the
-    installed version of NVCC is at least `(major_version,
-    minor_version, release_version)`.
-
-    This also marks the test as requiring a cuda support.
-
-    Parameters
-    ----------
-    major_version: int
-
-        The major version of the (major,minor,release) version tuple.
-
-    minor_version: int
-
-        The minor version of the (major,minor,release) version tuple.
-
-    release_version: int
-
-        The release version of the (major,minor,release) version tuple.
-
-    """
-
-    try:
-        nvcc_version = nvcc.get_cuda_version()
-    except RuntimeError:
-        nvcc_version = (0, 0, 0)
-
-    min_version = (major_version, minor_version, release_version)
-    version_str = ".".join(str(v) for v in min_version)
-    requires = [
-        pytest.mark.skipif(nvcc_version < min_version, reason=f"Requires NVCC >= {version_str}"),
-        *requires_cuda.marks(),
-    ]
-
-    def inner(func):
-        return _compose([func], requires)
-
-    return inner
-
-
-def requires_cuda_compute_version(major_version, minor_version=0):
-    """Mark a test as requiring at least a compute architecture
-
-    Unit test marked with this decorator will run only if the CUDA
-    compute architecture of the GPU is at least `(major_version,
-    minor_version)`.
-
-    This also marks the test as requiring a cuda support.
-
-    Parameters
-    ----------
-    major_version: int
-
-        The major version of the (major,minor) version tuple.
-
-    minor_version: int
-
-        The minor version of the (major,minor) version tuple.
-    """
-    min_version = (major_version, minor_version)
-    try:
-        arch = tvm.contrib.nvcc.get_target_compute_version()
-        compute_version = tvm.contrib.nvcc.parse_compute_version(arch)
-    except ValueError:
-        # No GPU present.  This test will be skipped from the
-        # requires_cuda() marks as well.
-        compute_version = (0, 0)
-
-    min_version_str = ".".join(str(v) for v in min_version)
-    compute_version_str = ".".join(str(v) for v in compute_version)
-    requires = [
-        pytest.mark.skipif(
-            compute_version < min_version,
-            reason=f"Requires CUDA compute >= {min_version_str}, but have {compute_version_str}",
-        ),
-        *requires_cuda.marks(),
-    ]
-
-    def inner(func):
-        return _compose([func], requires)
-
-    return inner
-
-
 def skip_if_32bit(reason):
     def decorator(*args):
         if "32bit" in platform.architecture()[0]:
@@ -1256,180 +625,6 @@ def skip_if_32bit(reason):
         return _compose(args, [])
 
     return decorator
-
-
-def skip_if_no_reference_system(func):
-    return skip_if_32bit(reason="Reference system unavailable in i386 container")(func)
-
-
-def requires_package(*packages):
-    """Mark a test as requiring python packages to run.
-
-    If the packages listed are not available, tests marked with
-    `requires_package` will appear in the pytest results as being skipped.
-    This is equivalent to using ``foo = pytest.importorskip('foo')`` inside
-    the test body.
-
-    Parameters
-    ----------
-    packages : List[str]
-
-        The python packages that should be available for the test to
-        run.
-
-    Returns
-    -------
-    mark: pytest mark
-
-        The pytest mark to be applied to unit tests that require this
-
-    """
-
-    def has_package(package):
-        try:
-            __import__(package)
-            return True
-        except ImportError:
-            return False
-
-    marks = [
-        pytest.mark.skipif(not has_package(package), reason=f"Cannot import '{package}'")
-        for package in packages
-    ]
-
-    def wrapper(func):
-        for mark in marks:
-            func = mark(func)
-        return func
-
-    return wrapper
-
-
-def parametrize_targets(*args):
-    """Parametrize a test over a specific set of targets.
-
-    Use this decorator when you want your test to be run over a
-    specific set of targets and devices.  It is intended for use where
-    a test is applicable only to a specific target, and is
-    inapplicable to any others (e.g. verifying target-specific
-    assembly code matches known assembly code).  In most
-    circumstances, :py:func:`tvm.testing.exclude_targets` or
-    :py:func:`tvm.testing.known_failing_targets` should be used
-    instead.
-
-    If used as a decorator without arguments, the test will be
-    parametrized over all targets in
-    :py:func:`tvm.testing.enabled_targets`.  This behavior is
-    automatically enabled for any target that accepts arguments of
-    ``target`` or ``dev``, so the explicit use of the bare decorator
-    is no longer needed, and is maintained for backwards
-    compatibility.
-
-    Parameters
-    ----------
-    f : function
-        Function to parametrize. Must be of the form `def test_xxxxxxxxx(target, dev)`:,
-        where `xxxxxxxxx` is any name.
-    targets : list[str], optional
-        Set of targets to run against. If not supplied,
-        :py:func:`tvm.testing.enabled_targets` will be used.
-
-    Example
-    -------
-    >>> @tvm.testing.parametrize_targets("llvm", "cuda")
-    >>> def test_mytest(target, dev):
-    >>>     ...  # do something
-    """
-
-    # Backwards compatibility, when used as a decorator with no
-    # arguments implicitly parametrizes over "target".  The
-    # parametrization is now handled by _auto_parametrize_target, so
-    # this use case can just return the decorated function.
-    if len(args) == 1 and callable(args[0]):
-        return args[0]
-
-    return pytest.mark.parametrize("target", list(args), scope="session")
-
-
-def exclude_targets(*args):
-    """Exclude a test from running on a particular target.
-
-    Use this decorator when you want your test to be run over a
-    variety of targets and devices (including cpu and gpu devices),
-    but want to exclude some particular target or targets.  For
-    example, a test may wish to be run against all targets in
-    tvm.testing.enabled_targets(), except for a particular target that
-    does not support the capabilities.
-
-    Applies pytest.mark.skipif to the targets given.
-
-    Parameters
-    ----------
-    f : function
-        Function to parametrize. Must be of the form `def test_xxxxxxxxx(target, dev)`:,
-        where `xxxxxxxxx` is any name.
-    targets : list[str]
-        Set of targets to exclude.
-
-    Example
-    -------
-    >>> @tvm.testing.exclude_targets("cuda")
-    >>> def test_mytest(target, dev):
-    >>>     ...  # do something
-
-    Or
-
-    >>> @tvm.testing.exclude_targets("llvm", "cuda")
-    >>> def test_mytest(target, dev):
-    >>>     ...  # do something
-
-    """
-
-    def wraps(func):
-        func.tvm_excluded_targets = args
-        return func
-
-    return wraps
-
-
-def known_failing_targets(*args):
-    """Skip a test that is known to fail on a particular target.
-
-    Use this decorator when you want your test to be run over a
-    variety of targets and devices (including cpu and gpu devices),
-    but know that it fails for some targets.  For example, a newly
-    implemented runtime may not support all features being tested, and
-    should be excluded.
-
-    Applies pytest.mark.xfail to the targets given.
-
-    Parameters
-    ----------
-    f : function
-        Function to parametrize. Must be of the form `def test_xxxxxxxxx(target, dev)`:,
-        where `xxxxxxxxx` is any name.
-    targets : list[str]
-        Set of targets to skip.
-
-    Example
-    -------
-    >>> @tvm.testing.known_failing_targets("cuda")
-    >>> def test_mytest(target, dev):
-    >>>     ...  # do something
-
-    Or
-
-    >>> @tvm.testing.known_failing_targets("llvm", "cuda")
-    >>> def test_mytest(target, dev):
-    >>>     ...  # do something
-
-    """
-
-    def wraps(func):
-        func.tvm_known_failing_targets = args
-        return func
-
-    return wraps
 
 
 def parameter(*values, ids=None, by_dict=None):
@@ -1511,77 +706,6 @@ def parameter(*values, ids=None, by_dict=None):
     return as_fixture
 
 
-_parametrize_group = 0
-
-
-def parameters(*value_sets, ids=None):
-    """Convenience function to define pytest parametrized fixtures.
-
-    Declaring a variable using tvm.testing.parameters will define a
-    parametrized pytest fixture that can be used by test
-    functions. Like :py:func:`tvm.testing.parameter`, this is intended
-    for cases that have no setup cost, such as strings, integers,
-    tuples, etc.  For cases that have a significant setup cost, please
-    use :py:func:`tvm.testing.fixture` instead.
-
-    Unlike :py:func:`tvm.testing.parameter`, if a test function
-    accepts multiple parameters defined using a single call to
-    ``tvm.testing.parameters``, then the test will only be run once
-    for each set of parameters, not for all combinations of
-    parameters.
-
-    These parameter definitions apply to all tests in a module.  If a
-    specific test should have different values for some parameters,
-    that test should be marked with ``@pytest.mark.parametrize``.
-
-    Parameters
-    ----------
-    values : List[tuple]
-
-       A list of parameter value sets.  Each set of values represents
-       a single combination of values to be tested.  A unit test that
-       accepts parameters defined will be run once for every set of
-       parameters in the list.
-
-    ids : List[str], optional
-
-       A list of names for the parameter sets.  If None, pytest will
-       generate a name from each parameter set.  These generated names may
-       not be readable/useful for composite types such as tuples.
-
-    Returns
-    -------
-    List[function]
-       Function outputs from pytest.fixture.  These should be unpacked
-       into individual named parameters.
-
-    Example
-    -------
-    >>> size, dtype = tvm.testing.parameters( (16,'float32'), (512,'float16') )
-    >>> def test_feature_x(size, dtype):
-    >>>     # Test code here
-    >>>     assert( (size,dtype) in [(16,'float32'), (512,'float16')])
-
-    """
-    global _parametrize_group
-    parametrize_group = _parametrize_group
-    _parametrize_group += 1
-
-    outputs = []
-    for param_values in zip(*value_sets):
-        # Optional cls parameter in case a parameter is defined inside a
-        # class scope.
-        def fixture_func(*_cls, request):
-            return request.param
-
-        fixture_func.parametrize_group = parametrize_group
-        fixture_func.parametrize_values = param_values
-        fixture_func.parametrize_ids = ids
-        outputs.append(pytest.fixture(fixture_func))
-
-    return outputs
-
-
 def fixture(func=None, *, cache_return_value=False):
     """Convenience function to define pytest fixtures.
 
@@ -1655,35 +779,6 @@ def fixture(func=None, *, cache_return_value=False):
     return wraps(func)
 
 
-def get_dtype_range(dtype: str) -> Tuple[int, int]:
-    """
-    Produces the min,max for a give data type.
-
-    Parameters
-    ----------
-    dtype : str
-        a type string (e.g., int8, float64)
-
-    Returns
-    -------
-    type_info.min : int
-        the minimum of the range
-    type_info.max : int
-        the maximum of the range
-    """
-    type_info = None
-    np_dtype = np.dtype(dtype)
-    kind = np_dtype.kind
-
-    if kind == "f":
-        type_info = np.finfo(np_dtype)
-    elif kind in ["i", "u"]:
-        type_info = np.iinfo(np_dtype)
-    else:
-        raise TypeError(f"dtype ({dtype}) must indicate some floating-point or integral data type.")
-    return type_info.min, type_info.max
-
-
 class _DeepCopyAllowedClasses(dict):
     def __init__(self, allowed_class_list):
         self.allowed_class_list = allowed_class_list
@@ -1724,17 +819,15 @@ class _DeepCopyAllowedClasses(dict):
             "https://github.com/apache/tvm-rfcs/blob/main/rfcs/0007-parametrized-unit-tests.md"
         )
         raise TypeError(
-            (
-                f"Cannot copy fixture of type {cls.__name__}.  TVM fixture caching "
-                "is limited to objects that explicitly provide the ability "
-                "to be copied (e.g. through __deepcopy__, __getstate__, or __setstate__),"
-                "and forbids the use of the default `object.__reduce__` and "
-                "`object.__reduce_ex__`.  For third-party classes that are "
-                "safe to use with copy.deepcopy, please add the class to "
-                "the arguments of _DeepCopyAllowedClasses in tvm.testing._fixture_cache.\n"
-                "\n"
-                f"For discussion on this restriction, please see {rfc_url}."
-            )
+            f"Cannot copy fixture of type {cls.__name__}.  TVM fixture caching "
+            "is limited to objects that explicitly provide the ability "
+            "to be copied (e.g. through __deepcopy__, __getstate__, or __setstate__),"
+            "and forbids the use of the default `object.__reduce__` and "
+            "`object.__reduce_ex__`.  For third-party classes that are "
+            "safe to use with copy.deepcopy, please add the class to "
+            "the arguments of _DeepCopyAllowedClasses in tvm.testing._fixture_cache.\n"
+            "\n"
+            f"For discussion on this restriction, please see {rfc_url}."
         )
 
 
@@ -1838,8 +931,8 @@ def terminate_self():
 
 def is_ampere_or_newer():
     """Check if the target environment has an NVIDIA Ampere GPU or newer."""
-    arch = tvm.contrib.nvcc.get_target_compute_version()
-    major, minor = tvm.contrib.nvcc.parse_compute_version(arch)
+    arch = nvcc.get_target_compute_version()
+    major, minor = nvcc.parse_compute_version(arch)
     return major >= 8 and minor != 9
 
 
@@ -1888,40 +981,6 @@ def install_request_hook(depth: int) -> None:
     request_hook.init()
 
 
-def _mark_parameterizations(*params, marker_fn, reason):
-    """
-    Mark tests with a nodeid parameters that exactly matches one in params.
-    Useful for quickly marking tests as xfail when they have a large
-    combination of parameters.
-    """
-    params = set(params)
-
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(request, *args, **kwargs):
-            if "[" in request.node.name and "]" in request.node.name:
-                # Strip out the test name and the [ and ] brackets
-                params_from_name = request.node.name[len(request.node.originalname) + 1 : -1]
-                if params_from_name in params:
-                    marker_fn(
-                        reason=f"{marker_fn.__name__} on nodeid {request.node.nodeid}: " + reason
-                    )
-
-            return func(request, *args, **kwargs)
-
-        return wrapper
-
-    return decorator
-
-
-def xfail_parameterizations(*xfail_params, reason):
-    return _mark_parameterizations(*xfail_params, marker_fn=pytest.xfail, reason=reason)
-
-
-def skip_parameterizations(*skip_params, reason):
-    return _mark_parameterizations(*skip_params, marker_fn=pytest.skip, reason=reason)
-
-
 def strtobool(val):
     """Convert a string representation of truth to true (1) or false (0).
     True values are 'y', 'yes', 't', 'true', 'on', and '1'; false values
@@ -1939,249 +998,62 @@ def strtobool(val):
 
 def main():
     test_file = inspect.getsourcefile(sys._getframe(1))
-    sys.exit(pytest.main([test_file] + sys.argv[1:]))
+    sys.exit(pytest.main([test_file, *sys.argv[1:]]))
 
 
-class CompareBeforeAfter:
-    """Utility for comparing before/after of TIR transforms
+ml_dtypes_dict = {
+    "float8_e4m3fn": ml_dtypes.float8_e4m3fn,
+    "float8_e5m2": ml_dtypes.float8_e5m2,
+    "bfloat16": ml_dtypes.bfloat16,
+    "int4": ml_dtypes.int4,
+}
 
-    A standard framework for writing tests that take a TIR PrimFunc as
-    input, apply a transformation, then either compare against an
-    expected output or assert that the transformation raised an error.
-    A test should subclass CompareBeforeAfter, defining class members
-    `before` / `Before`, `transform`, and `expected` / `Expected`.  CompareBeforeAfter will
-    then use these members to define a test method and test fixture.
 
-    `transform` may be one of the following.
+def np_dtype_from_str(dtype: str) -> np.dtype:
+    """Convert a string dtype to a numpy dtype."""
+    return np.dtype(ml_dtypes_dict[dtype]) if dtype in ml_dtypes_dict else np.dtype(dtype)
 
-    - An instance of `tvm.ir.transform.Pass`
 
-    - A method that takes no arguments and returns a `tvm.ir.transform.Pass`
-
-    - A pytest fixture that returns a `tvm.ir.transform.Pass`
-
-    `before` / `Before` may be any one of the following.
-
-    - An instance of `tvm.tir.PrimFunc`.  This is allowed, but is not
-      the preferred method, as any errors in constructing the
-      `PrimFunc` occur while collecting the test, preventing any other
-      tests in the same file from being run.
-
-    - An TVMScript function, without the ``@T.prim_func`` decoration.
-      The ``@T.prim_func`` decoration will be applied when running the
-      test, rather than at module import.
-
-    - A method that takes no arguments and returns a `tvm.tir.PrimFunc`
-
-    - A pytest fixture that returns a `tvm.tir.PrimFunc`
-
-    `expected` / `Expected` may be any one of the following.  The type of
-    `expected` / `Expected` defines the test being performed.  If `expected`
-    provides a `tvm.tir.PrimFunc`, the result of the transformation
-    must match `expected`.  If `expected` is an exception, then the
-    transformation must raise that exception type.
-
-    - Any option supported for `before` / `Before`.
-
-    - The `Exception` class object, or a class object that inherits
-      from `Exception`.
-
-    - A method that takes no arguments and returns `Exception` or a
-      class object that inherits from `Exception`.
-
-    - A pytest fixture that returns `Exception` or an class object
-      that inherits from `Exception`.
-
-    Examples
-    --------
-
-    .. python::
-
-        class TestRemoveIf(tvm.testing.CompareBeforeAfter):
-            transform = tvm.tir.transform.Simplify()
-
-            def before(A: T.Buffer(1, "int32")):
-                if True:
-                    A[0] = 42
-                else:
-                    A[0] = 5
-
-            def expected(A: T.Buffer(1, "int32")):
-                A[0] = 42
-
+def generate_random_array(dtype: str, shape: tuple) -> np.ndarray:
     """
+    Generate a random array by generating random bits and casting to the target dtype.
 
-    check_well_formed: bool = True
+    Supported dtypes:
+      - "int8", "uint8", "float16", "float32", "bfloat16", "float8_e4m3fn", "float8_e5m2"
+    """
+    try:
+        np_dtype = np_dtype_from_str(dtype)
 
-    def __init_subclass__(cls):
-        assert len([getattr(cls, name) for name in ["before", "Before"] if hasattr(cls, name)]) <= 1
-        assert (
-            len([getattr(cls, name) for name in ["expected", "Expected"] if hasattr(cls, name)])
-            <= 1
-        )
-        for name in ["before", "Before"]:
-            if hasattr(cls, name):
-                cls.before = cls._normalize_before(getattr(cls, name))
-                break
-        for name in ["expected", "Expected"]:
-            if hasattr(cls, name):
-                cls.expected = cls._normalize_expected(getattr(cls, name))
-                break
-        if hasattr(cls, "transform"):
-            cls.transform = cls._normalize_transform(cls.transform)
+    except TypeError:
+        raise ValueError("Provided dtype is not a valid numpy dtype.")
 
-    @classmethod
-    def _normalize_ir_module(cls, func):
-        if isinstance(func, (tvm.tir.PrimFunc, tvm.IRModule)):
+    # Determine the bit length for this dtype.
+    bit_length = np_dtype.itemsize * 8
 
-            def inner(self):
-                # pylint: disable=unused-argument
-                return func
+    # Choose an appropriate unsigned container type.
+    if bit_length <= 8:
+        container = np.uint8
+    elif bit_length <= 16:
+        container = np.uint16
+    elif bit_length <= 32:
+        container = np.uint32
+    elif bit_length <= 64:
+        container = np.uint64
+    else:
+        raise ValueError(f"Unsupported dtype bit length: {bit_length}")
 
-        elif cls._is_method(func):
-
-            def inner(self):
-                # pylint: disable=unused-argument
-                return func(self)
-
-        elif inspect.isclass(func):
-
-            def inner(self):
-                # pylint: disable=unused-argument
-                func_dict = {}
-                for name, method in func.__dict__.items():
-                    if name.startswith("_"):
-                        pass
-                    elif isinstance(method, tvm.ir.function.BaseFunc):
-                        func_dict[name] = method.with_attr("global_symbol", name)
-                    else:
-                        source_code = "@T.prim_func\n" + textwrap.dedent(inspect.getsource(method))
-                        prim_func = tvm.script.from_source(
-                            source_code, check_well_formed=self.check_well_formed
-                        )
-                        func_dict[name] = prim_func.with_attr("global_symbol", name)
-                return tvm.IRModule(func_dict)
-
-        else:
-
-            def inner(self):
-                # pylint: disable=unused-argument
-                source_code = "@T.prim_func\n" + textwrap.dedent(inspect.getsource(func))
-                return tvm.script.from_source(source_code, check_well_formed=self.check_well_formed)
-
-        return pytest.fixture(inner)
-
-    @classmethod
-    def _normalize_before(cls, func):
-        if hasattr(func, "_pytestfixturefunction"):
-            return func
-        else:
-            return cls._normalize_ir_module(func)
-
-    @classmethod
-    def _normalize_expected(cls, func):
-        if hasattr(func, "_pytestfixturefunction"):
-            return func
-
-        elif inspect.isclass(func) and issubclass(func, Exception):
-
-            def inner(self):
-                # pylint: disable=unused-argument
-                return func
-
-            return pytest.fixture(inner)
-
-        else:
-            return cls._normalize_ir_module(func)
-
-    @classmethod
-    def _normalize_transform(cls, transform):
-        def apply(module_transform):
-            def inner(obj):
-                if isinstance(obj, tvm.IRModule):
-                    return module_transform(obj)
-                elif isinstance(obj, tvm.tir.PrimFunc):
-                    mod = tvm.IRModule({"main": obj})
-                    mod = module_transform(mod)
-                    return mod["main"]
-                else:
-                    raise TypeError(f"Expected IRModule or PrimFunc, but received {type(obj)}")
-
-            return inner
-
-        if hasattr(transform, "_pytestfixturefunction"):
-            if not hasattr(cls, "_transform_orig"):
-                cls._transform_orig = transform
-
-            def inner(self, _transform_orig):
-                # pylint: disable=unused-argument
-                return apply(_transform_orig)
-
-        elif isinstance(transform, tvm.ir.transform.Pass):
-
-            def inner(self):
-                # pylint: disable=unused-argument
-                return apply(transform)
-
-        elif cls._is_method(transform):
-
-            def inner(self):
-                # pylint: disable=unused-argument
-                return apply(transform(self))
-
-        else:
-            raise TypeError(
-                "Expected transform to be a tvm.ir.transform.Pass, or a method returning a Pass"
-            )
-
-        return pytest.fixture(inner)
-
-    @staticmethod
-    def _is_method(func):
-        return callable(func) and "self" in inspect.signature(func).parameters
-
-    def test_compare(self, before, expected, transform):
-        """Unit test to compare the expected TIR PrimFunc to actual"""
-
-        if inspect.isclass(expected) and issubclass(expected, Exception):
-            with pytest.raises(expected):
-                after = transform(before)
-
-                # This portion through pytest.fail isn't strictly
-                # necessary, but gives a better error message that
-                # includes the before/after.
-                before_str = before.script(name="before")
-                after_str = after.script(name="after")
-
-                pytest.fail(
-                    msg=(
-                        f"Expected {expected.__name__} to be raised from transformation, "
-                        f"instead received TIR\n:{before_str}\n{after_str}"
-                    )
-                )
-
-        elif isinstance(expected, (tvm.tir.PrimFunc, tvm.ir.IRModule)):
-            after = transform(before)
-
-            try:
-                # overwrite global symbol so it doesn't come up in the comparison
-                if isinstance(after, tvm.tir.PrimFunc):
-                    after = after.with_attr("global_symbol", "main")
-                    expected = expected.with_attr("global_symbol", "main")
-                tvm.ir.assert_structural_equal(after, expected)
-            except ValueError as err:
-                before_str = before.script(name="before")
-                after_str = after.script(name="after")
-                expected_str = expected.script(name="expected")
-                raise ValueError(
-                    f"TIR after transformation did not match expected:\n"
-                    f"{before_str}\n{after_str}\n{expected_str}"
-                ) from err
-
-        else:
-            raise TypeError(
-                f"tvm.testing.CompareBeforeAfter requires the `expected` fixture "
-                f"to return either `Exception`, an `Exception` subclass, "
-                f"or an instance of `tvm.tir.PrimFunc`.  "
-                f"Instead, received {type(expected)}."
-            )
+    # Generate random integers in the full range of the bit length.
+    random_ints = np.random.randint(0, 2**bit_length, size=shape, dtype=container)
+    # Reinterpret the bit pattern as the desired dtype.
+    res = random_ints.view(np_dtype)
+    with np.errstate(invalid="ignore"):
+        invalid_indices = np.where(~np.isfinite(res))
+    for idx in zip(*invalid_indices):
+        while True:
+            with np.errstate(invalid="ignore"):
+                if np.isfinite(res[idx]):
+                    break
+            # Generate a new random value for this specific position
+            new_random_int = np.random.randint(0, 2**bit_length, size=1, dtype=container)
+            res[idx] = new_random_int.view(np_dtype)[0]
+    return res

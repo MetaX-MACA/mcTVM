@@ -16,26 +16,29 @@
 # under the License.
 """Test eliminate common subexpr pass"""
 
-from typing import List
-import tvm
-from tvm import relax
-import tvm.testing
-from tvm.ir.module import IRModule
-from tvm.script.parser import ir as I, relax as R
-from tvm.runtime import Device
 import numpy as np
+import pytest
+
+import tvm
+import tvm.testing
+from tvm import relax
+from tvm.ir.module import IRModule
+from tvm.runtime import Device
+from tvm.script.parser import ir as I
+from tvm.script.parser import relax as R
+from tvm.testing import env
 
 
 def compile(
     mod: IRModule,
-    device: List[Device] = [
+    device: list[Device] = [
         tvm.cpu(),
     ],
 ) -> relax.VirtualMachine:
     # compile the model
     mod = relax.transform.RealizeVDevice()(mod)
     mod = relax.transform.LegalizeOps()(mod)
-    mod = tvm.tir.transform.DefaultGPUSchedule()(mod)
+    mod = tvm.s_tir.transform.DefaultGPUSchedule()(mod)
     # no need to feed target argument for mult-target compilation
     ex = tvm.compile(mod)
 
@@ -64,9 +67,7 @@ def test_multi_cpu():
             with R.dataflow():
                 lv0 = R.matmul(x, y)
                 lv0 = R.hint_on_device(lv0, tvm.cpu(0))
-                lv1: R.Tensor((2, 4), "float32", "llvm:1") = R.to_vdevice(  # noqa: F722
-                    lv0, "llvm:1"
-                )
+                lv1: R.Tensor((2, 4), "float32", "llvm:1") = R.to_vdevice(lv0, "llvm:1")
                 gv = R.matmul(lv1, z)
                 R.output(gv)
             return gv
@@ -86,8 +87,11 @@ def test_multi_cpu():
     tvm.testing.assert_allclose(res.numpy(), np_res)
 
 
-@tvm.testing.requires_multi_gpu
+@pytest.mark.skipif(not env.has_multi_gpu(), reason="need multiple gpus")
 def test_multi_gpu():
+    if not tvm.cuda(2).exist:
+        pytest.skip("requires at least 3 visible CUDA devices")
+
     @I.ir_module
     class Example:
         I.module_attrs({"attr": 10})
@@ -109,17 +113,17 @@ def test_multi_gpu():
             d: R.Tensor((5, 6), "float32"),
         ) -> R.Tensor((2, 6), "float32"):
             with R.dataflow():
-                lv0: R.Tensor((2, 4), "float32", "cuda:0") = R.matmul(a, b)  # noqa: F722
-                lv1: R.Tensor((2, 4), "float32", "cuda:1") = R.to_vdevice(  # noqa: F722
+                lv0: R.Tensor((2, 4), "float32", "cuda:0") = R.matmul(a, b)
+                lv1: R.Tensor((2, 4), "float32", "cuda:1") = R.to_vdevice(
                     lv0,
-                    "cuda:1",  # noqa: F722
+                    "cuda:1",
                 )
-                lv2: R.Tensor((2, 5), "float32", "cuda:1") = R.matmul(lv1, c)  # noqa: F722
-                lv3: R.Tensor((2, 5), "float32", "cuda:2") = R.to_vdevice(  # noqa: F722
+                lv2: R.Tensor((2, 5), "float32", "cuda:1") = R.matmul(lv1, c)
+                lv3: R.Tensor((2, 5), "float32", "cuda:2") = R.to_vdevice(
                     lv2,
-                    "cuda:2",  # noqa: F722
+                    "cuda:2",
                 )
-                gv: R.Tensor((2, 6), "float32", "cuda:2") = R.matmul(lv3, d)  # noqa: F722
+                gv: R.Tensor((2, 6), "float32", "cuda:2") = R.matmul(lv3, d)
                 R.output(gv)
             return gv
 
@@ -142,7 +146,8 @@ def test_multi_gpu():
     tvm.testing.assert_allclose(res.numpy(), np_res)
 
 
-@tvm.testing.requires_gpu
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_multi_device():
     @I.ir_module
     class Example:

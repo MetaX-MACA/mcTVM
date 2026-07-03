@@ -1,3 +1,4 @@
+# isort: skip_file
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -14,33 +15,35 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Relax IR analysis. """
+"""Relax IR analysis."""
 
 from .analysis import (
     BaseCheckResult,
     all_global_vars,
     all_vars,
     bound_vars,
+    check_well_formed,
     collect_non_negative_expressions,
     computable_at_compile_time,
     contains_impure_call,
-    definable_tir_vars_in_struct_info,
+    definable_tir_vars_in_type,
     defined_symbolic_vars,
-    derive_call_ret_struct_info,
+    derive_call_ret_type,
     detect_recursion,
     erase_to_well_defined,
     free_symbolic_vars,
     free_vars,
     get_static_type,
+    used_vars,
     get_var2val,
     has_reshape_pattern,
     name_to_binding,
     post_order_visit,
     remove_all_unused,
-    struct_info_base_check,
-    struct_info_lca,
+    type_base_check,
+    type_lca,
     suggest_layout_transforms,
-    tir_vars_in_struct_info,
+    tir_vars_in_type,
     udchain,
     well_formed,
 )

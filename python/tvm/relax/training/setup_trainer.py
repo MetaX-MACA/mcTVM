@@ -16,18 +16,16 @@
 # under the License.
 # pylint: disable=not-callable, unused-argument
 """Setup Trainer Pass."""
-from typing import List
 
 import tvm
-from tvm import TVMError
 from tvm.ir.module import IRModule
-from tvm.tir.expr import IntImm
+from tvm.tirx.expr import IntImm
 
-from ..analysis import well_formed
+from ..analysis import check_well_formed
 from ..expr import Tuple
-from ..struct_info import TensorStructInfo
 from ..training.utils import AppendLoss
-from ..transform import LegalizeOps, Gradient, DecomposeOpsForInference, DecomposeOpsForTraining
+from ..transform import DecomposeOpsForInference, DecomposeOpsForTraining, Gradient, LegalizeOps
+from ..type import TensorType
 from .loss import Loss
 from .optimizer import Optimizer
 
@@ -40,6 +38,7 @@ class SetupTrainer:
     int attributes `param_num` and `state_num`, as follows:
 
     .. code-block:: python
+
         @I.ir_module
         class Backbone:
             I.module_attrs({"param_num": 1, "state_num": 1})
@@ -61,6 +60,7 @@ class SetupTrainer:
     The transformed module will at least contain the functions and attributes listed below:
 
     .. code-block:: python
+
         @I.ir_module
         class Module:
             I.module_attrs({"input_num": 1, "param_num": 1, "state_num": 1, "optim_states": ...})
@@ -103,7 +103,7 @@ class SetupTrainer:
     optimizer : Optimizer
         The optimizer. It will be put as the `optimizer` function of the transformed module.
 
-    loss_args : List[TensorStructInfo]
+    loss_args : List[TensorType]
         The arguments to call the loss function.
 
     legalize : bool
@@ -119,7 +119,7 @@ class SetupTrainer:
     STATE_NUM_ATTR_KEY: str = "state_num"
 
     def __init__(
-        self, loss: Loss, optimizer: Optimizer, loss_args: List[TensorStructInfo], legalize=True
+        self, loss: Loss, optimizer: Optimizer, loss_args: list[TensorType], legalize=True
     ):
         self._loss = loss
         self._optimizer = optimizer
@@ -127,26 +127,26 @@ class SetupTrainer:
         self._legalize = legalize
 
     def _check_well_formed(self, mod: IRModule):
-        if not well_formed(mod):
+        if not check_well_formed(mod):
             raise ValueError("SetupTrainer: The backbone module is not well formed.")
         try:
             func = mod[self.BACKBONE_FUNC]
-        except TVMError as exc:
+        except (KeyError, ValueError) as exc:
             raise ValueError(
                 f"SetupTrainer: The backbone module does not contain a function named "
                 f"{self.BACKBONE_FUNC}"
             ) from exc
 
         # Check function attrs
-        if not self.PARAM_NUM_ATTR_KEY in mod.attrs or not isinstance(
-            mod.attrs[self.PARAM_NUM_ATTR_KEY], (IntImm, int)
+        if self.PARAM_NUM_ATTR_KEY not in mod.attrs or not isinstance(
+            mod.attrs[self.PARAM_NUM_ATTR_KEY], IntImm | int
         ):
             raise ValueError(
                 f"SetupTrainer: The backbone module should has an integer attribute named "
                 f"{self.PARAM_NUM_ATTR_KEY}"
             )
-        if not self.STATE_NUM_ATTR_KEY in mod.attrs or not isinstance(
-            mod.attrs[self.STATE_NUM_ATTR_KEY], (IntImm, int)
+        if self.STATE_NUM_ATTR_KEY not in mod.attrs or not isinstance(
+            mod.attrs[self.STATE_NUM_ATTR_KEY], IntImm | int
         ):
             raise ValueError(
                 f"SetupTrainer: The backbone module should has an integer attribute named "

@@ -43,8 +43,8 @@ class CompileTimeCollector : ExprVisitor {
 
  private:
   void VisitExpr_(const FunctionNode* func) override {
-    if (auto opt_num_input = func->attrs.GetAttr<Integer>(attr::kNumInput)) {
-      size_t num_input = opt_num_input.value()->value;
+    if (auto opt_num_input = func->attrs.GetAttr<int64_t>(attr::kNumInput)) {
+      size_t num_input = opt_num_input.value();
       for (size_t i = num_input; i < func->params.size(); i++) {
         MarkAsKnown(func->params[i]);
       }
@@ -79,13 +79,13 @@ class CompileTimeCollector : ExprVisitor {
 
   void MarkAsKnown(const Var& var) {
     known_relax_vars_.insert(var);
-    for (const auto& tir_var : DefinableTIRVarsInStructInfo(GetStructInfo(var))) {
+    for (const auto& tir_var : DefinableTIRVarsInType(GetType(var))) {
       known_tir_vars_.insert(tir_var);
     }
   }
 
-  support::OrderedSet<Var, ObjectPtrHash, ObjectPtrEqual> known_relax_vars_;
-  std::unordered_set<tir::Var> known_tir_vars_;
+  support::OrderedSet<Var, ffi::ObjectPtrHash, ffi::ObjectPtrEqual> known_relax_vars_;
+  std::unordered_set<tirx::Var> known_tir_vars_;
 };
 }  // namespace
 

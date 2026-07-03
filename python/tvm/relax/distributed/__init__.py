@@ -1,3 +1,4 @@
+# isort: skip_file
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -18,6 +19,6 @@
 """The infrastructure for distributed inference on Relax."""
 
 from .global_info import DeviceMesh, device_mesh
-from .struct_info import Placement, DTensorStructInfo, PlacementSpec
+from .type import Placement, DTensorType, PlacementSpec
 
 from . import transform

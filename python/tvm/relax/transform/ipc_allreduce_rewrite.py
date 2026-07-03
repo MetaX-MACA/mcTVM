@@ -18,8 +18,6 @@
 The pass is written in Python for experiment, fast development.
 """
 
-from typing import Dict
-
 import tvm
 from tvm import relax
 from tvm.ir.module import IRModule
@@ -59,12 +57,12 @@ class IPCAllReduceRewrite:
 class _Visitor(PyExprVisitor):  # pylint: disable=abstract-method
     def __init__(self, allreduce_strategy: int) -> None:
         self.allreduce_strategy = allreduce_strategy
-        self.alloc_map: Dict[Var, relax.Call] = {}
-        self.binding_replacement_map: Dict[relax.Expr, relax.Expr] = {}
+        self.alloc_map: dict[Var, relax.Call] = {}
+        self.binding_replacement_map: dict[relax.Expr, relax.Expr] = {}
         self.builtin_alloc_tensor_op = tvm.ir.Op.get("relax.builtin.alloc_tensor")
         self.reshape_op = tvm.ir.Op.get("relax.reshape")
 
-    def visit(self, mod: IRModule) -> Dict[relax.Expr, relax.Expr]:
+    def visit(self, mod: IRModule) -> dict[relax.Expr, relax.Expr]:
         """Entry point"""
         for _, func in mod.functions_items():
             if isinstance(func, relax.Function):
@@ -119,7 +117,7 @@ class _Visitor(PyExprVisitor):  # pylint: disable=abstract-method
             # The "cuda_ipc.custom_allreduce" implementation does not
             # yet support num_groups>1, and therefore does not use the
             # `in_group` argument.
-            [allreduce_input, relax.PrimValue(self.allreduce_strategy), allreduce_output],
+            [allreduce_input, relax.prim_value(self.allreduce_strategy), allreduce_output],
         )
 
 
@@ -128,7 +126,7 @@ class _Rewriter(PyExprMutator):
     """Rewrite the IRModule according to the binding replacement provided by the visitor."""
 
     def __init__(
-        self, mod: IRModule, binding_replacement_map: Dict[relax.Expr, relax.Expr]
+        self, mod: IRModule, binding_replacement_map: dict[relax.Expr, relax.Expr]
     ) -> None:
         super().__init__(mod)
         self.mod = mod

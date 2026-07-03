@@ -15,11 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 """Tensor class for computation declaration."""
+
 # pylint: disable=invalid-name
 import tvm_ffi
 
 from tvm.runtime import Object, ObjectConvertible
-from tvm.tir import expr as _expr, DataProducer
+from tvm.tirx import DataProducer
+from tvm.tirx import expr as _expr
 
 from . import _ffi_api
 
@@ -46,6 +48,10 @@ class TensorSlice(ObjectConvertible, _expr.ExprOp):
     def dtype(self):
         """Data content of the tensor."""
         return self.tensor.dtype
+
+    def expr_ty(self):
+        """Compile-time element type of the tensor."""
+        return self.tensor.expr_ty()
 
 
 @tvm_ffi.register_object("te.Tensor")
@@ -83,6 +89,15 @@ class Tensor(DataProducer, _expr.ExprOp):
     def ndim(self):
         """Dimension of the tensor."""
         return len(self.shape)
+
+    @property
+    def dtype(self):
+        """Data content of the tensor."""
+        return _ffi_api.TensorDType(self)
+
+    def expr_ty(self):
+        """Compile-time element type of the tensor."""
+        return self.dtype
 
     @property
     def name(self):

@@ -25,15 +25,15 @@
 #define TVM_RELAX_ANALYSIS_H_
 
 #include <tvm/arith/analyzer.h>
-#include <tvm/ir/diagnostic.h>
 #include <tvm/ir/module.h>
 #include <tvm/relax/expr.h>
 #include <tvm/relax/op_attr_types.h>
-#include <tvm/relax/struct_info.h>
-#include <tvm/tir/function.h>
-#include <tvm/tir/index_map.h>
+#include <tvm/relax/type.h>
+#include <tvm/tirx/function.h>
+#include <tvm/tirx/index_map.h>
 
 #include <functional>
+#include <set>
 #include <utility>
 
 namespace tvm {
@@ -54,7 +54,7 @@ namespace relax {
  *       two shapes equals to each other during runtime.
  */
 TVM_DLL bool CanProveShapeEqual(const ffi::Array<PrimExpr>& lhs, const ffi::Array<PrimExpr>& rhs,
-                                arith::Analyzer* ana);
+                                const arith::Analyzer& ana);
 
 /*!
  * \brief Can prove the two symbolic shape expressions equals to each other.
@@ -67,48 +67,56 @@ TVM_DLL bool CanProveShapeEqual(const ffi::Array<PrimExpr>& lhs, const ffi::Arra
  *       if result is false, there is still possibility that
  *       two shapes equals to each other during runtime.
  */
-TVM_DLL bool CanProveShapeEqual(const Expr& lhs, const Expr& rhs, arith::Analyzer* ana);
+TVM_DLL bool CanProveShapeEqual(const Expr& lhs, const Expr& rhs, const arith::Analyzer& ana);
 
 //-----------------------------------
-// Foundational StructInfo analysis
+// Foundational Type analysis
 //-----------------------------------
 /*!
- * \brief Get the corresponding static type from a given struct info.
- * \param info The struct info.
+ * \brief Get the corresponding static type from a given type.
+ * \param info The type.
  * \return the corresponding static type.
  */
-TVM_DLL Type GetStaticType(const StructInfo& info);
+TVM_DLL Type GetStaticType(const Type& info);
 
 /*!
- * \brief Get the corresponding struct info from static type.
+ * \brief Get the corresponding type from static type.
  * \param type The input type
- * \return the corresponding struct info.
+ * \return the corresponding type.
  */
-TVM_DLL StructInfo StructInfoFromType(const Type& type);
+TVM_DLL Type TypeFromStaticType(const Type& type);
 
 /*!
- * \return Derive the call's ret value struct info from inputs.
- * \param finfo The function struct info.
+ * \return Derive the call's ret value type from inputs.
+ * \param finfo The function type.
  * \param call The call expression to be derived.
  * \param ctx The builder context.
- * \param ana Optional context analyzer to prove symbolic expression equality.
- * \return The derived struct info of the call.
+ * \return The derived type of the call.
  * \note  call->op field is ignored during derivation and we only rely on information
- *        presented by func_sinfo.
+ *        presented by func_ty.
  */
-TVM_DLL StructInfo DeriveCallRetStructInfo(const FuncStructInfo& finfo, const Call& call,
-                                           const BlockBuilder& ctx, arith::Analyzer* ana = nullptr);
+TVM_DLL Type DeriveCallRetType(const FuncType& finfo, const Call& call, const BlockBuilder& ctx);
+/*!
+ * \brief Derive the call's ret value type using a caller-provided analyzer.
+ * \param finfo The function type.
+ * \param call The call expression to be derived.
+ * \param ctx The builder context.
+ * \param ana Context analyzer to prove symbolic expression equality.
+ * \return The derived type of the call.
+ */
+TVM_DLL Type DeriveCallRetType(const FuncType& finfo, const Call& call, const BlockBuilder& ctx,
+                               const arith::Analyzer& ana);
 
 /*!
  * \brief Erase the info to a corresponding more coarse grained
- *        struct info that is still well-defined(with all the vars in scope).
+ *        type that is still well-defined(with all the vars in scope).
  *
- * When we are returning a StructInfo to another scope,
- * it is important to remember that StructInfo may carry
+ * When we are returning a Type to another scope,
+ * it is important to remember that Type may carry
  * dependencies on var that is not defined the other scope.
  *
  * In such cases, it is important to call EraseToWellDefined to get
- * another StructInfo that **only** contains the vars that are defined
+ * another Type that **only** contains the vars that are defined
  * in the target scope.
  *
  * For example, consider the following function
@@ -117,7 +125,7 @@ TVM_DLL StructInfo DeriveCallRetStructInfo(const FuncStructInfo& finfo, const Ca
  *
  * @R.function
  * def f(x: R.Tensor[(n, m)]):
- *     k = tir.Var("k", "int64")
+ *     k = tirx.Var("k", "int64")
  *     v0 = opaque_fn(x)
  *     v1 = match_cast(v0, R.Tensor[(n, k)])
  *     v2 : R.Tensor[(n + 1, k + 2)] = pad(v1)
@@ -141,42 +149,67 @@ TVM_DLL StructInfo DeriveCallRetStructInfo(const FuncStructInfo& finfo, const Ca
  * will give us R.Tensor[(3, m)], where n get replaced by 2.
  *
  * Use this function in the following scenarios:
- * - Decide the struct_info of expr with sub-scopes, such as If, SeqExpr
- * - Decide the deduced return struct_info of a function that can be fully decided by params.
+ * - Decide the ty of expr with sub-scopes, such as If, SeqExpr
+ * - Decide the deduced return ty of a function that can be fully decided by params.
  *
- * \param info The struct info.
+ * \param info The type.
  * \param f_shape_var_map callback function to specify
  *        whether a symbolic shape var is defined and the value it maps to,
  *        return nullopt if var is undefined.
  * \param f_var_map callback function to specify
  *        whether a var is defined in the target scope and the value it maps to,
  *        return nullopt if var is undefined.
- * \param ana Optional context analyzer to prove symbolic expression equality.
  *
- * \return the corresponding erased struct info.
+ * \return the corresponding erased type.
  */
-TVM_DLL StructInfo EraseToWellDefined(
-    const StructInfo& info,
-    std::function<ffi::Optional<PrimExpr>(const tir::Var& var)> f_shape_var_map = nullptr,
-    std::function<ffi::Optional<Expr>(const Var& var)> f_var_map = nullptr,
-    arith::Analyzer* ana = nullptr);
+TVM_DLL Type EraseToWellDefined(
+    const Type& info,
+    std::function<ffi::Optional<PrimExpr>(const tirx::Var& var)> f_shape_var_map = nullptr,
+    std::function<ffi::Optional<Expr>(const Var& var)> f_var_map = nullptr);
+/*!
+ * \brief EraseToWellDefined overload using a caller-provided analyzer.
+ * \param info The type.
+ * \param f_shape_var_map callback function to specify
+ *        whether a symbolic shape var is defined and the value it maps to,
+ *        return nullopt if var is undefined.
+ * \param f_var_map callback function to specify
+ *        whether a var is defined in the target scope and the value it maps to,
+ *        return nullopt if var is undefined.
+ * \param ana Context analyzer to prove symbolic expression equality.
+ * \return the corresponding erased type.
+ */
+TVM_DLL Type EraseToWellDefined(
+    const Type& info, std::function<ffi::Optional<PrimExpr>(const tirx::Var& var)> f_shape_var_map,
+    std::function<ffi::Optional<Expr>(const Var& var)> f_var_map, const arith::Analyzer& ana);
 
 /*!
  * \brief EraseToWellDefined variant with map.
- * \param info The struct info.
+ * \param info The type.
  * \param shape_var_map map to specify
  *        whether a symbolic shape var is defined and the value it maps to,
  *        return nullopt if var is undefined.
  * \param var_map map to specify
  *        whether a var is defined in the target scope and the value it maps to,
  *        return nullopt if var is undefined.
- * \param ana Optional context analyzer to prove symbolic expression equality.
  *
- * \return the corresponding erased struct info.
+ * \return the corresponding erased type.
  */
-TVM_DLL StructInfo EraseToWellDefined(const StructInfo& info,
-                                      ffi::Map<tir::Var, PrimExpr> shape_var_map,
-                                      ffi::Map<Var, Expr> var_map, arith::Analyzer* ana = nullptr);
+TVM_DLL Type EraseToWellDefined(const Type& info, ffi::Map<tirx::Var, PrimExpr> shape_var_map,
+                                ffi::Map<Var, Expr> var_map);
+/*!
+ * \brief EraseToWellDefined map overload using a caller-provided analyzer.
+ * \param info The type.
+ * \param shape_var_map map to specify
+ *        whether a symbolic shape var is defined and the value it maps to,
+ *        return nullopt if var is undefined.
+ * \param var_map map to specify
+ *        whether a var is defined in the target scope and the value it maps to,
+ *        return nullopt if var is undefined.
+ * \param ana Context analyzer to prove symbolic expression equality.
+ * \return the corresponding erased type.
+ */
+TVM_DLL Type EraseToWellDefined(const Type& info, ffi::Map<tirx::Var, PrimExpr> shape_var_map,
+                                ffi::Map<Var, Expr> var_map, const arith::Analyzer& ana);
 
 /*!
  * \brief Fine grained result of base check.
@@ -184,10 +217,10 @@ TVM_DLL StructInfo EraseToWellDefined(const StructInfo& info,
  * This analysis comes with different levels of checking failures
  * that can help to customize the compilation decisions.
  *
- * For a given pair of lhs_struct_info, rhs_struct_info. We adopt
+ * For a given pair of lhs_ty, rhs_ty. We adopt
  * the following terminology:
- * - LSet = {value | value matches lhs_struct_info}
- * - RSet = {value | value matches rhs_struct_info}
+ * - LSet = {value | value matches lhs_ty}
+ * - RSet = {value | value matches rhs_ty}
  *
  * See the definition of each level below.
  */
@@ -205,13 +238,13 @@ enum class BaseCheckResult {
   /*!
    * \brief WLSet is not superset of RSet because of mismatch in value information.
    *
-   * L1-level mismatches in params of FuncStructInfo is categorized as
-   * If lhs is FuncStructInfo, then L1-level mismatch in its params
+   * L1-level mismatches in params of FuncType is categorized as
+   * If lhs is FuncType, then L1-level mismatch in its params
    * is categorized as L2-level mismatch for lhs.
    *
    * Design considerations for functions:
    * - (a) We want to be able to erase type/value in function signature
-   *       when we unify function struct info and preserve simpler representations.
+   *       when we unify function type and preserve simpler representations.
    * - (b) We automatically insert match_cast at function boundary, so
    *       we can erase (int)->int argument as (object)->int.
    *       The input shape/type mismatch will be detected by runtime checks at function boundary.
@@ -230,31 +263,46 @@ enum class BaseCheckResult {
  *
  * This function returns fine-grained base-check result on reasons of failure.
  *
- * \param base The base struct info.
- * \param derived The derived struct info.
- * \param ana Optional context analyzer to prove symbolic expression equality.
+ * \param base The base type.
+ * \param derived The derived type.
  * \return Whether the relation holds.
  *
  * \sa BaseCheckResult
  */
-TVM_DLL BaseCheckResult StructInfoBaseCheck(const StructInfo& base, const StructInfo& derived,
-                                            arith::Analyzer* ana = nullptr);
+TVM_DLL BaseCheckResult TypeBaseCheck(const Type& base, const Type& derived);
+/*!
+ * \brief Run a base check using a caller-provided analyzer.
+ * \param base The base type.
+ * \param derived The derived type.
+ * \param ana Context analyzer to prove symbolic expression equality.
+ * \return Whether the relation holds.
+ *
+ * \sa BaseCheckResult
+ */
+TVM_DLL BaseCheckResult TypeBaseCheck(const Type& base, const Type& derived,
+                                      const arith::Analyzer& ana);
 
 /*!
- * \brief Check the relation of two struct info to see if one subsumes another one.
+ * \brief Check the relation of two type to see if one subsumes another one.
  *
- * \param base The base struct info.
- * \param derived The derived struct info.
- * \param ana Optional context analyzer to prove symbolic expression equality.
+ * \param base The base type.
+ * \param derived The derived type.
  * \return Whether the relation holds.
  */
-TVM_DLL bool IsBaseOf(const StructInfo& base, const StructInfo& derived,
-                      arith::Analyzer* ana = nullptr);
+TVM_DLL bool IsBaseOf(const Type& base, const Type& derived);
+/*!
+ * \brief Check whether one type subsumes another using a caller-provided analyzer.
+ * \param base The base type.
+ * \param derived The derived type.
+ * \param ana Context analyzer to prove symbolic expression equality.
+ * \return Whether the relation holds.
+ */
+TVM_DLL bool IsBaseOf(const Type& base, const Type& derived, const arith::Analyzer& ana);
 
 /*!
  * \brief Return the condition for which base is a superset of derived
  *
- * This function returns finer-grained conditions for kFailL2 than StructInfoBaseCheck
+ * This function returns finer-grained conditions for kFailL2 than TypeBaseCheck
  *
  * If the returned expression is true, or simplifies to true, then
  * base is a superset of derived.  If the returned expression is
@@ -265,46 +313,52 @@ TVM_DLL bool IsBaseOf(const StructInfo& base, const StructInfo& derived,
  * expression in terms of the symbolic variables available in `base`
  * and `derived`.
  *
- * \param base The base struct info.
- * \param derived The derived struct info.
+ * \param base The base type.
+ * \param derived The derived type.
  * \return Whether base is a base of derived.
  *
  * \sa BaseCheckResult
  */
-TVM_DLL PrimExpr StructInfoBaseCheckPrecondition(const StructInfo& base, const StructInfo& derived);
+TVM_DLL PrimExpr TypeBaseCheckPrecondition(const Type& base, const Type& derived);
 
 /*!
- * \brief Unify the two struct info to their least common ancestor.
+ * \brief Unify the two type to their least common ancestor.
  *
  * \param lhs The left operand.
  * \param rhs The right operand.
- * \param ana Optional context analyzer to prove symbolic expression equality.
  * \return The unified information.
  */
-TVM_DLL StructInfo StructInfoLCA(const StructInfo& lhs, const StructInfo& rhs,
-                                 arith::Analyzer* ana = nullptr);
-
+TVM_DLL Type TypeLCA(const Type& lhs, const Type& rhs);
 /*!
- * \brief Get the TIR variables that appear in the input struct info.
- * The returned list is deduplicated - each TIR variable will appear at most once.
- * \param sinfo The struct info object to be analyzed.
- * \return The list of TIR variables that appear in the input struct info.
+ * \brief Unify two types using a caller-provided analyzer.
+ * \param lhs The left operand.
+ * \param rhs The right operand.
+ * \param ana Context analyzer to prove symbolic expression equality.
+ * \return The unified information.
  */
-TVM_DLL ffi::Array<tir::Var> TIRVarsInStructInfo(const StructInfo& sinfo);
+TVM_DLL Type TypeLCA(const Type& lhs, const Type& rhs, const arith::Analyzer& ana);
 
 /*!
- * \brief Get the TIR variables that appear in the input struct info.
+ * \brief Get the TIR variables that appear in the input type.
+ * The returned list is deduplicated - each TIR variable will appear at most once.
+ * \param ty The type object to be analyzed.
+ * \return The list of TIR variables that appear in the input type.
+ */
+TVM_DLL ffi::Array<tirx::Var> TIRVarsInType(const Type& ty);
+
+/*!
+ * \brief Get the TIR variables that appear in the input type.
  *
  * Returns all symbolic variables that are definable based on, and
- * used within, the StructInfo.
+ * used within, the Type.
  *
- * \param sinfo The struct info object to be analyzed.
+ * \param ty The type object to be analyzed.
  *
  * \return A tuple of (definable,used) TIR variables.  Both lists are
  *   deduplicated, each TIR variable will appear at most once, and in
  *   order of occurrence.
  */
-TVM_DLL ffi::Array<tir::Var> DefinableTIRVarsInStructInfo(const StructInfo& sinfo);
+TVM_DLL ffi::Array<tirx::Var> DefinableTIRVarsInType(const Type& ty);
 
 /*! \brief Collect expressions whose usage requires them to be non-negative
  *
@@ -313,11 +367,11 @@ TVM_DLL ffi::Array<tir::Var> DefinableTIRVarsInStructInfo(const StructInfo& sinf
  * to generate assertions prior to calling a kernel, or to provide
  * assumptions within a kernel that may be useful for simplification.
  *
- * \param sinfo The struct info to be analyzed
+ * \param ty The type to be analyzed
  *
  * \return A list of non-negative expressions.
  */
-TVM_DLL ffi::Array<PrimExpr> CollectNonNegativeExpressions(const StructInfo& sinfo);
+TVM_DLL ffi::Array<PrimExpr> CollectNonNegativeExpressions(const Type& ty);
 
 /*!
  * \brief Get the TIR variables that defined in the input function.
@@ -325,7 +379,7 @@ TVM_DLL ffi::Array<PrimExpr> CollectNonNegativeExpressions(const StructInfo& sin
  * \param expr The relax expression (e.g. a Function) to be analyzed.
  * \return The list of TIR variables that are defined in the input function.
  */
-TVM_DLL ffi::Array<tir::Var> DefinedSymbolicVars(const Expr& expr);
+TVM_DLL ffi::Array<tirx::Var> DefinedSymbolicVars(const Expr& expr);
 
 /*!
  * \brief Get the TIR variables that are used but not defined in the input function.
@@ -333,7 +387,7 @@ TVM_DLL ffi::Array<tir::Var> DefinedSymbolicVars(const Expr& expr);
  * \param expr The relax expression (e.g. a Function) to be analyzed.
  * \return The list of TIR variables that are used but not defined in the input function.
  */
-TVM_DLL ffi::Array<tir::Var> FreeSymbolicVars(const Expr& expr);
+TVM_DLL ffi::Array<tirx::Var> FreeSymbolicVars(const Expr& expr);
 //-----------------------------------
 // General IR analysis
 //-----------------------------------
@@ -495,6 +549,17 @@ struct VarUsageInfo {
 VarUsageInfo CollectVarUsage(const Expr& expr);
 
 /*!
+ * \brief Get the used variables in an expression.
+ *
+ * This function collects all variables that are referenced within the given expression.
+ *
+ * \param expr The expression to analyze
+ *
+ * \return A set of variable nodes that are used in the expression
+ */
+TVM_DLL std::set<const VarNode*> GetUsedVars(const Expr& expr);
+
+/*!
  * \brief Remove unused statements inside DataflowBlocks.
  *
  * \param expr The expression (typically a relax::Function) from which
@@ -513,7 +578,7 @@ TVM_DLL Expr RemoveAllUnused(Expr expr);
  * \note This analysis applies on TIR function but is primarily used by relax passes.
  *       As a result we place it under the relax namespace.
  */
-TVM_DLL OpPatternKind AnalyzeOpPatternKind(const tir::PrimFunc& func);
+TVM_DLL OpPatternKind AnalyzeOpPatternKind(const tirx::PrimFunc& func);
 
 /*!
  * \brief Check if the given PrimFunc is essentially doing a reshape operation.
@@ -528,7 +593,7 @@ TVM_DLL OpPatternKind AnalyzeOpPatternKind(const tir::PrimFunc& func);
  * cannot be false-positive, since whenever we cannot prove the equality, we return false. This
  * property guarantees the safety of this function.
  */
-TVM_DLL bool HasReshapePattern(const tir::PrimFunc& func);
+TVM_DLL bool HasReshapePattern(const tirx::PrimFunc& func);
 
 /*!
  * \brief Check if the given expression (likely a function body) contains any impure calls.
@@ -538,7 +603,7 @@ TVM_DLL bool HasReshapePattern(const tir::PrimFunc& func);
  *   can be ignored in the check (must be a Var or GlobalVar).
  * \return The impure expression, if one exists within the given
  *   expression.  Otherwise, std::nullopt.
- * \note Relies on StructInfo annotations, so ensure that the module has been normalized first.
+ * \note Relies on Type annotations, so ensure that the module has been normalized first.
  *   Also, an impure call in a *nested* function does *not* mean that the outer expression contains
  *   an impure call--it only does if the nested function is *later called*.
  */
@@ -552,7 +617,7 @@ TVM_DLL ffi::Optional<Expr> FindImpureCall(
  *   the caller can pass the function's name so recursive calls
  *   can be ignored in the check (must be a Var or GlobalVar).
  * \return A boolean indicating if the expression contains any impure calls.
- * \note Relies on StructInfo annotations, so ensure that the module has been normalized first.
+ * \note Relies on Type annotations, so ensure that the module has been normalized first.
  *   Also, an impure call in a *nested* function does *not* mean that the outer expression contains
  *   an impure call--it only does if the nested function is *later called*.
  */
@@ -560,17 +625,31 @@ TVM_DLL bool ContainsImpureCall(
     const Expr& expr, const ffi::Optional<Expr>& own_name = ffi::Optional<Expr>(std::nullopt));
 
 /*!
- * \brief Check if the IRModule is well formed.
+ * \brief Check if an IRModule or Function is well-formed.
+ *
+ * Throws an ffi::Error on the first well-formedness violation. The error is
+ * seeded with the offending node so a pass runner can resolve a precise access
+ * path. Use \ref CheckWellFormed for a boolean answer.
  *
  * \param obj The IRModule or relax::Function to check.
- * \param check_struct_info A boolean flag indicating if the property "every Expr
- * must have defined structure info" will be checked.
- * \return true if the object is well formed, false if not.
- * \note By default the structure info is always checked. It is only in test cases
- * where `check_struct_info` might be false, so that other well-formed requirements
- * will be well tested and will not be blocked by not having structure info.
+ * \param check_ty If true, verify that every Expr has ty populated.
+ * \note By default the type information is always checked. It is only in test cases
+ * where `check_ty` might be false, so that other well-formed requirements
+ * will be well tested and will not be blocked by not having type information.
  */
-TVM_DLL bool WellFormed(ffi::Variant<IRModule, Function> obj, bool check_struct_info = true);
+TVM_DLL void WellFormed(ffi::Variant<IRModule, Function> obj, bool check_ty = true);
+
+/*!
+ * \brief Return whether an IRModule or Function is well-formed.
+ *
+ * Wraps \ref WellFormed, returning false instead of throwing on the first
+ * violation.
+ *
+ * \param obj The IRModule or relax::Function to check.
+ * \param check_ty If true, verify that every Expr has ty populated.
+ * \return true if the object is well-formed, false otherwise.
+ */
+TVM_DLL bool CheckWellFormed(ffi::Variant<IRModule, Function> obj, bool check_ty = true);
 
 /*!
  * \brief Using the layout transforms on the outputs, suggest layout transformation on the blocks
@@ -582,8 +661,8 @@ TVM_DLL bool WellFormed(ffi::Variant<IRModule, Function> obj, bool check_struct_
  * from the object (block or buffer) to it's index map transformation.
  */
 
-TVM_DLL ffi::Map<tir::Block, ffi::Map<ObjectRef, tir::IndexMap>> SuggestLayoutTransforms(
-    const Function& fn, ffi::Array<tir::IndexMap> write_buffer_transformations);
+TVM_DLL ffi::Map<tirx::SBlock, ffi::Map<ffi::ObjectRef, tirx::IndexMap>> SuggestLayoutTransforms(
+    const Function& fn, ffi::Array<tirx::IndexMap> write_buffer_transformations);
 
 /* \brief Collect variables whose value can be computed at compile-time
  *

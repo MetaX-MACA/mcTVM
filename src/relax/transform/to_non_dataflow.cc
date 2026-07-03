@@ -22,11 +22,10 @@
  */
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/expr_functor.h>
-#include <tvm/relax/struct_info.h>
 #include <tvm/relax/transform.h>
 #include <tvm/relax/type.h>
 #include <tvm/relax/utils.h>
-#include <tvm/tir/op.h>
+#include <tvm/tirx/op.h>
 
 namespace tvm {
 namespace relax {
@@ -35,7 +34,7 @@ class ToNonDFMutator : public ExprMutator {
  public:
   Var VisitVarDef(const Var& var) final {
     if (var.as<DataflowVarNode>()) {
-      Var new_var = Var(var->vid, GetStructInfo(var), var->span);
+      Var new_var = Var(var->vid, GetType(var), var->span);
       this->var_remap_[var->vid] = new_var;
       return new_var;
     }
@@ -57,7 +56,7 @@ namespace transform {
 
 Pass ToNonDataflow() {
   auto pass_func = [=](Function f, IRModule m, PassContext pc) {
-    return Downcast<Function>(ToNonDataflow(f));
+    return ToNonDataflow(f).as_or_throw<Function>();
   };
   return CreateFunctionPass(pass_func, 0, "ToNonDataflow", {});
 }

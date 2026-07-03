@@ -15,13 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=no-else-return, unidiomatic-typecheck, invalid-name, arguments-differ
+# ruff: noqa: RUF012
 """The expression functor of Relax."""
-from typing import Callable, Optional
+
+from collections.abc import Callable
 
 import tvm_ffi
+
 from tvm.ir import Op
+from tvm.ir.utils import derived_object
 from tvm.runtime import Object
-from tvm.runtime.support import derived_object
 
 from ..ir.module import IRModule
 from . import _ffi_api
@@ -41,7 +44,7 @@ from .expr import (
     Id,
     If,
     MatchCast,
-    PrimValue,
+    PrimExpr,
     SeqExpr,
     ShapeExpr,
     Span,
@@ -51,7 +54,7 @@ from .expr import (
     Var,
     VarBinding,
 )
-from .struct_info import StructInfo
+from .type import Type
 
 visitor = derived_object
 """
@@ -159,14 +162,14 @@ class ExprFunctor:
             ret = self.visit_op_(expr)
         elif isinstance(expr, TupleGetItem):
             ret = self.visit_tuple_getitem_(expr)
-        elif isinstance(expr, PrimValue):
-            ret = self.visit_prim_value_(expr)
+        elif isinstance(expr, PrimExpr):
+            ret = self.visit_prim_expr_(expr)
         elif isinstance(expr, StringImm):
             ret = self.visit_string_imm_(expr)
         elif isinstance(expr, DataTypeImm):
             ret = self.visit_data_type_imm_(expr)
         else:
-            raise TypeError("Invalid type: {0}".format(type(expr)))
+            raise TypeError(f"Invalid type: {type(expr)}")
 
         return ret
 
@@ -209,7 +212,7 @@ class ExprFunctor:
     def visit_tuple_getitem_(self, op: TupleGetItem):
         raise NotImplementedError()
 
-    def visit_prim_value_(self, op: PrimValue):
+    def visit_prim_expr_(self, op: PrimExpr):
         raise NotImplementedError()
 
     def visit_string_imm_(self, op: StringImm):
@@ -242,7 +245,7 @@ class ExprFunctor:
         elif isinstance(binding, VarBinding):
             self.visit_var_binding_(binding)
         else:
-            raise TypeError("Invalid type: {0}".format(type(binding)))
+            raise TypeError(f"Invalid type: {type(binding)}")
 
     def visit_binding_block(self, block: BindingBlock):
         if isinstance(block, DataflowBlock):
@@ -250,7 +253,7 @@ class ExprFunctor:
         elif isinstance(block, BindingBlock):
             self.visit_binding_block_(block)
         else:
-            raise TypeError("Invalid type: {0}".format(type(block)))
+            raise TypeError(f"Invalid type: {type(block)}")
 
     def visit_var_def(self, var: Var):
         if isinstance(var, DataflowVar):
@@ -258,7 +261,7 @@ class ExprFunctor:
         elif isinstance(var, Var):
             self.visit_var_def_(var)
         else:
-            raise TypeError("Invalid type: {0}".format(type(var)))
+            raise TypeError(f"Invalid type: {type(var)}")
 
 
 @tvm_ffi.register_object("expr_functor.PyExprVisitor")
@@ -274,33 +277,33 @@ class _PyExprVisitor(tvm_ffi.core.Object):
 
     def __init__(
         self,
-        f_visit_expr: Callable = None,
-        f_visit_constant_: Callable = None,
-        f_visit_tuple_: Callable = None,
-        f_visit_var_: Callable = None,
-        f_visit_dataflow_var_: Callable = None,
-        f_visit_shape_expr_: Callable = None,
-        f_visit_extern_func_: Callable = None,
-        f_visit_global_var_: Callable = None,
-        f_visit_function_: Callable = None,
-        f_visit_call_: Callable = None,
-        f_visit_seq_expr_: Callable = None,
-        f_visit_if_: Callable = None,
-        f_visit_op_: Callable = None,
-        f_visit_tuple_getitem_: Callable = None,
-        f_visit_prim_value_: Callable = None,
-        f_visit_string_imm_: Callable = None,
-        f_visit_data_type_imm_: Callable = None,
-        f_visit_binding: Callable = None,
-        f_visit_var_binding_: Callable = None,
-        f_visit_match_cast_: Callable = None,
-        f_visit_binding_block: Callable = None,
-        f_visit_binding_block_: Callable = None,
-        f_visit_dataflow_block_: Callable = None,
-        f_visit_var_def: Callable = None,
-        f_visit_var_def_: Callable = None,
-        f_visit_dataflow_var_def_: Callable = None,
-        f_visit_span: Callable = None,
+        f_visit_expr: Callable | None = None,
+        f_visit_constant_: Callable | None = None,
+        f_visit_tuple_: Callable | None = None,
+        f_visit_var_: Callable | None = None,
+        f_visit_dataflow_var_: Callable | None = None,
+        f_visit_shape_expr_: Callable | None = None,
+        f_visit_extern_func_: Callable | None = None,
+        f_visit_global_var_: Callable | None = None,
+        f_visit_function_: Callable | None = None,
+        f_visit_call_: Callable | None = None,
+        f_visit_seq_expr_: Callable | None = None,
+        f_visit_if_: Callable | None = None,
+        f_visit_op_: Callable | None = None,
+        f_visit_tuple_getitem_: Callable | None = None,
+        f_visit_prim_expr_: Callable | None = None,
+        f_visit_string_imm_: Callable | None = None,
+        f_visit_data_type_imm_: Callable | None = None,
+        f_visit_binding: Callable | None = None,
+        f_visit_var_binding_: Callable | None = None,
+        f_visit_match_cast_: Callable | None = None,
+        f_visit_binding_block: Callable | None = None,
+        f_visit_binding_block_: Callable | None = None,
+        f_visit_dataflow_block_: Callable | None = None,
+        f_visit_var_def: Callable | None = None,
+        f_visit_var_def_: Callable | None = None,
+        f_visit_dataflow_var_def_: Callable | None = None,
+        f_visit_span: Callable | None = None,
     ) -> None:
         """Constructor."""
 
@@ -320,7 +323,7 @@ class _PyExprVisitor(tvm_ffi.core.Object):
             f_visit_if_,
             f_visit_op_,
             f_visit_tuple_getitem_,
-            f_visit_prim_value_,
+            f_visit_prim_expr_,
             f_visit_string_imm_,
             f_visit_data_type_imm_,
             f_visit_binding,
@@ -415,7 +418,7 @@ class PyExprVisitor:
             "visit_if_",
             "visit_op_",
             "visit_tuple_getitem_",
-            "visit_prim_value_",
+            "visit_prim_expr_",
             "visit_string_imm_",
             "visit_data_type_imm_",
             "visit_binding",
@@ -651,15 +654,15 @@ class PyExprVisitor:
         # Using self._outer() to ref _PyExprVisitor
         return _ffi_api.ExprVisitorVisitExpr(self._outer(), op)  # type: ignore
 
-    def visit_prim_value_(self, op: PrimValue) -> None:
-        """Visit PrimValue.
-        Users can customized this function to overwrite VisitExpr_(const PrimValueNode* op)
+    def visit_prim_expr_(self, op: PrimExpr) -> None:
+        """Visit PrimExpr.
+        Users can customized this function to overwrite VisitExpr_(const PrimExprNode* op)
         on the C++ side.
 
         Parameters
         ----------
-        op : PrimValue
-            The PrimValue to be visited.
+        op : PrimExpr
+            The PrimExpr to be visited.
         """
         # Using self._outer() to ref _PyExprVisitor
         return _ffi_api.ExprVisitorVisitExpr(self._outer(), op)  # type: ignore
@@ -795,33 +798,33 @@ class _PyExprMutator(Object):
     def __init__(
         self,
         builder: BlockBuilder = None,
-        f_visit_expr: Callable = None,
-        f_visit_constant_: Callable = None,
-        f_visit_tuple_: Callable = None,
-        f_visit_var_: Callable = None,
-        f_visit_dataflow_var_: Callable = None,
-        f_visit_shape_expr_: Callable = None,
-        f_visit_extern_func_: Callable = None,
-        f_visit_global_var_: Callable = None,
-        f_visit_function_: Callable = None,
-        f_visit_call_: Callable = None,
-        f_visit_seq_expr_: Callable = None,
-        f_visit_if_: Callable = None,
-        f_visit_op_: Callable = None,
-        f_visit_tuple_getitem_: Callable = None,
-        f_visit_prim_value_: Callable = None,
-        f_visit_string_imm_: Callable = None,
-        f_visit_data_type_imm_: Callable = None,
-        f_visit_binding: Callable = None,
-        f_visit_var_binding_: Callable = None,
-        f_visit_match_cast_: Callable = None,
-        f_visit_binding_block: Callable = None,
-        f_visit_binding_block_: Callable = None,
-        f_visit_dataflow_block_: Callable = None,
-        f_visit_var_def: Callable = None,
-        f_visit_var_def_: Callable = None,
-        f_visit_dataflow_var_def_: Callable = None,
-        f_visit_span: Callable = None,
+        f_visit_expr: Callable | None = None,
+        f_visit_constant_: Callable | None = None,
+        f_visit_tuple_: Callable | None = None,
+        f_visit_var_: Callable | None = None,
+        f_visit_dataflow_var_: Callable | None = None,
+        f_visit_shape_expr_: Callable | None = None,
+        f_visit_extern_func_: Callable | None = None,
+        f_visit_global_var_: Callable | None = None,
+        f_visit_function_: Callable | None = None,
+        f_visit_call_: Callable | None = None,
+        f_visit_seq_expr_: Callable | None = None,
+        f_visit_if_: Callable | None = None,
+        f_visit_op_: Callable | None = None,
+        f_visit_tuple_getitem_: Callable | None = None,
+        f_visit_prim_expr_: Callable | None = None,
+        f_visit_string_imm_: Callable | None = None,
+        f_visit_data_type_imm_: Callable | None = None,
+        f_visit_binding: Callable | None = None,
+        f_visit_var_binding_: Callable | None = None,
+        f_visit_match_cast_: Callable | None = None,
+        f_visit_binding_block: Callable | None = None,
+        f_visit_binding_block_: Callable | None = None,
+        f_visit_dataflow_block_: Callable | None = None,
+        f_visit_var_def: Callable | None = None,
+        f_visit_var_def_: Callable | None = None,
+        f_visit_dataflow_var_def_: Callable | None = None,
+        f_visit_span: Callable | None = None,
     ) -> None:
         """Constructor."""
 
@@ -842,7 +845,7 @@ class _PyExprMutator(Object):
             f_visit_if_,
             f_visit_op_,
             f_visit_tuple_getitem_,
-            f_visit_prim_value_,
+            f_visit_prim_expr_,
             f_visit_string_imm_,
             f_visit_data_type_imm_,
             f_visit_binding,
@@ -953,7 +956,7 @@ class PyExprMutator:
             "visit_if_",
             "visit_op_",
             "visit_tuple_getitem_",
-            "visit_prim_value_",
+            "visit_prim_expr_",
             "visit_string_imm_",
             "visit_data_type_imm_",
             "visit_binding",
@@ -969,7 +972,7 @@ class PyExprMutator:
         ],
     }
 
-    def __init__(self, mod: Optional[IRModule] = None) -> None:
+    def __init__(self, mod: IRModule | None = None) -> None:
         """Constructor"""
         self.builder_ = BlockBuilder(mod)
 
@@ -1273,15 +1276,15 @@ class PyExprMutator:
         # Using self._outer() to ref _PyExprMutator
         return _ffi_api.ExprMutatorVisitExpr(self._outer(), op)  # type: ignore
 
-    def visit_prim_value_(self, op: PrimValue) -> Expr:
-        """Visit PrimValue.
-        Users can customized this function to overwrite VisitExpr_(const PrimValueNode* op)
+    def visit_prim_expr_(self, op: PrimExpr) -> Expr:
+        """Visit PrimExpr.
+        Users can customized this function to overwrite VisitExpr_(const PrimExprNode* op)
         on the C++ side.
 
         Parameters
         ----------
-        op : PrimValue
-            The PrimValue to be visited.
+        op : PrimExpr
+            The PrimExpr to be visited.
 
         Returns
         -------
@@ -1501,7 +1504,7 @@ class PyExprMutator:
         # Using self._outer() to ref _PyExprMutator
         return _ffi_api.PyExprMutatorVisitWithNewScope(self._outer(), expr)  # type: ignore
 
-    def lookup_binding(self, var: Var) -> Optional[Expr]:
+    def lookup_binding(self, var: Var) -> Expr | None:
         """Look up the value bound to a variable.
         Note: For function parameters, this function returns std::nullopt.
 
@@ -1518,7 +1521,7 @@ class PyExprMutator:
         # Using self._outer() to ref _PyExprMutator
         return _ffi_api.PyExprMutatorLookupBinding(self._outer(), var)  # type: ignore
 
-    def with_struct_info(self, var: Var, struct_info: StructInfo) -> Var:
+    def with_type(self, var: Var, ty: Type) -> Var:
         """Create a new var with specified shape and type if the original var's shape or type does
         not match with the specified ones.
 
@@ -1526,8 +1529,8 @@ class PyExprMutator:
         ----------
         var : Var
             The var to be updated.
-        struct_info : StructInfo
-            The struct info.
+        ty : Type
+            The type.
 
         Returns
         -------
@@ -1535,4 +1538,4 @@ class PyExprMutator:
             The var filled with shape and type.
         """
         # Using self._outer() to ref _PyExprMutator
-        return _ffi_api.PyExprMutatorWithStructInfo(self._outer(), var, struct_info)  # type: ignore
+        return _ffi_api.PyExprMutatorWithType(self._outer(), var, ty)  # type: ignore

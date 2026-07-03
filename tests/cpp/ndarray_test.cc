@@ -24,49 +24,49 @@
 using namespace tvm;
 
 TEST(TensorTest, IsContiguous_ContiguousStride) {
-  auto array = runtime::Tensor::Empty({5, 10}, DataType::Float(32), {kDLCPU});
+  auto array = runtime::Tensor::Empty({5, 10}, DLDataType{kDLFloat, 32, 1}, {kDLCPU});
   DLManagedTensor* managed_tensor = array.ToDLPack();
 
   int64_t strides[] = {10, 1};
   managed_tensor->dl_tensor.strides = strides;
 
-  ICHECK(runtime::IsContiguous(managed_tensor->dl_tensor));
+  TVM_FFI_ICHECK(ffi::IsContiguous(managed_tensor->dl_tensor));
 
   managed_tensor->deleter(managed_tensor);
 }
 
 TEST(TensorTest, IsContiguous_NullStride) {
-  auto array = runtime::Tensor::Empty({5, 10}, DataType::Float(32), {kDLCPU});
+  auto array = runtime::Tensor::Empty({5, 10}, DLDataType{kDLFloat, 32, 1}, {kDLCPU});
   DLManagedTensor* managed_tensor = array.ToDLPack();
 
   managed_tensor->dl_tensor.strides = nullptr;
 
-  ICHECK(runtime::IsContiguous(managed_tensor->dl_tensor));
+  TVM_FFI_ICHECK(ffi::IsContiguous(managed_tensor->dl_tensor));
 
   managed_tensor->deleter(managed_tensor);
 }
 
 TEST(TensorTest, IsContiguous_AnyStrideForSingular) {
-  auto array = runtime::Tensor::Empty({5, 1, 10}, DataType::Float(32), {kDLCPU});
+  auto array = runtime::Tensor::Empty({5, 1, 10}, DLDataType{kDLFloat, 32, 1}, {kDLCPU});
   DLManagedTensor* managed_tensor = array.ToDLPack();
 
   int64_t strides[] = {10, 1, 1};  // strides[1] is normalized to 1 because shape[1] == 1.
   managed_tensor->dl_tensor.strides = strides;
 
-  ICHECK(runtime::IsContiguous(managed_tensor->dl_tensor));
+  TVM_FFI_ICHECK(ffi::IsContiguous(managed_tensor->dl_tensor));
 
   managed_tensor->dl_tensor.strides = nullptr;
   managed_tensor->deleter(managed_tensor);
 }
 
 TEST(TensorTest, IsContiguous_UncontiguousStride) {
-  auto array = runtime::Tensor::Empty({5, 1, 10}, DataType::Float(32), {kDLCPU});
+  auto array = runtime::Tensor::Empty({5, 1, 10}, DLDataType{kDLFloat, 32, 1}, {kDLCPU});
   DLManagedTensor* managed_tensor = array.ToDLPack();
 
   int64_t strides[] = {1, 1, 1};
   managed_tensor->dl_tensor.strides = strides;
 
-  ICHECK(!runtime::IsContiguous(managed_tensor->dl_tensor));
+  TVM_FFI_ICHECK(!ffi::IsContiguous(managed_tensor->dl_tensor));
 
   managed_tensor->dl_tensor.strides = nullptr;
   managed_tensor->deleter(managed_tensor);

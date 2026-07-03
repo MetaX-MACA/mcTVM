@@ -24,7 +24,7 @@ Note that
 """
 
 import tvm
-from tvm import IRModule, relax, te, tir
+from tvm import IRModule, relax, te, tirx
 from tvm.relax.dpl.pattern import is_op, wildcard
 from tvm.relax.expr_functor import PyExprMutator, mutator
 
@@ -64,7 +64,7 @@ def _pattern():
 
     def _check(context: relax.transform.PatternCheckContext) -> bool:
         transpose_call = context.annotated_expr["wT"]
-        ndim = transpose_call.args[0].struct_info.ndim
+        ndim = transpose_call.args[0].ty.ndim
         if ndim == -1:
             return False
         if ndim == 2 and transpose_call.attrs.axes is None:
@@ -106,13 +106,11 @@ class _TransposeMatmulFuser(PyExprMutator):  # pylint: disable=abstract-method
             is_a_larger = len(a_shape) > len(b_shape)
             offset = len(a_shape) - len(b_shape) if is_a_larger else len(b_shape) - len(a_shape)
 
-            a_relax = relax.Var("a", relax.TensorStructInfo(a.shape))
+            a_relax = relax.Var("a", relax.TensorType(a.shape))
             bT_shape = list(b.shape)
             bT_shape[-1], bT_shape[-2] = bT_shape[-2], bT_shape[-1]
-            bT_relax = relax.Var("b", relax.TensorStructInfo(bT_shape))
-            output_shape = self.builder_.normalize(
-                relax.op.matmul(a_relax, bT_relax)
-            ).struct_info.shape
+            bT_relax = relax.Var("b", relax.TensorType(bT_shape))
+            output_shape = self.builder_.normalize(relax.op.matmul(a_relax, bT_relax)).ty.shape
 
             def matmul_compute(*idx_spatial):
                 k = te.reduce_axis((0, a_shape[-1]), name="k")
@@ -130,9 +128,9 @@ class _TransposeMatmulFuser(PyExprMutator):  # pylint: disable=abstract-method
                         a_dim = a_shape[i if is_a_larger else i - offset]
                         b_dim = b_shape[i if not is_a_larger else i - offset]
                         dim_equal = a_dim == b_dim
-                        if not isinstance(dim_equal, tir.IntImm) or dim_equal == 0:
-                            a_dim_is_one = isinstance(a_dim, tir.IntImm) and a_dim == 1
-                            b_dim_is_one = isinstance(b_dim, tir.IntImm) and b_dim == 1
+                        if not isinstance(dim_equal, tirx.IntImm) or dim_equal == 0:
+                            a_dim_is_one = isinstance(a_dim, tirx.IntImm) and a_dim == 1
+                            b_dim_is_one = isinstance(b_dim, tirx.IntImm) and b_dim == 1
                             a_indices.append(0 if a_dim_is_one else idx_spatial[i])
                             b_indices.append(0 if b_dim_is_one else idx_spatial[i])
                         else:
@@ -165,7 +163,7 @@ class _TransposeMatmulFuser(PyExprMutator):  # pylint: disable=abstract-method
                 "Composite" in function.attrs
                 and function.attrs["Composite"] == "transpose_matmul_fuse"
             ):
-                out_dtype = function.ret_struct_info.dtype
+                out_dtype = function.ret_ty.dtype
                 return self.builder_.call_te(
                     te_transposed_matmul,
                     call.args[1],

@@ -30,8 +30,8 @@ namespace tvm {
 namespace relax {
 
 /*! \brief Attributes for relax.quantize/relax.dequantize operator */
-struct QuantizeAttrs : public AttrsNodeReflAdapter<QuantizeAttrs> {
-  DataType out_dtype;
+struct QuantizeAttrs : public AttrsNode {
+  DLDataType out_dtype;
   int axis;
 
   static void RegisterReflection() {
@@ -43,7 +43,7 @@ struct QuantizeAttrs : public AttrsNodeReflAdapter<QuantizeAttrs> {
                 "Default value is -1, which corresponds to the last axis.",
                 refl::DefaultValue(-1));
   }
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.QuantizeAttrs", QuantizeAttrs, BaseAttrsNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.QuantizeAttrs", QuantizeAttrs, AttrsNode);
 };  // QuantizeAttrs
 
 }  // namespace relax

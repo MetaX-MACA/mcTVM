@@ -16,20 +16,28 @@
 # under the License.
 # pylint: disable=invalid-name, unused-argument, pointless-exception-statement
 """Pattern table for CLML backend"""
+
 import tvm
-from tvm import relax, IRModule
+from tvm import IRModule, relax, tirx
 from tvm.ir.transform import PassContext, module_pass
 from tvm.relax import transform
-from tvm.relax.expr_functor import PyExprMutator, mutator
-from tvm.relax.expr import TupleGetItem, VarBinding
 from tvm.relax.dpl.pattern import (
+    GlobalVarPattern,
+    TuplePattern,
     is_const,
     is_op,
     is_tuple_get_item,
     wildcard,
 )
+from tvm.relax.expr import TupleGetItem, VarBinding
+from tvm.relax.expr_functor import PyExprMutator, mutator
 from tvm.relax.transform import PatternCheckContext
+
 from ..pattern_registry import register_patterns
+
+
+def _dtype_str(dtype):
+    return str(dtype.dtype) if isinstance(dtype, tvm.ir.PrimType) else str(dtype)
 
 
 @mutator
@@ -60,7 +68,7 @@ class AppendReshapeToBNRewriter(PyExprMutator):
             bn_call = self.bn_vars[tuple_value]
             if op.index == 0:
                 bn_out = relax.TupleGetItem(bn_call, 0)
-                input_shape = bn_call.args[0].struct_info.shape
+                input_shape = bn_call.args[0].ty.shape
                 return relax.Call(reshape_op, [bn_out, input_shape])
 
         return super().visit_tuple_getitem_(op)
@@ -82,9 +90,18 @@ class AppendReshapeToBNRewriterPass:
 
 
 def clml_sdk_version():
-    """Utility function to get clml version"""
+    """Utility function to get clml version.
 
-    return int(tvm.support.libinfo().get("TVM_CLML_VERSION", 2))
+    Probes the FFI registry for the OpenCLML version registered by the
+    CLML backend at build time.  Returns 2 when CLML is not present.
+    """
+    # Registry: "relax.get_openclml_version" — returns the CLML SDK version
+    # that TVM was built against; registered unconditionally in codegen.cc.
+    # Grep hint: grep -rn 'relax.get_openclml_version' src/
+    get_version = tvm.get_global_func("relax.get_openclml_version", allow_missing=True)
+    if get_version is None:
+        return 2
+    return int(get_version())
 
 
 def is_clml_runtime_enabled():
@@ -124,13 +141,13 @@ def clml_pattern_table():
 
         if "data" in context.annotated_expr:
             input_expr = context.annotated_expr["data"]
-            input_dtype = input_expr.struct_info.dtype
+            input_dtype = _dtype_str(input_expr.ty.dtype)
             if input_dtype not in ["float32", "float16"]:
                 return False
 
         if "weight" in context.annotated_expr:
             weight_expr = context.annotated_expr["weight"]
-            weight_dtype = weight_expr.struct_info.dtype
+            weight_dtype = _dtype_str(weight_expr.ty.dtype)
             if weight_dtype not in ["float32", "float16"]:
                 return False
 
@@ -231,7 +248,7 @@ def clml_pattern_table():
             return False
 
         data = context.annotated_expr["data"]
-        input_shape = data.struct_info.shape
+        input_shape = data.ty.shape
 
         if len(input_shape) != 4:
             return False
@@ -298,7 +315,7 @@ def clml_pattern_table():
             return False
 
         data = context.annotated_expr["data"]
-        input_shape = data.struct_info.shape
+        input_shape = data.ty.shape
 
         if len(input_shape) != 4:
             return False
@@ -358,7 +375,7 @@ def clml_pattern_table():
             return False
 
         data = context.annotated_expr["data"]
-        input_shape = data.struct_info.shape
+        input_shape = data.ty.shape
 
         if len(input_shape) != 4:
             return False
@@ -438,8 +455,8 @@ def clml_pattern_table():
 
         base_shape = None
         for param in params.values():
-            shape = param.struct_info.shape
-            dtype = param.struct_info.dtype
+            shape = param.ty.shape
+            dtype = _dtype_str(param.ty.dtype)
 
             if dtype not in {"float32"}:
                 return False
@@ -483,8 +500,8 @@ def clml_pattern_table():
 
     def _check_binary_op(context: PatternCheckContext) -> bool:
         def _check_arg(input_expr):
-            input_dtype = input_expr.struct_info.dtype
-            input_shape = input_expr.struct_info.shape
+            input_dtype = _dtype_str(input_expr.ty.dtype)
+            input_shape = input_expr.ty.shape
             if len(input_shape) == 0:
                 return False
 
@@ -510,13 +527,13 @@ def clml_pattern_table():
         rhs_shape = None
         if "lhs" in context.annotated_expr:
             lhs = context.annotated_expr["lhs"]
-            lhs_shape = lhs.struct_info.shape
+            lhs_shape = lhs.ty.shape
             if not _check_arg(lhs):
                 return False
 
         if "rhs" in context.annotated_expr:
             rhs = context.annotated_expr["rhs"]
-            rhs_shape = rhs.struct_info.shape
+            rhs_shape = rhs.ty.shape
             if not _check_arg(rhs):
                 return False
 
@@ -608,4 +625,103 @@ class OpenCLMLOffLoad:
             ],
         )
         mod = seq(mod)
+        return mod
+
+
+def _check_dequantize_matmul(ctx: relax.transform.PatternCheckContext) -> bool:
+    _input = ctx.annotated_expr["lhs"]
+    root = ctx.annotated_expr["root"]
+    wdq = ctx.annotated_expr["w_decoded"]
+    w_pack = ctx.annotated_expr["w_encoded"]
+
+    if _dtype_str(ctx.annotated_expr["lhs"].ty.dtype) != "float16":
+        return False
+    if not isinstance(wdq, relax.Call):
+        return False
+    g_var = wdq.args[0]
+    if not (isinstance(g_var, relax.GlobalVar) and "dequantize" in g_var.name_hint):
+        return False
+
+    if not (
+        (len(root.ty.shape) == 3)
+        and isinstance(root.ty.shape[0], tirx.IntImm)
+        and (_dtype_str(root.ty.dtype) == "float16")
+        and (root.ty.shape[0] == 1)
+    ):
+        return False
+
+    if not (
+        (len(wdq.ty.shape) == 2)
+        and (w_pack.ty.shape[-1] == root.ty.shape[-1])
+        and (wdq.ty.shape[-2] == _input.ty.shape[-1])
+    ):
+        return False
+
+    return True
+
+
+def dequantize_matmul_patterns():
+    """Returns a list of supported decode -> matmul patterns."""
+
+    def _dequantize_matmul_pattern(name):
+        scales = wildcard()
+        x = wildcard()
+        w_packed = wildcard()
+
+        w_decoded = is_op("relax.call_tir")(
+            GlobalVarPattern(),
+            TuplePattern([w_packed, scales]),
+        )
+        matmul = is_op("relax.matmul")(x, w_decoded)
+
+        annotations = {
+            "root": matmul,
+            "lhs": x,
+            "w_encoded": w_packed,
+            "w_decoded": w_decoded,
+            "scales": scales,
+        }
+
+        return name, matmul, annotations, _check_dequantize_matmul
+
+    return [
+        _dequantize_matmul_pattern("openclml.dequant_matmul"),
+    ]
+
+
+clml_llm_patterns = [
+    *dequantize_matmul_patterns(),
+]
+register_patterns(clml_llm_patterns)
+
+
+@tvm.transform.module_pass(opt_level=0, name="OpenCLMLOffLoadForLLM")
+class OpenCLMLOffLoadForLLM:
+    """A compiler pass that partition the graph with dequant Matmul to CLML backend offload."""
+
+    def __init__(self, target: tvm.target.Target) -> None:
+        """Initializer.
+        Parameters
+        ----------
+        target : tvm.target.Target
+            Target device.
+        """
+        self.target = target
+
+    def transform_module(
+        self,
+        mod: IRModule,
+        _ctx: tvm.transform.PassContext,
+    ) -> IRModule:
+        """Apply required passed to transform"""
+
+        if "adreno" in self.target.keys and (clml_sdk_version() >= 5):
+            mod = tvm.transform.Sequential(
+                [
+                    transform.Normalize(),
+                    transform.FuseOpsByPattern(clml_llm_patterns, annotate_codegen=True),
+                    transform.RunCodegen(),
+                ]
+            )(mod)
+
         return mod

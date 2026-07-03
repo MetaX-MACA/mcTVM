@@ -20,15 +20,16 @@
 /*!
  * \file tvm/relax/transform/normalize.cc
  * \brief Pass for transforming Relax IR to normal form, i.e., the expressions are normalized(no
- * nesting and hence the AST is in ANF), and all struct_info_ of expressions are
+ * nesting and hence the AST is in ANF), and all ty of expressions are
  * available.
  */
 
+#include <tvm/ffi/cast.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/expr.h>
 #include <tvm/relax/expr_functor.h>
-#include <tvm/relax/struct_info.h>
 #include <tvm/relax/transform.h>
+#include <tvm/relax/type.h>
 
 namespace tvm {
 namespace relax {
@@ -48,7 +49,7 @@ class NormalizeMutator : public ExprMutatorBase {
     if (body.same_as(op->body)) {
       return ffi::GetRef<Expr>(op);
     } else {
-      return Function(op->params, body, op->ret_struct_info, op->is_pure, op->attrs);
+      return Function(op->params, body, op->ret_ty, op->is_pure, op->attrs);
     }
   }
 
@@ -113,7 +114,7 @@ class NormalizeMutator : public ExprMutatorBase {
     } else if (const auto* node = block.as<BindingBlockNode>()) {
       ret = VisitBindingBlock_(node);
     } else {
-      LOG(FATAL) << "TypeError: Invalid type: " << block->GetTypeKey();
+      TVM_FFI_THROW(TypeError) << "Invalid type: " << block->GetTypeKey();
     }
     return ret;
   }
@@ -140,14 +141,14 @@ class NormalizeMutator : public ExprMutatorBase {
     } else if (const auto* node = binding.as<MatchCastNode>()) {
       VisitBinding_(node);
     } else {
-      LOG(FATAL) << "TypeError: Invalid type: " << binding->GetTypeKey();
+      TVM_FFI_THROW(TypeError) << "Invalid type: " << binding->GetTypeKey();
     }
   }
 
   void VisitBinding_(const VarBindingNode* binding) {
     Expr new_value = this->VisitExpr(binding->value);
-    if (!binding->var->struct_info_.defined()) {
-      UpdateStructInfo(binding->var, GetStructInfo(new_value));
+    if (!binding->var->ty.defined()) {
+      UpdateType(binding->var, GetType(new_value));
     }
 
     if (new_value.same_as(binding->value)) {
@@ -164,7 +165,7 @@ class NormalizeMutator : public ExprMutatorBase {
       builder_->EmitNormalized(ffi::GetRef<MatchCast>(binding));
     } else {
       builder_->EmitNormalized(
-          MatchCast(binding->var, builder_->NormalizeArgument(new_value), binding->struct_info));
+          MatchCast(binding->var, builder_->NormalizeArgument(new_value), binding->ty));
     }
   }
 
@@ -203,7 +204,7 @@ class GlobalVarNormalizer : private ExprMutator {
       if (!func->IsInstance<FunctionNode>()) {
         continue;
       }
-      auto new_func = Downcast<BaseFunc>(this->VisitExpr(func));
+      auto new_func = this->VisitExpr(func).as_or_throw<BaseFunc>();
       builder_->UpdateFunction(gvar_map_[gvar], new_func);
     }
 
@@ -236,7 +237,7 @@ class GlobalVarNormalizer : private ExprMutator {
       }
 
       auto global_symbol_value = global_symbol.value();
-      CHECK(!name_supply_->ContainsName(global_symbol_value))
+      TVM_FFI_ICHECK(!name_supply_->ContainsName(global_symbol_value))
           << "IRModule contains duplicate global symbol: " << global_symbol_value;
       name_supply_->ReserveName(global_symbol_value);
       auto new_gvar = builder_->AddFunction(func, global_symbol_value);
@@ -262,12 +263,12 @@ class GlobalVarNormalizer : private ExprMutator {
   }
 
   Expr VisitExpr_(const GlobalVarNode* op) final {
-    ICHECK(gvar_map_.count(ffi::GetRef<GlobalVar>(op)));
+    TVM_FFI_ICHECK(gvar_map_.count(ffi::GetRef<GlobalVar>(op)));
     return gvar_map_[ffi::GetRef<GlobalVar>(op)];
   }
 
   IRModule module_;
-  NameSupply name_supply_;
+  UniqueNameSupply name_supply_;
   ffi::Map<GlobalVar, GlobalVar> gvar_map_;
 };
 
@@ -275,7 +276,7 @@ namespace transform {
 
 Pass Normalize() {
   auto pass_func = [=](Function f, IRModule m, PassContext pc) {
-    return Downcast<Function>(Normalize(f));
+    return Normalize(f).as_or_throw<Function>();
   };
   return CreateFunctionPass(pass_func, 1, "Normalize", {});
 }

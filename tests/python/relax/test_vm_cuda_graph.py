@@ -14,60 +14,62 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
-import tvm
-import tvm.testing
-
-from tvm import relax
-from tvm.script import tir as T, relax as R, ir as I
+# ruff: noqa: E501
 
 import numpy as np
 import pytest
 
+import tvm
+import tvm.testing
+from tvm import relax
+from tvm.script import ir as I
+from tvm.script import relax as R
+from tvm.script import tirx as T
+from tvm.testing import env
 
 # fmt: off
 
 
-@I.ir_module
+@I.ir_module(s_tir=True)
 class Module:
     @R.function(pure=False)
     def main(x: R.Tensor((16, 16), dtype="float32")) -> R.Tensor((16, 16), dtype="float32"):
         cls = Module
         R.func_attr({"global_symbol": "main"})
-        gv: R.Tuple(R.Object, R.Object) = R.call_builtin_with_ctx("vm.builtin.cuda_graph.get_cached_alloc", (cls.cuda_graph_alloc, R.prim_value(0)), sinfo_args=(R.Tuple(R.Object, R.Object),))
-        storage: R.Object = gv[0]
+        gv: R.Tuple(R.Any, R.Any) = R.call_builtin_with_ctx("vm.builtin.cuda_graph.get_cached_alloc", (cls.cuda_graph_alloc, R.prim_value(0)), ty_args=(R.Tuple(R.Any, R.Any),))
+        storage: R.Any = gv[0]
         alloc = R.vm.alloc_tensor(storage, R.prim_value(0), R.shape((16, 16)), R.dtype("float32"))
         _: R.Tuple = cls.add(x, alloc)
-        storage1: R.Object = gv[1]
-        gv1: R.Tuple(R.Tensor(dtype="float32"), R.Object, R.Object) = (alloc, storage1, storage)
-        gv2: R.Tuple(R.Tensor((16, 16), dtype="float32")) = R.call_builtin_with_ctx("vm.builtin.cuda_graph.run_or_capture", (cls.cuda_graph_capture, gv1, R.prim_value(0)), sinfo_args=(R.Tuple(R.Tensor((16, 16), dtype="float32")),))
-        storage2: R.Object = R.vm.alloc_storage(R.shape((1024,)), R.prim_value(0), R.dtype("uint8"))
+        storage1: R.Any = gv[1]
+        gv1: R.Tuple(R.Tensor(dtype="float32"), R.Any, R.Any) = (alloc, storage1, storage)
+        gv2: R.Tuple(R.Tensor((16, 16), dtype="float32")) = R.call_builtin_with_ctx("vm.builtin.cuda_graph.run_or_capture", (cls.cuda_graph_capture, gv1, R.prim_value(0)), ty_args=(R.Tuple(R.Tensor((16, 16), dtype="float32")),))
+        storage2: R.Any = R.vm.alloc_storage(R.shape((1024,)), R.prim_value(0), R.dtype("uint8"))
         alloc3 = R.vm.alloc_tensor(storage2, R.prim_value(0), R.shape((16, 16)), R.dtype("float32"))
         lv4: R.Tensor((16, 16), dtype="float32") = gv2[0]
         _3: R.Tuple = cls.add(lv4, alloc3)
         lv5: R.Tensor(dtype="float32") = alloc3
         return lv5
 
-    @T.prim_func
+    @T.prim_func(s_tir=True)
     def add(A: T.Buffer((16, 16), "float32"), B: T.Buffer((16, 16), "float32")):
         T.func_attr({"global_symbol": "add"})
-        with T.block("root"):
+        with T.sblock("root"):
             for i in T.thread_binding(16, thread="threadIdx.x"):
                 for j in range(16):
-                    with T.block("update"):
+                    with T.sblock("update"):
                         vi, vj = T.axis.remap("SS", [i, j])
                         B[vi, vj] = A[vi, vj] + T.float32(1)
 
     @R.function
-    def cuda_graph_alloc() -> R.Tuple(R.Object, R.Object):
+    def cuda_graph_alloc() -> R.Tuple(R.Any, R.Any):
         R.func_attr({"global_symbol": "cuda_graph_alloc"})
-        storage: R.Object = R.vm.alloc_storage(R.shape((1024,)), R.prim_value(0), R.dtype("uint8"))
-        storage1: R.Object = R.vm.alloc_storage(R.shape((1024,)), R.prim_value(0), R.dtype("uint8"))
-        gv: R.Tuple(R.Object, R.Object) = (storage, storage1)
+        storage: R.Any = R.vm.alloc_storage(R.shape((1024,)), R.prim_value(0), R.dtype("uint8"))
+        storage1: R.Any = R.vm.alloc_storage(R.shape((1024,)), R.prim_value(0), R.dtype("uint8"))
+        gv: R.Tuple(R.Any, R.Any) = (storage, storage1)
         return gv
 
     @R.function(pure=False)
-    def cuda_graph_capture(alloc: R.Tensor((16, 16), dtype="float32"), storage1: R.Object, storage: R.Object) -> R.Tuple(R.Tensor((16, 16), dtype="float32")):
+    def cuda_graph_capture(alloc: R.Tensor((16, 16), dtype="float32"), storage1: R.Any, storage: R.Any) -> R.Tuple(R.Tensor((16, 16), dtype="float32")):
         cls = Module
         R.func_attr({"global_symbol": "cuda_graph_capture"})
         lv0: R.Tensor((16, 16), dtype="float32") = alloc
@@ -93,7 +95,8 @@ def codegen(mod, target, exec_mode="bytecode"):
     return relax.vm_build._vmlink(builder, target, tir_mod)
 
 
-@tvm.testing.requires_cuda
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_vm_run():
     mod = Module
     target = tvm.target.Target("cuda", host="llvm")
@@ -107,7 +110,8 @@ def test_vm_run():
     tvm.testing.assert_allclose(y.numpy(), y_np, rtol=1e-5, atol=1e-5)
 
 
-@tvm.testing.requires_cudagraph
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cudagraph(), reason="need cudagraph")
 def test_capture_error_is_recoverable():
     """Function calls while capturing cudagraph may throw exceptions
 
@@ -138,7 +142,7 @@ def test_capture_error_is_recoverable():
         _dummy_workspace = tvm.runtime.empty([16], "float16", dev)
         return arg_tensor
 
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class Module:
         @R.function
         def main(A: R.Tensor([16], "float16")):
@@ -146,7 +150,7 @@ def test_capture_error_is_recoverable():
             C = R.call_pure_packed(
                 "test_vm_cuda_graph.invalid_impl_for_cudagraph",
                 B,
-                sinfo_args=R.Tensor([16], "float16"),
+                ty_args=R.Tensor([16], "float16"),
             )
             D = R.add(C, C)
             return D
@@ -155,7 +159,7 @@ def test_capture_error_is_recoverable():
         Module = tvm.ir.transform.Sequential(
             [
                 tvm.relax.transform.LegalizeOps(),
-                tvm.tir.transform.DefaultGPUSchedule(),
+                tvm.s_tir.transform.DefaultGPUSchedule(),
                 tvm.relax.transform.RemovePurityChecking(),
                 tvm.relax.transform.CallTIRRewrite(),
                 tvm.relax.transform.StaticPlanBlockMemory(),
@@ -173,7 +177,7 @@ def test_capture_error_is_recoverable():
 
     arg = tvm.runtime.tensor(np.arange(16).astype("float16"), dev)
 
-    with pytest.raises(tvm.TVMError):
+    with pytest.raises(RuntimeError):
         vm["main"](arg)
 
 

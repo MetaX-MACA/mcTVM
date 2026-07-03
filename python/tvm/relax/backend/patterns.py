@@ -17,28 +17,35 @@
 # pylint: disable=invalid-name
 """Common patterns used in BYOC"""
 
-from typing import Dict, Mapping, Tuple, Union
-from tvm.script import relax as R, tir as T
+from collections.abc import Mapping
+
 from tvm.relax.dpl.pattern import (
     DFPattern,
+    GlobalVarPattern,
+    TuplePattern,
     is_const,
     is_op,
     is_tuple_get_item,
     wildcard,
-    GlobalVarPattern,
-    TuplePattern,
 )
+from tvm.script import relax as R
+from tvm.script import tirx as T
 
 
 def _with_bias_activation_pattern(
     out: DFPattern,
-    annotations: Dict[str, DFPattern],
+    annotations: dict[str, DFPattern],
     with_bias: bool = False,
-    activation: str = None,
-) -> Tuple[DFPattern, Mapping[str, DFPattern]]:
+    activation: str | None = None,
+    allow_reshape: bool = False,
+) -> tuple[DFPattern, Mapping[str, DFPattern]]:
     if with_bias:
         annotations["bias"] = bias = wildcard()
-        out = is_op("relax.add")(out, bias)
+        if allow_reshape:
+            reshaped_bias = is_op("relax.reshape")(bias, wildcard(), varg_default_wildcard=True)
+            out = is_op("relax.add")(out, reshaped_bias, varg_default_wildcard=True)
+        else:
+            out = is_op("relax.add")(out, bias)
 
     if activation:
         out = is_op(activation)(out)
@@ -49,8 +56,9 @@ def _with_bias_activation_pattern(
 def make_fused_bias_activation_pattern(
     op_name: str,
     with_bias: bool = False,
-    activation: str = None,
-) -> Tuple[DFPattern, Mapping[str, DFPattern]]:
+    activation: str | None = None,
+    allow_reshape: bool = False,
+) -> tuple[DFPattern, Mapping[str, DFPattern]]:
     """
     A simple utility to create patterns for an operation fused with bias addition and activation.
 
@@ -80,14 +88,14 @@ def make_fused_bias_activation_pattern(
     out = is_op(op_name)(lhs, rhs)
     annotations = {"lhs": lhs, "rhs": rhs, "root": out}
 
-    return _with_bias_activation_pattern(out, annotations, with_bias, activation)
+    return _with_bias_activation_pattern(out, annotations, with_bias, activation, allow_reshape)
 
 
 def make_residual_block_pattern(
-    node_output: Union[DFPattern, Tuple[DFPattern, Mapping[str, DFPattern]]],
+    node_output: DFPattern | tuple[DFPattern, Mapping[str, DFPattern]],
     binary_op="relax.add",
     activation=None,
-) -> Tuple[DFPattern, Mapping[str, DFPattern]]:
+) -> tuple[DFPattern, Mapping[str, DFPattern]]:
     """
     Create pattern for residual block.
 
@@ -131,8 +139,8 @@ def make_residual_block_pattern(
 
 def make_conv2d_pattern(
     with_bias: bool = False,
-    activation: str = None,
-) -> Tuple[DFPattern, Mapping[str, DFPattern]]:
+    activation: str | None = None,
+) -> tuple[DFPattern, Mapping[str, DFPattern]]:
     """
     Create pattern for 2D convolution.
 
@@ -167,9 +175,9 @@ def make_conv2d_pattern(
 
 def make_matmul_pattern(
     with_bias: bool = False,
-    activation: str = None,
+    activation: str | None = None,
     transposed_rhs: bool = False,
-) -> Tuple[DFPattern, Mapping[str, DFPattern]]:
+) -> tuple[DFPattern, Mapping[str, DFPattern]]:
     """
     Create pattern for matrix multiplication.
 
@@ -356,7 +364,7 @@ def make_rms_norm_pattern():
 
 def make_matmul_dequantize_pattern(
     transposed_rhs: bool = False,
-) -> Tuple[DFPattern, Mapping[str, DFPattern]]:
+) -> tuple[DFPattern, Mapping[str, DFPattern]]:
     """
     Create pattern for matrix multiplication and dequantize operation.
 
@@ -396,7 +404,7 @@ def make_matmul_dequantize_pattern(
 
 def make_matmul_multiply_pattern(
     transposed_rhs: bool = False,
-) -> Tuple[DFPattern, Mapping[str, DFPattern]]:
+) -> tuple[DFPattern, Mapping[str, DFPattern]]:
     """
     Create pattern for matrix multiplication and multiply operation.
 
@@ -481,12 +489,12 @@ def make_attention_rewrite_pattern(
                 transposed = is_op("relax.permute_dims")(reshaped)
 
             def rewriter(matchings, x):
-                if matchings[tensor].struct_info.ndim != 4:
+                if matchings[tensor].ty.ndim != 4:
                     return None
                 if list(matchings[permuted].attrs.axes) != [0, 2, 1, 3]:
                     return None
-                before_reshape = matchings[permuted].struct_info.shape.values
-                after_reshape = matchings[shape].struct_info.values
+                before_reshape = matchings[permuted].ty.shape.values
+                after_reshape = matchings[shape].ty.values
                 if not (
                     len(before_reshape) == 4
                     and len(after_reshape) == 3
@@ -495,7 +503,7 @@ def make_attention_rewrite_pattern(
                     return None
                 if transpose and list(matchings[transposed].attrs.axes) != [0, 2, 1]:
                     return None
-                return x, x.struct_info.shape
+                return x, x.ty.shape
 
             if transpose:
                 return transposed, rewriter
@@ -506,11 +514,11 @@ def make_attention_rewrite_pattern(
                 transposed = is_op("relax.permute_dims")(tensor)
 
             def rewriter(matchings, x):
-                if matchings[tensor].struct_info.ndim != 3:
+                if matchings[tensor].ty.ndim != 3:
                     return None
                 if transpose and list(matchings[transposed].attrs.axes) != [0, 2, 1]:
                     return None
-                before_reshape = x.struct_info.shape.values
+                before_reshape = x.ty.shape.values
                 after_reshape = [before_reshape[0], before_reshape[1], 1, before_reshape[2]]
                 return R.reshape(x, after_reshape), after_reshape
 
@@ -528,10 +536,10 @@ def make_attention_rewrite_pattern(
             permuted = is_op("relax.permute_dims")(reshaped)
 
             def rewriter(matchings, x):
-                if matchings[tensor].struct_info.ndim != 3:
+                if matchings[tensor].ty.ndim != 3:
                     return None
-                before_reshape = matchings[tensor].struct_info.shape.values
-                after_reshape = matchings[shape].struct_info.values
+                before_reshape = matchings[tensor].ty.shape.values
+                after_reshape = matchings[shape].ty.values
                 if not (
                     len(before_reshape) == 3
                     and len(after_reshape) == 4
@@ -546,9 +554,9 @@ def make_attention_rewrite_pattern(
         elif layout == "BSH":
 
             def rewriter(matchings, x):
-                if matchings[tensor].struct_info.ndim != 3:
+                if matchings[tensor].ty.ndim != 3:
                     return None
-                return R.reshape(x, matchings[tensor].struct_info.shape.values)
+                return R.reshape(x, matchings[tensor].ty.shape.values)
 
             return tensor, rewriter
         else:
@@ -594,7 +602,7 @@ def make_attention_rewrite_pattern(
         if query is None or key is None or value is None:
             return original
         softmax_axis = matchings[softmax].attrs.axis
-        softmax_input_rank = len(matchings[softmax].struct_info.shape)
+        softmax_input_rank = len(matchings[softmax].ty.shape)
         if softmax_axis == -1:
             softmax_axis += softmax_input_rank
         if softmax_axis != softmax_input_rank - 1:
@@ -603,7 +611,7 @@ def make_attention_rewrite_pattern(
         _, s_kv, _, _ = key_shape
         if with_bias:
             bias = matchings[bias_raw]
-            bias_shape = list(bias.struct_info.shape)
+            bias_shape = list(bias.ty.shape)
             if bias_shape == [b * n, s, s_kv]:
                 bias = R.reshape(bias, [b, n, s, s_kv])
             elif bias_shape == [b * n, 1, s_kv]:

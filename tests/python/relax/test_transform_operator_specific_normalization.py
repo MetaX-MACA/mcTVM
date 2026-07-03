@@ -14,17 +14,20 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: F841
 
 """Test FNormalize usage"""
 
-import tvm
-import tvm.testing
-import tvm.relax.testing.transform
-
-from tvm import relax
-from tvm.script.parser import ir as I, relax as R, tir as T
-
 import pytest
+import tvm_ffi
+
+import tvm
+import tvm.relax.testing.transform
+import tvm.testing
+from tvm import relax
+from tvm.script.parser import ir as I
+from tvm.script.parser import relax as R
+from tvm.script.parser import tirx as T
 
 define_normalization = tvm.testing.parameter(True)
 
@@ -40,8 +43,8 @@ def custom_op(define_normalization):
 
     op_name = "custom_op.ignore_second_argument"
 
-    def infer_struct_info(call: relax.Call, context: relax.BlockBuilder):
-        return call.args[0].struct_info
+    def infer_ty(call: relax.Call, context: relax.BlockBuilder):
+        return call.args[0].ty
 
     def normalize(context: relax.BlockBuilder, call: relax.Call):
         if len(call.args) == 1:
@@ -53,7 +56,7 @@ def custom_op(define_normalization):
         return call.args[0]
 
     op_attrs = {
-        "FInferStructInfo": infer_struct_info,
+        "FInferType": infer_ty,
         "FLegalize": legalize,
         "FPurity": True,
     }
@@ -84,12 +87,12 @@ def test_normalization_suppressed_for_tvmscript(custom_op):
         return relax.Call(custom_op, [A])
 
     call_expr = func.body.blocks[0].bindings[0].value
-    assert isinstance(
-        call_expr, relax.Call
-    ), "Test implementation error, didn't extract the correct expression"
-    assert (
-        len(call_expr.args) == 1
-    ), "Expected TVMScript to suppress use of FNormalize, produce arguments as written"
+    assert isinstance(call_expr, relax.Call), (
+        "Test implementation error, didn't extract the correct expression"
+    )
+    assert len(call_expr.args) == 1, (
+        "Expected TVMScript to suppress use of FNormalize, produce arguments as written"
+    )
 
 
 @pytest.mark.skip_well_formed_check_before_transform
@@ -110,7 +113,7 @@ def test_normalization_applied_during_cpp_mutator(custom_op):
 
     After = tvm.relax.testing.transform.ApplyEmptyCppMutator()(Before)
 
-    assert not tvm.ir.structural_equal(Before, After)
+    assert not tvm_ffi.structural_equal(Before, After)
     tvm.ir.assert_structural_equal(Expected, After)
 
 
@@ -131,7 +134,7 @@ def test_normalization_applied_during_python_mutator(custom_op):
 
     after = EmptyPyExprMutator().visit_expr(before)
 
-    assert not tvm.ir.structural_equal(before, after)
+    assert not tvm_ffi.structural_equal(before, after)
     tvm.ir.assert_structural_equal(expected, after)
 
 
@@ -144,7 +147,7 @@ def test_normalized_call_node_is_well_formed(custom_op):
         def main(A: R.Tensor):
             return relax.Call(custom_op, [A, A])
 
-    assert relax.analysis.well_formed(Module)
+    relax.analysis.well_formed(Module)
 
 
 @pytest.mark.skip_well_formed_check_before_transform
@@ -163,9 +166,9 @@ def test_un_normalized_call_node_is_ill_formed(custom_op, define_normalization):
             return relax.Call(custom_op, [A])
 
     if define_normalization:
-        assert not relax.analysis.well_formed(Module)
+        assert not relax.analysis.check_well_formed(Module)
     else:
-        assert relax.analysis.well_formed(Module)
+        relax.analysis.well_formed(Module)
 
 
 @pytest.mark.skip_well_formed_check_before_transform
@@ -181,10 +184,10 @@ def test_normalize_to_inline_tuple_for_call_tir(custom_op):
             return relax.Call(
                 tvm.ir.Op.get("relax.call_tir"),
                 [cls.multiply_by_two, args],
-                sinfo_args=[A.struct_info],
+                ty_args=[A.ty],
             )
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def multiply_by_two(A: T.Buffer(16, "float32"), B: T.Buffer(16, "float32")):
             for i in range(16):
                 B[i] = A[i] * 2.0
@@ -198,17 +201,17 @@ def test_normalize_to_inline_tuple_for_call_tir(custom_op):
             return relax.Call(
                 tvm.ir.Op.get("relax.call_tir"),
                 [cls.multiply_by_two, relax.Tuple([A])],
-                sinfo_args=[A.struct_info],
+                ty_args=[A.ty],
             )
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def multiply_by_two(A: T.Buffer(16, "float32"), B: T.Buffer(16, "float32")):
             for i in range(16):
                 B[i] = A[i] * 2.0
 
     After = tvm.relax.testing.transform.ApplyEmptyCppMutator()(Before)
 
-    assert not tvm.ir.structural_equal(Before, After)
+    assert not tvm_ffi.structural_equal(Before, After)
     tvm.ir.assert_structural_equal(Expected, After)
 
 
@@ -228,10 +231,10 @@ def test_normalize_argument_to_inline_tuple_for_call_tir(custom_op):
             return relax.Call(
                 tvm.ir.Op.get("relax.call_tir"),
                 [cls.multiply_by_two, args],
-                sinfo_args=[args[0].struct_info],
+                ty_args=[args[0].ty],
             )
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def multiply_by_two(A: T.Buffer(16, "float32"), B: T.Buffer(16, "float32")):
             for i in range(16):
                 B[i] = A[i] * 2.0
@@ -244,17 +247,17 @@ def test_normalize_argument_to_inline_tuple_for_call_tir(custom_op):
             return relax.Call(
                 tvm.ir.Op.get("relax.call_tir"),
                 [cls.multiply_by_two, relax.Tuple([args[0]])],
-                sinfo_args=[args[0].struct_info],
+                ty_args=[args[0].ty],
             )
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def multiply_by_two(A: T.Buffer(16, "float32"), B: T.Buffer(16, "float32")):
             for i in range(16):
                 B[i] = A[i] * 2.0
 
     After = tvm.relax.testing.transform.ApplyEmptyCppMutator()(Before)
 
-    assert not tvm.ir.structural_equal(Before, After)
+    assert not tvm_ffi.structural_equal(Before, After)
     tvm.ir.assert_structural_equal(Expected, After)
 
 
@@ -275,10 +278,10 @@ def test_normalize_to_inline_tuple_for_call_tir_inplace(custom_op):
                 cls.multiply_by_two,
                 A,
                 inplace_indices=[0],
-                out_sinfo=[A.struct_info],
+                out_ty=[A.ty],
             )
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def multiply_by_two(A: T.Buffer(16, "float32")):
             for i in range(16):
                 A[i] = A[i] * 2.0
@@ -295,17 +298,17 @@ def test_normalize_to_inline_tuple_for_call_tir_inplace(custom_op):
                 tvm.ir.Op.get("relax.call_tir_inplace"),
                 [cls.multiply_by_two, args],
                 attrs=inplace_attrs,
-                sinfo_args=[A.struct_info],
+                ty_args=[A.ty],
             )
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def multiply_by_two(A: T.Buffer(16, "float32")):
             for i in range(16):
                 A[i] = A[i] * 2.0
 
     After = tvm.relax.testing.transform.ApplyEmptyCppMutator()(Before)
 
-    assert not tvm.ir.structural_equal(Before, After)
+    assert not tvm_ffi.structural_equal(Before, After)
     tvm.ir.assert_structural_equal(Expected, After)
 
 
@@ -325,16 +328,16 @@ def test_normalize_to_inline_tuple_for_call_tir_with_grad(custom_op):
             return R.call_tir_with_grad(
                 cls.multiply_by_two,
                 A,
-                out_sinfo=[A.struct_info],
+                out_ty=[A.ty],
                 te_grad_name="f_grad",
             )
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def multiply_by_two(A: T.Buffer(16, "float32"), B: T.Buffer(16, "float32")):
             for i in range(16):
                 B[i] = A[i] * 2.0
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def f_grad(
             A: T.Buffer(16, "float32"), B: T.Buffer(16, "float32"), Grad: T.Buffer(16, "float32")
         ):
@@ -353,15 +356,15 @@ def test_normalize_to_inline_tuple_for_call_tir_with_grad(custom_op):
                 tvm.ir.Op.get("relax.call_tir_with_grad"),
                 [cls.multiply_by_two, args],
                 attrs=with_grad_attrs,
-                sinfo_args=[A.struct_info],
+                ty_args=[A.ty],
             )
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def multiply_by_two(A: T.Buffer(16, "float32"), B: T.Buffer(16, "float32")):
             for i in range(16):
                 B[i] = A[i] * 2.0
 
-        @T.prim_func(private=True)
+        @T.prim_func(private=True, s_tir=True)
         def f_grad(
             A: T.Buffer(16, "float32"), B: T.Buffer(16, "float32"), Grad: T.Buffer(16, "float32")
         ):
@@ -370,7 +373,7 @@ def test_normalize_to_inline_tuple_for_call_tir_with_grad(custom_op):
 
     After = tvm.relax.testing.transform.ApplyEmptyCppMutator()(Before)
 
-    assert not tvm.ir.structural_equal(Before, After)
+    assert not tvm_ffi.structural_equal(Before, After)
     tvm.ir.assert_structural_equal(Expected, After)
 
 

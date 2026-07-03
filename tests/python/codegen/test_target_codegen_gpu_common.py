@@ -21,34 +21,56 @@ import pytest
 
 import tvm
 import tvm.testing
-from tvm import te
+from tvm.script import ir as I
+from tvm.script import tirx as T
+from tvm.testing import env
 
 
-@tvm.testing.requires_gpu
-@tvm.testing.parametrize_targets("cuda", "metal", "vulkan -supports_int64=1", "opencl", "maca")
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
+@pytest.mark.parametrize(
+    "target",
+    [
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param("maca", marks=pytest.mark.gpu),
+        pytest.param("metal", marks=pytest.mark.gpu),
+        pytest.param({"kind": "vulkan", "supports_int64": True}, marks=pytest.mark.gpu),
+        pytest.param("opencl", marks=pytest.mark.gpu),
+    ],
+)
 @pytest.mark.parametrize("dtype", ["int32", "uint32", "int64", "uint64"])
-def test_int_intrin(target, dev, dtype):
+def test_int_intrin(target, dtype):
+    if not tvm.testing.device_enabled(target):
+        pytest.skip(f"{target} not enabled")
+    dev = tvm.device(target["kind"] if isinstance(target, dict) else target)
     test_funcs = [
-        (tvm.tir.clz, lambda x, dtype: int(dtype[-2:]) - (len(bin(x)) - 2)),
+        (T.clz, lambda x, dtype: int(dtype[-2:]) - (len(bin(x)) - 2)),
     ]
 
-    def run_test(tvm_intrin, np_func, dtype):
+    for tvm_intrin, np_func in test_funcs:
         n = 128
-        A = te.placeholder((n,), name="A", dtype=dtype)
-        B = te.compute(A.shape, lambda *i: tvm_intrin(A(*i)), name="B")
-        func = te.create_prim_func([A, B])
-        sch = tvm.tir.Schedule(func)
-        (x,) = sch.get_loops(sch.get_block("B"))
-        sch.bind(x, "threadIdx.x")
-        f = tvm.compile(sch.mod, target=target)
-        a = tvm.runtime.tensor(np.random.randint(0, 100000, size=n).astype(A.dtype), dev)
-        b = tvm.runtime.tensor(np.zeros(shape=(n,)).astype(B.dtype), dev)
+
+        @I.ir_module(s_tir=True)
+        class Module:
+            @T.prim_func(s_tir=True)
+            def main(
+                A: T.Buffer((n,), dtype),
+                B: T.Buffer((n,), dtype),
+            ):
+                T.func_attr({"tirx.noalias": True})
+                for i0 in T.thread_binding(n, thread="threadIdx.x"):
+                    with T.sblock("B"):
+                        v_i0 = T.axis.spatial(n, i0)
+                        T.reads(A[v_i0])
+                        T.writes(B[v_i0])
+                        B[v_i0] = tvm_intrin(A[v_i0])
+
+        f = tvm.compile(Module, target=target)
+        a = tvm.runtime.tensor(np.random.randint(0, 100000, size=n).astype(dtype), dev)
+        b = tvm.runtime.tensor(np.zeros(shape=(n,)).astype(dtype), dev)
         f(a, b)
         ref = np.vectorize(partial(np_func, dtype=dtype))(a.numpy())
         tvm.testing.assert_allclose(b.numpy(), ref)
-
-    for func in test_funcs:
-        run_test(*func, dtype)
 
 
 if __name__ == "__main__":

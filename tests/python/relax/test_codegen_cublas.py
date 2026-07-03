@@ -14,11 +14,16 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: RUF005
 import numpy as np
 import pytest
 
 import tvm
 import tvm.testing
+from tvm.testing import env
+
+pytest.importorskip("scipy")  # tvm.topi.testing imports scipy
+
 import tvm.topi.testing
 from tvm import relax
 from tvm.relax.backend.cuda.cublas import partition_for_cublas
@@ -38,7 +43,10 @@ def reset_seed():
     np.random.seed(0)
 
 
-pytestmark = tvm.testing.requires_cublas.marks()
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.skipif(not env.has_cublas(), reason="need cublas"),
+]
 
 
 def build_and_run(mod, inputs_np, target, legalize=False, cuda_graph=False):
@@ -72,7 +80,7 @@ def get_result_with_relax_cublas_offload(mod, np_inputs, cuda_graph=False, bind_
 def _to_concrete_shape(symbolic_shape, var_table):
     result = []
     for dim in symbolic_shape:
-        if not isinstance(dim, tvm.tir.expr.Var):
+        if not isinstance(dim, tvm.tirx.expr.Var):
             result.append(dim)
             continue
 
@@ -84,8 +92,8 @@ def _to_concrete_shape(symbolic_shape, var_table):
 
 
 _vars = {
-    "a": tvm.tir.expr.Var("a", "int64"),
-    "b": tvm.tir.expr.Var("b", "int64"),
+    "a": tvm.tirx.expr.Var("a", "int64"),
+    "b": tvm.tirx.expr.Var("b", "int64"),
 }
 
 
@@ -299,7 +307,8 @@ def test_matmul_igemm_offload(
     tvm.testing.assert_allclose(out, ref, rtol=1e-2, atol=1e-2)
 
 
-@tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 @pytest.mark.skipif(ml_dtypes is None, reason="requires ml_dtypes to be installed")
 @pytest.mark.parametrize(
     "x_shape, y_shape, transpose_y, out_dtype",
@@ -337,7 +346,8 @@ def test_matmul_fp8_offload(
     tvm.testing.assert_allclose(out, ref_out, rtol=1e-3, atol=1e-3)
 
 
-@tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 @pytest.mark.skipif(ml_dtypes is None, reason="requires ml_dtypes to be installed")
 def test_matmul_fp8_dequantize_offload():
     x_shape = (10, 32)
@@ -363,7 +373,8 @@ def test_matmul_fp8_dequantize_offload():
     tvm.testing.assert_allclose(out, ref, rtol=1e-3, atol=1e-3)
 
 
-@tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 @pytest.mark.skipif(ml_dtypes is None, reason="requires ml_dtypes to be installed")
 def test_matmul_fp8_multiply_offload():
     x_shape = (10, 32)
@@ -548,7 +559,7 @@ def test_cublas_matmul_cuda_graph():
     out = get_result_with_relax_cublas_offload(Mod, inputs, cuda_graph=True)
 
     with tvm.target.Target("cuda"):
-        mod = tvm.tir.transform.DefaultGPUSchedule()(mod)
+        mod = tvm.s_tir.transform.DefaultGPUSchedule()(mod)
     ref = build_and_run(mod, inputs, "llvm", legalize=True)
     tvm.testing.assert_allclose(out, ref, rtol=1e-2, atol=1e-2)
 

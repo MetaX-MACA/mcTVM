@@ -21,20 +21,22 @@
  * \file src/target/target_kind.cc
  * \brief Target kind registry
  */
+#include <dlpack/dlpack.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/expr.h>
 #include <tvm/runtime/device_api.h>
+#include <tvm/runtime/logging.h>
 #include <tvm/target/target.h>
 #include <tvm/target/target_kind.h>
 
-#include <algorithm>
-
-#include "../node/attr_registry.h"
+#include "../ir/attr_registry.h"
 #include "../support/utils.h"
-#include "./parsers/cpu.h"
+#include "./canonicalizer/llvm/canonicalize.h"
 
 namespace tvm {
+
+namespace refl = ffi::reflection;
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
@@ -47,16 +49,17 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            })
       .def("__data_from_json__", [](const ffi::String& name) {
         auto kind = TargetKind::Get(name);
-        ICHECK(kind.has_value()) << "Cannot find target kind \'" << name << '\'';
+        TVM_FFI_ICHECK(kind.has_value()) << "Cannot find target kind \'" << name << '\'';
         return kind.value();
       });
 }
 
-TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
-    .set_dispatch<TargetKindNode>([](const ObjectRef& obj, ReprPrinter* p) {
-      const TargetKind& kind = Downcast<TargetKind>(obj);
-      p->stream << kind->name;
-    });
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::TypeAttrDef<TargetKindNode>().def(
+      refl::type_attr::kRepr,
+      [](TargetKind kind, ffi::Function) -> ffi::String { return kind->name; });
+}
 
 /**********  Registry-related code  **********/
 
@@ -69,8 +72,8 @@ ffi::Array<ffi::String> TargetKindRegEntry::ListTargetKinds() {
 ffi::Map<ffi::String, ffi::String> TargetKindRegEntry::ListTargetKindOptions(
     const TargetKind& target_kind) {
   ffi::Map<ffi::String, ffi::String> options;
-  for (const auto& kv : target_kind->key2vtype_) {
-    options.Set(kv.first, kv.second.type_key);
+  for (const auto& e : target_kind->schema_.ListOptions()) {
+    options.Set(e.key, e.type_str);
   }
   return options;
 }
@@ -96,195 +99,13 @@ ffi::Optional<TargetKind> TargetKind::Get(const ffi::String& target_kind_name) {
   return reg->kind_;
 }
 
-/**********  Utility functions  **********/
-
-/*!
- * \brief Extract a string from the string with the given prefix.
- * For example, when `str` is "sm_20" and `prefix` is "sm_".
- * This function first checks if `str` starts with `prefix`,
- * then return the integer 20 after the `prefix`
- * \param str The string to be extracted
- * \param prefix The prefix to be checked
- * \return A string, the extracted string. "" if the check fails
- */
-std::string ExtractStringWithPrefix(const std::string& str, const std::string& prefix) {
-  if (str.find(prefix) != 0) return "";
-  std::size_t pos = prefix.length();
-  while (pos < str.length() && (std::isdigit(str[pos]) || std::isalpha(str[pos]))) {
-    ++pos;
-  }
-  return str.substr(prefix.length(), pos - prefix.length());
-}
-
-/*!
- * \brief Using TVM DeviceAPI to detect the device flag
- * \param device The device to be detected
- * \param flag The device flag to be detected
- * \param val The detected value
- * \return A boolean indicating if detection succeeds
- */
-static bool DetectDeviceFlag(Device device, runtime::DeviceAttrKind flag, ffi::Any* val) {
-  using runtime::DeviceAPI;
-  DeviceAPI* api = DeviceAPI::Get(device, true);
-  // Check if compiled with the corresponding device api
-  if (api == nullptr) {
-    return false;
-  }
-  // Check if the device exists
-  api->GetAttr(device, runtime::kExist, val);
-  int exists = val->cast<int>();
-  if (!exists) {
-    return false;
-  }
-  // Get the arch of the device
-  DeviceAPI::Get(device)->GetAttr(device, flag, val);
-  return true;
-}
-
-void CheckOrSetAttr(ffi::Map<ffi::String, ffi::Any>* attrs, const ffi::String& name,
-                    const ffi::String& value) {
-  auto iter = attrs->find(name);
-  if (iter == attrs->end()) {
-    attrs->Set(name, value);
-  } else {
-    auto str = (*iter).second.try_cast<ffi::String>();
-    ICHECK(str && str.value() == value) << "ValueError: Expects \"" << name << "\" to be \""
-                                        << value << "\", but gets: " << (*iter).second;
-  }
-}
-
-/**********  Target kind attribute updaters  **********/
-
-/*!
- * \brief Update the attributes in the CUDA target.
- * \param target The Target to update
- * \return The updated attributes
- */
-TargetJSON UpdateCUDAAttrs(TargetJSON target) {
-  // Update -arch=sm_xx
-  if (target.count("arch")) {
-    // If -arch has been specified, validate the correctness
-    ffi::String archStr = Downcast<ffi::String>(target.at("arch"));
-    ICHECK(support::StartsWith(archStr, "sm_"))
-        << "ValueError: CUDA target gets an invalid CUDA arch: -arch=" << archStr;
-  } else {
-    // Use the compute version of the first CUDA GPU instead
-    int archInt;
-    ffi::Any version;
-    if (!DetectDeviceFlag({kDLCUDA, 0}, runtime::kComputeVersion, &version)) {
-      LOG(WARNING) << "Unable to detect CUDA version, default to \"-arch=sm_50\" instead";
-      archInt = 50;
-    } else {
-      archInt = std::stod(version.cast<std::string>()) * 10 + 0.1;
-    }
-    target.Set("arch", ffi::String("sm_") + std::to_string(archInt));
-  }
-  return target;
-}
-
-/*!
- * \brief Update the attributes in the LLVM NVPTX target.
- * \param target The Target to update
- * \return The updated attributes
- */
-TargetJSON UpdateNVPTXAttrs(TargetJSON target) {
-  CheckOrSetAttr(&target, "mtriple", "nvptx64-nvidia-cuda");
-  // Update -mcpu=sm_xx
-  if (target.count("mcpu")) {
-    // If -mcpu has been specified, validate the correctness
-    ffi::String mcpu = Downcast<ffi::String>(target.at("mcpu"));
-    ICHECK(support::StartsWith(mcpu, "sm_"))
-        << "ValueError: NVPTX target gets an invalid CUDA arch: -mcpu=" << mcpu;
-  } else {
-    // Use the compute version of the first CUDA GPU instead
-    int arch;
-    ffi::Any version;
-    if (!DetectDeviceFlag({kDLCUDA, 0}, runtime::kComputeVersion, &version)) {
-      LOG(WARNING) << "Unable to detect CUDA version, default to \"-mcpu=sm_50\" instead";
-      arch = 50;
-    } else {
-      arch = std::stod(version.cast<std::string>()) * 10 + 0.1;
-    }
-    target.Set("mcpu", ffi::String("sm_") + std::to_string(arch));
-  }
-  return target;
-}
-
-/*!
- * \brief Update the attributes in the LLVM ROCm target.
- * \param target The Target to update
- * \return The updated attributes
- */
-TargetJSON UpdateROCmAttrs(TargetJSON target) {
-  CheckOrSetAttr(&target, "mtriple", "amdgcn-amd-amdhsa-hcc");
-  // Update -mcpu=gfx
-  std::string arch = "gfx900";
-  if (target.count("mcpu")) {
-    ffi::String mcpu = Downcast<ffi::String>(target.at("mcpu"));
-    arch = ExtractStringWithPrefix(mcpu, "gfx");
-    ICHECK(!arch.empty()) << "ValueError: ROCm target gets an invalid GFX version: -mcpu=" << mcpu;
-  } else {
-    ffi::Any val;
-    if (const auto f_get_rocm_arch = tvm::ffi::Function::GetGlobal("tvm_callback_rocm_get_arch")) {
-      arch = (*f_get_rocm_arch)().cast<std::string>();
-    }
-    target.Set("mcpu", ffi::String(arch));
-  }
-  // Update -mattr before ROCm 3.5:
-  //   Before ROCm 3.5 we needed code object v2, starting
-  //   with 3.5 we need v3 (this argument disables v3)
-
-  ffi::Any val;
-  int version;
-  if (!DetectDeviceFlag({kDLROCM, 0}, runtime::kApiVersion, &val)) {
-    LOG(WARNING) << "Unable to detect ROCm version, assuming >= 3.5";
-    version = 305;
-  } else {
-    version = val.cast<int>();
-  }
-  if (version < 305) {
-    ffi::Array<ffi::String> mattr;
-    if (target.count("mattr")) {
-      mattr = Downcast<ffi::Array<ffi::String>>(target.at("mattr"));
-    }
-    mattr.push_back("-code-object-v3");
-    target.Set("mattr", mattr);
-  }
-  return target;
-}
-
-/*!
- * \brief Update the attributes in the LLVM MACA target.
- * \param target The Target to update
- * \return The updated attributes
- */
-TargetJSON UpdateMACAAttrs(TargetJSON target) {
-  CheckOrSetAttr(&target, "mtriple", "mxc-metax-macahca");
-  // Update -mcpu=xcore1000
-  std::string arch = "xcore1000";
-  if (target.count("mcpu")) {
-    ffi::String mcpu = Downcast<ffi::String>(target.at("mcpu"));
-    arch = ExtractStringWithPrefix(mcpu, "xcore");
-    ICHECK(!arch.empty()) << "ValueError: MACA target gets an invalid XCORE version: -mcpu="
-                          << mcpu;
-  } else {
-    if (auto f_get_maca_arch = tvm::ffi::Function::GetGlobal("tvm_callback_maca_get_arch")) {
-      arch = (*f_get_maca_arch)().cast<std::string>();
-    }
-    target.Set("mcpu", ffi::String(arch));
-  }
-
-  return target;
-}
-
 /*!
  * \brief Test Target Parser
  * \param target The Target to update
  * \return The updated attributes
  */
-TargetJSON TestTargetParser(TargetJSON target) {
-  ffi::Map<ffi::String, ffi::Any> features = {{"is_test", true}};
-  target.Set("features", features);
+ffi::Map<ffi::String, ffi::Any> TestTargetParser(ffi::Map<ffi::String, ffi::Any> target) {
+  target.Set("feature.is_test", true);
   return target;
 }
 
@@ -315,7 +136,7 @@ TVM_REGISTER_TARGET_KIND("llvm", kDLCPU)
     .set_default_keys({"cpu"})
     // Force the external codegen kind attribute to be registered, even if no external
     // codegen targets are enabled by the TVM build.
-    .set_target_parser(tvm::target::parsers::cpu::ParseTarget);
+    .set_target_canonicalizer(tvm::target::canonicalizer::llvm::Canonicalize);
 
 // Note regarding the "cl-opt" attribute:
 // Each string in the array has the format
@@ -345,140 +166,37 @@ TVM_REGISTER_TARGET_KIND("c", kDLCPU)
     .add_attr_option<int64_t>("workspace-byte-alignment")
     .add_attr_option<int64_t>("constants-byte-alignment")
     .set_default_keys({"cpu"})
-    .set_target_parser(tvm::target::parsers::cpu::ParseTarget);
-
-TVM_REGISTER_TARGET_KIND("cuda", kDLCUDA)
-    .add_attr_option<ffi::String>("mcpu")
-    .add_attr_option<ffi::String>("arch")
-    .add_attr_option<int64_t>("max_shared_memory_per_block")
-    .add_attr_option<int64_t>("max_threads_per_block")
-    .add_attr_option<int64_t>("thread_warp_size", 32)
-    .add_attr_option<int64_t>("registers_per_block")
-    .add_attr_option<int64_t>("l2_cache_size_bytes")
-    .add_attr_option<int64_t>("max_num_threads", 1024)  // TODO(@zxybazh): deprecate it
-    .set_default_keys({"cuda", "gpu"})
-    .set_target_parser(UpdateCUDAAttrs);
-
-TVM_REGISTER_TARGET_KIND("nvptx", kDLCUDA)
-    .add_attr_option<ffi::String>("mcpu")
-    .add_attr_option<ffi::String>("mtriple")
-    .add_attr_option<int64_t>("max_num_threads", 1024)
-    .add_attr_option<int64_t>("thread_warp_size", 32)
-    .set_default_keys({"cuda", "gpu"})
-    .set_target_parser(UpdateNVPTXAttrs);
-
-TVM_REGISTER_TARGET_KIND("rocm", kDLROCM)
-    .add_attr_option<ffi::String>("mcpu")
-    .add_attr_option<ffi::String>("mtriple")
-    .add_attr_option<ffi::Array<ffi::String>>("mattr")
-    // TODO(masahi): Support querying from a target device
-    // On RDNA cards, thread_warp_size should be 32
-    .add_attr_option<int64_t>("max_num_threads", 256)
-    .add_attr_option<int64_t>("max_threads_per_block", 256)
-    .add_attr_option<int64_t>("max_shared_memory_per_block", 65536)
-    .add_attr_option<int64_t>("thread_warp_size", 64)
-    .set_default_keys({"rocm", "gpu"})
-    .set_target_parser(UpdateROCmAttrs);
-
-TVM_REGISTER_TARGET_KIND("opencl", kDLOpenCL)
-    .add_attr_option<int64_t>("max_threads_per_block", 256)
-    .add_attr_option<int64_t>("max_shared_memory_per_block", 16384)
-    .add_attr_option<int64_t>("max_num_threads", 256)
-    .add_attr_option<int64_t>("thread_warp_size", 1)
-    .add_attr_option<int64_t>("texture_spatial_limit", 16384)
-    // Faced that Qualcomm OpenCL runtime crashed without any error message in
-    // the case when the number of kernel arguments was pretty big. OpenCL doesn't
-    // specify any limitations on the number of kernel arguments. max_function_args
-    // equals to 128 looks like a reasonable number of kernel arguments.
-    .add_attr_option<int64_t>("max_function_args", 128)
-    .add_attr_option<int64_t>("image_base_address_alignment", 64)
-    .set_default_keys({"opencl", "gpu"});
-
-// The metal has some limitations on the number of input parameters. This is why attribute
-// `max_function_args` was introduced. It specifies the maximum number of kernel argumetns. More
-// information about this limitation can be found here:
-// https://developer.apple.com/documentation/metal/buffers/about_argument_buffers?language=objc
-// See also https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf
-TVM_REGISTER_TARGET_KIND("metal", kDLMetal)
-    .add_attr_option<int64_t>("max_num_threads", 256)
-    .add_attr_option<int64_t>("max_threads_per_block", 256)
-    .add_attr_option<int64_t>("max_shared_memory_per_block", 32768)
-    .add_attr_option<int64_t>("thread_warp_size", 16)
-    .add_attr_option<int64_t>("max_function_args", 31)
-    .set_default_keys({"metal", "gpu"});
-
-TVM_REGISTER_TARGET_KIND("vulkan", kDLVulkan)
-    .add_attr_option<ffi::Array<ffi::String>>("mattr")
-    // Feature support
-    .add_attr_option<bool>("supports_float16")
-    .add_attr_option<bool>("supports_float32", true)
-    .add_attr_option<bool>("supports_float64")
-    .add_attr_option<bool>("supports_int8")
-    .add_attr_option<bool>("supports_int16")
-    .add_attr_option<bool>("supports_int32", true)
-    .add_attr_option<bool>("supports_int64")
-    .add_attr_option<bool>("supports_8bit_buffer")
-    .add_attr_option<bool>("supports_16bit_buffer")
-    .add_attr_option<bool>("supports_storage_buffer_storage_class")
-    .add_attr_option<bool>("supports_push_descriptor")
-    .add_attr_option<bool>("supports_dedicated_allocation")
-    .add_attr_option<bool>("supports_integer_dot_product")
-    .add_attr_option<bool>("supports_cooperative_matrix")
-    .add_attr_option<int64_t>("supported_subgroup_operations")
-    // Physical device limits
-    .add_attr_option<int64_t>("max_num_threads", 256)
-    .add_attr_option<int64_t>("max_threads_per_block", 256)
-    .add_attr_option<int64_t>("thread_warp_size", 1)
-    .add_attr_option<int64_t>("max_block_size_x")
-    .add_attr_option<int64_t>("max_block_size_y")
-    .add_attr_option<int64_t>("max_block_size_z")
-    .add_attr_option<int64_t>("max_push_constants_size")
-    .add_attr_option<int64_t>("max_uniform_buffer_range")
-    .add_attr_option<int64_t>("max_storage_buffer_range")
-    .add_attr_option<int64_t>("max_per_stage_descriptor_storage_buffer")
-    .add_attr_option<int64_t>("max_shared_memory_per_block")
-    // Other device properties
-    .add_attr_option<ffi::String>("device_type")
-    .add_attr_option<ffi::String>("device_name")
-    .add_attr_option<ffi::String>("driver_name")
-    .add_attr_option<int64_t>("driver_version")
-    .add_attr_option<int64_t>("vulkan_api_version")
-    .add_attr_option<int64_t>("max_spirv_version")
-    // Tags
-    .set_default_keys({"vulkan", "gpu"});
-
-TVM_REGISTER_TARGET_KIND("webgpu", kDLWebGPU)
-    .add_attr_option<int64_t>("max_num_threads", 256)
-    .set_default_keys({"webgpu", "gpu"});
-
-TVM_REGISTER_TARGET_KIND("hexagon", kDLHexagon)
-    .add_attr_option<ffi::Array<ffi::String>>("mattr")
-    .add_attr_option<ffi::String>("mcpu")
-    .add_attr_option<ffi::String>("mtriple")
-    .add_attr_option<ffi::Array<ffi::String>>("llvm-options")
-    .add_attr_option<int64_t>("num-cores")
-    .add_attr_option<int64_t>("vtcm-capacity")
-    .set_default_keys({"hexagon", "cpu"});
-
-TVM_REGISTER_TARGET_KIND("maca", kDLMACA)
-    .add_attr_option<ffi::String>("mcpu")
-    .add_attr_option<ffi::String>("mtriple")
-    .add_attr_option<ffi::Array<ffi::String>>("mattr")
-    .add_attr_option<int64_t>("max_num_threads", 1024)
-    .add_attr_option<int64_t>("max_threads_per_block", 1024)
-    .add_attr_option<int64_t>("max_shared_memory_per_block", 65536)
-    .add_attr_option<int64_t>("thread_warp_size", 64)
-    .add_attr_option<int64_t>("max_local_memory_per_block", 4095)
-    .set_default_keys({"maca", "gpu"})
-    .set_target_parser(UpdateMACAAttrs);
+    .set_target_canonicalizer(tvm::target::canonicalizer::llvm::Canonicalize);
 
 TVM_REGISTER_TARGET_KIND("ext_dev", kDLExtDev);
 
 TVM_REGISTER_TARGET_KIND("composite", kDLCPU)  // line break
-    .add_attr_option<ffi::Array<Target>>("devices");
+    .add_attr_option<ffi::Array<Target>>(
+        "devices",
+        ir::ConfigSchema::AttrValidator(ffi::TypedFunction<ffi::Any(ffi::Any)>(  //
+            [](ffi::Any val) -> ffi::Any {
+              // Allow elements to be strings or dicts, converting them to Target objects.
+              if (val.try_cast<ffi::Array<Target>>().has_value()) return val;
+              auto arr = val.cast<ffi::Array<ffi::Any>>();
+              ffi::Array<Target> result;
+              for (const auto& elem : arr) {
+                if (auto t = elem.try_cast<Target>()) {
+                  result.push_back(t.value());
+                } else if (auto s = elem.try_cast<ffi::String>()) {
+                  result.push_back(Target(s.value()));
+                } else if (auto m = elem.try_cast<ffi::Map<ffi::String, ffi::Any>>()) {
+                  result.push_back(Target(m.value()));
+                } else {
+                  TVM_FFI_THROW(TypeError)
+                      << "Expected Target, string, or dict in 'devices' array, got '"
+                      << elem.GetTypeKey() << "'";
+                }
+              }
+              return ffi::Any(result);
+            })));
 
 TVM_REGISTER_TARGET_KIND("test", kDLCPU)  // line break
-    .set_target_parser(TestTargetParser);
+    .set_target_canonicalizer(TestTargetParser);
 
 /**********  Registry  **********/
 

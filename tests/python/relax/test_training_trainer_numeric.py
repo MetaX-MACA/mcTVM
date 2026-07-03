@@ -14,16 +14,17 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import pytest
-import tvm.testing
 import numpy as np
+import pytest
 
 import tvm
-from tvm import relax, TVMError
+import tvm.testing
+from tvm import relax
 from tvm.relax.training import SetupTrainer, Trainer
-from tvm.relax.training.optimizer import SGD, Adam
 from tvm.relax.training.loss import MSELoss
-from tvm.script import ir as I, relax as R
+from tvm.relax.training.optimizer import SGD, Adam
+from tvm.script import ir as I
+from tvm.script import relax as R
 
 
 def _get_backbone():
@@ -52,20 +53,22 @@ def _make_dataset():
     return [[np.ones((1, 10)).astype(np.float32), np.array([[0, 0, 1, 0, 0]], np.float32)]] * N
 
 
-@tvm.testing.parametrize_targets("llvm")
-def test_execute(target, dev):
+@pytest.mark.skipif(not tvm.testing.device_enabled("llvm"), reason="llvm not enabled")
+def test_execute():
+    target = "llvm"
+    dev = tvm.device(target)
     backbone = _get_backbone()
-    pred_sinfo = relax.TensorStructInfo((1, 5), "float32")
+    pred_ty = relax.TensorType((1, 5), "float32")
 
     setup_trainer = SetupTrainer(
         MSELoss(reduction="sum"),
         Adam(0.01),
-        [pred_sinfo, pred_sinfo],
+        [pred_ty, pred_ty],
     )
 
     train_mod = setup_trainer(backbone)
     ex = tvm.compile(train_mod, target)
-    vm = relax.VirtualMachine(ex, dev, profile=True)
+    vm = relax.VirtualMachine(ex, dev)
 
     trainer = Trainer(train_mod, vm, dev, False)
     trainer.zero_init_params()
@@ -74,18 +77,19 @@ def test_execute(target, dev):
     dataset = _make_dataset()
     trainer.predict(dataset[0][0])
     trainer.update(dataset[0][0], dataset[0][1])
-    trainer.profile_adjoint(dataset[0][0], dataset[0][1])
 
 
-@tvm.testing.parametrize_targets("llvm")
-def test_execute_numeric(target, dev):
+@pytest.mark.skipif(not tvm.testing.device_enabled("llvm"), reason="llvm not enabled")
+def test_execute_numeric():
+    target = "llvm"
+    dev = tvm.device(target)
     backbone = _get_backbone()
-    pred_sinfo = relax.TensorStructInfo((1, 5), "float32")
+    pred_ty = relax.TensorType((1, 5), "float32")
 
     setup_trainer = SetupTrainer(
         MSELoss(reduction="sum"),
         SGD(0.01),
-        [pred_sinfo, pred_sinfo],
+        [pred_ty, pred_ty],
     )
 
     train_mod = setup_trainer(backbone)
@@ -106,15 +110,17 @@ def test_execute_numeric(target, dev):
     tvm.testing.assert_allclose(result.numpy(), result_expected)
 
 
-@tvm.testing.parametrize_targets("llvm")
-def test_load_export_params(target, dev):
+@pytest.mark.skipif(not tvm.testing.device_enabled("llvm"), reason="llvm not enabled")
+def test_load_export_params():
+    target = "llvm"
+    dev = tvm.device(target)
     backbone = _get_backbone()
-    pred_sinfo = relax.TensorStructInfo((1, 5), "float32")
+    pred_ty = relax.TensorType((1, 5), "float32")
 
     setup_trainer = SetupTrainer(
         MSELoss(reduction="sum"),
         SGD(0.01),
-        [pred_sinfo, pred_sinfo],
+        [pred_ty, pred_ty],
     )
 
     train_mod = setup_trainer(backbone)
@@ -141,15 +147,17 @@ def test_load_export_params(target, dev):
     )
 
 
-@tvm.testing.parametrize_targets("llvm")
-def test_setting_error(target, dev):
+@pytest.mark.skipif(not tvm.testing.device_enabled("llvm"), reason="llvm not enabled")
+def test_setting_error():
+    target = "llvm"
+    dev = tvm.device(target)
     backbone = _get_backbone()
-    pred_sinfo = relax.TensorStructInfo((1, 5), "float32")
+    pred_ty = relax.TensorType((1, 5), "float32")
 
     setup_trainer = SetupTrainer(
         MSELoss(reduction="sum"),
         SGD(0.01),
-        [pred_sinfo, pred_sinfo],
+        [pred_ty, pred_ty],
     )
 
     train_mod = setup_trainer(backbone)
@@ -160,9 +168,9 @@ def test_setting_error(target, dev):
 
     dataset = _make_dataset()
     # parameters are not inited
-    with pytest.raises(TVMError):
+    with pytest.raises(RuntimeError):
         trainer.predict(dataset[0][0])
-    with pytest.raises(TVMError):
+    with pytest.raises(RuntimeError):
         trainer.update(dataset[0][0], dataset[0][1])
 
 

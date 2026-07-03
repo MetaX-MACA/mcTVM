@@ -24,16 +24,16 @@
 #include <tvm/arith/analyzer.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
-#include <tvm/tir/analysis.h>
-#include <tvm/tir/expr.h>
-#include <tvm/tir/expr_functor.h>
-#include <tvm/tir/op.h>
-#include <tvm/tir/stmt_functor.h>
+#include <tvm/tirx/analysis.h>
+#include <tvm/tirx/expr.h>
+#include <tvm/tirx/expr_functor.h>
+#include <tvm/tirx/op.h>
+#include <tvm/tirx/stmt_functor.h>
 
 namespace tvm {
 namespace arith {
 
-using namespace tir;
+using namespace tirx;
 
 // Linear equation, the components can be undefined.
 struct LinearEqEntry {
@@ -54,10 +54,10 @@ class LinearEqDetector : public ExprFunctor<LinearEqEntry(const PrimExpr&, const
     *ret = VisitExpr(e, e);
     if (fail_) return false;
     if (!ret->base.defined()) {
-      ret->base = make_zero(var_.dtype());
+      ret->base = IntImm(var_.ty(), 0);
     }
     if (!ret->coeff.defined()) {
-      ret->coeff = make_zero(var_.dtype());
+      ret->coeff = IntImm(var_.ty(), 0);
     }
     return true;
   }
@@ -101,14 +101,14 @@ class LinearEqDetector : public ExprFunctor<LinearEqEntry(const PrimExpr&, const
   LinearEqEntry VisitExpr_(const VarNode* op, const PrimExpr& e) final {
     LinearEqEntry ret;
     if (op == var_.get()) {
-      auto dtype = op->dtype;
-      ret.coeff = make_const(DataType::Int(dtype.bits(), dtype.lanes()), 1);
+      PrimType dtype = op->ty();
+      ret.coeff = MakeConst(PrimType::Int(dtype.bits(), dtype.lanes()), 1);
     } else {
       ret.base = e;
     }
     return ret;
   }
-  LinearEqEntry VisitExprDefault_(const Object* op, const PrimExpr& e) final {
+  LinearEqEntry VisitExprDefault_(const ffi::Object* op, const PrimExpr& e) final {
     if (fail_) return LinearEqEntry();
     if (UsesVar(e, [this](const VarNode* var) { return var == var_.get(); })) {
       fail_ = true;
@@ -174,11 +174,11 @@ bool DetectClipBound(const PrimExpr& cond,
                      std::unordered_map<const VarNode*, IntervalEntry>* bmap) {
   int flag = 0;
   Var var;
-  auto fvisit = [&bmap, &flag, &var](const ObjectRef& n) {
+  auto fvisit = [&bmap, &flag, &var](const ffi::ObjectRef& n) {
     if (const VarNode* v = n.as<VarNode>()) {
       if (bmap->count(v)) {
         if (flag == 0) {
-          var = Downcast<Var>(n);
+          var = n.as_or_throw<Var>();
           flag = 1;
         } else if (flag == 1) {
           if (!var.same_as(n)) {
@@ -194,19 +194,21 @@ bool DetectClipBound(const PrimExpr& cond,
   bool is_eq = false;
   PrimExpr canonical;
   if (const LTNode* op = cond.as<LTNode>()) {
-    if (!op->a.dtype().is_int()) return false;
-    canonical = op->b - op->a - make_const(op->a.dtype(), 1);
+    PrimType a_ty = op->a.ty();
+    if (!a_ty.MatchesCode(DLDataTypeCode::kDLInt)) return false;
+    canonical = op->b - op->a - MakeConst(a_ty, 1);
   } else if (const LENode* op = cond.as<LENode>()) {
-    if (!op->a.dtype().is_int()) return false;
+    if (!op->a.ty().MatchesCode(DLDataTypeCode::kDLInt)) return false;
     canonical = op->b - op->a;
   } else if (const GTNode* op = cond.as<GTNode>()) {
-    if (!op->a.dtype().is_int()) return false;
-    canonical = op->a - op->b - make_const(op->a.dtype(), 1);
+    PrimType a_ty = op->a.ty();
+    if (!a_ty.MatchesCode(DLDataTypeCode::kDLInt)) return false;
+    canonical = op->a - op->b - MakeConst(a_ty, 1);
   } else if (const GENode* op = cond.as<GENode>()) {
-    if (!op->a.dtype().is_int()) return false;
+    if (!op->a.ty().MatchesCode(DLDataTypeCode::kDLInt)) return false;
     canonical = op->a - op->b;
   } else if (const EQNode* op = cond.as<EQNode>()) {
-    if (!op->a.dtype().is_int()) return false;
+    if (!op->a.ty().MatchesCode(DLDataTypeCode::kDLInt)) return false;
     canonical = op->a - op->b;
     is_eq = true;
   } else {
@@ -215,7 +217,7 @@ bool DetectClipBound(const PrimExpr& cond,
   LinearEqEntry ret;
   Analyzer analyzer;
   if (!LinearEqDetector(var).Detect(canonical, &ret)) return false;
-  ret.coeff = analyzer.Simplify(ret.coeff);
+  ret.coeff = analyzer->Simplify(ret.coeff);
   IntervalEntry& p = (*bmap)[var.get()];
 
   ffi::Optional<PrimExpr> min_value;
@@ -268,7 +270,7 @@ void SplitCommExpr(const PrimExpr& e, std::vector<PrimExpr>* ret) {
 ffi::Array<PrimExpr> DetectClipBound(const PrimExpr& e, const ffi::Array<Var>& vars) {
   std::vector<PrimExpr> splits;
   Analyzer analyzer;
-  SplitCommExpr<tir::AndNode>(analyzer.Simplify(e), &splits);
+  SplitCommExpr<tirx::AndNode>(analyzer->Simplify(e), &splits);
   std::unordered_map<const VarNode*, IntervalEntry> rmap;
   for (Var v : vars) {
     rmap[v.get()] = IntervalEntry();
@@ -280,10 +282,10 @@ ffi::Array<PrimExpr> DetectClipBound(const PrimExpr& e, const ffi::Array<Var>& v
   for (Var v : vars) {
     IntervalEntry e = rmap[v.get()];
     if (e.min_value.defined()) {
-      e.min_value = analyzer.Simplify(e.min_value);
+      e.min_value = analyzer->Simplify(e.min_value);
     }
     if (e.max_value.defined()) {
-      e.max_value = analyzer.Simplify(e.max_value);
+      e.max_value = analyzer->Simplify(e.max_value);
     }
     ret.push_back(e.min_value);
     ret.push_back(e.max_value);

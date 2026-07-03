@@ -14,12 +14,16 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: F841
 """Test last-stage of codegen VM.
 
 Restrictions: all shape lowered, explicit allocation.
 """
+
 import numpy as np
 import pytest
+import tvm_ffi
+
 import tvm
 import tvm.testing
 from tvm import relax
@@ -27,7 +31,7 @@ from tvm.relax.testing.runtime_builtin import MakeShapeCode, MatchShapeCode
 from tvm.relax.testing.vm import check_saved_func
 from tvm.script import ir as I
 from tvm.script import relax as R
-from tvm.script import tir as T
+from tvm.script import tirx as T
 
 EXEC_MODE = ["bytecode", "compiled"]
 
@@ -45,7 +49,7 @@ def test_vm_copy(exec_mode):
         @R.function(pure=False)
         def foo(x: R.Tensor((3, 4), "float32")):
             R.func_attr({"global_symbol": "foo"})
-            z = R.call_packed("vm.builtin.copy", x, sinfo_args=(R.Tensor((3, 4), dtype="float32")))
+            z = R.call_packed("vm.builtin.copy", x, ty_args=(R.Tensor((3, 4), dtype="float32")))
             return z
 
     mod = TestVMMove
@@ -66,7 +70,7 @@ def test_vm_to_device(exec_mode):
             R.func_attr({"global_symbol": "foo"})
             # Copy x to the first cpu: device_type=1 and device_id=0.
             z = R.call_packed(
-                "vm.builtin.to_device", x, 1, 0, sinfo_args=(R.Tensor((3, 4), dtype="float32"))
+                "vm.builtin.to_device", x, 1, 0, ty_args=(R.Tensor((3, 4), dtype="float32"))
             )
             return z
 
@@ -112,13 +116,13 @@ def test_vm_exec_serialize_export_library(exec_mode):
         @R.function(pure=False)
         def foo(x: R.Tensor((3, 4), "float32")):
             R.func_attr({"global_symbol": "foo"})
-            z = R.call_packed("vm.builtin.copy", x, sinfo_args=(R.Tensor((3, 4), dtype="float32")))
+            z = R.call_packed("vm.builtin.copy", x, ty_args=(R.Tensor((3, 4), dtype="float32")))
             return z
 
     mod = TestVMMove
     target = tvm.target.Target("llvm", host="llvm")
     ex = codegen(mod, target)
-    from tvm.contrib import utils
+    from tvm.support import utils
 
     temp_dir = utils.tempdir()
     path_exec = temp_dir.relpath("exec.so")
@@ -136,9 +140,9 @@ def test_if_cond(exec_mode):
         def ife(cond: R.Tensor((), "bool"), x: R.Tensor((3, 4), "float32")) -> R.Tensor:
             R.func_attr({"global_symbol": "ife"})
             if cond:
-                w = R.call_packed("test.vm.add", x, x, sinfo_args=(R.Tensor))
+                w = R.call_packed("test.vm.add", x, x, ty_args=(R.Tensor))
             else:
-                w = R.call_packed("test.vm.mul", x, x, sinfo_args=(R.Tensor))
+                w = R.call_packed("test.vm.mul", x, x, ty_args=(R.Tensor))
             return w
 
     mod = TestVMCompileIf
@@ -189,13 +193,13 @@ def test_vm_const_as_call_arg(exec_mode):
                 "test.vm.add",
                 relax.const([1, 2]),
                 relax.const([3, 4]),
-                sinfo_args=(R.Tensor(ndim=2, dtype="float32")),
+                ty_args=(R.Tensor(ndim=2, dtype="float32")),
             )
             b = R.call_packed(
                 "test.vm.add",
                 a,
                 x,
-                sinfo_args=(R.Tensor(ndim=2, dtype="float32")),
+                ty_args=(R.Tensor(ndim=2, dtype="float32")),
             )
             return b
 
@@ -226,10 +230,10 @@ def test_shape_check_builtin(exec_mode):
             shape_heap = R.call_builtin_with_ctx(
                 "vm.builtin.alloc_shape_heap",
                 [R.prim_value(3)],
-                sinfo_args=[R.Tensor(ndim=1, dtype="int64")],
+                ty_args=[R.Tensor(ndim=1, dtype="int64")],
             )
             _ = R.call_packed(
-                "vm.builtin.check_tensor_info", x, 2, R.dtype("float32"), "", sinfo_args=[R.Tuple()]
+                "vm.builtin.check_tensor_info", x, 2, R.dtype("float32"), "", ty_args=[R.Tuple()]
             )
             _ = R.call_packed(
                 "vm.builtin.match_shape",
@@ -241,7 +245,7 @@ def test_shape_check_builtin(exec_mode):
                 MS.STORE_TO_HEAP,
                 sindex["m"],
                 "",
-                sinfo_args=[R.Tuple()],
+                ty_args=[R.Tuple()],
             )
             # construct shape value for return
             s = R.call_packed(
@@ -254,7 +258,7 @@ def test_shape_check_builtin(exec_mode):
                 sindex["n"],
                 MK.USE_IMM,
                 2,
-                sinfo_args=[R.Shape(ndim=3)],
+                ty_args=[R.Shape(ndim=3)],
             )
             return s
 
@@ -264,7 +268,7 @@ def test_shape_check_builtin(exec_mode):
     vm = relax.VirtualMachine(ex, tvm.cpu())
     x = tvm.runtime.tensor(np.zeros((1, 2)).astype("float32"))
     res = vm["main"](x)
-    assert res == tvm.runtime.container.ShapeTuple([2, 1, 2])
+    assert res == tvm_ffi.Shape([2, 1, 2])
 
     # wrong input type
     with pytest.raises(TypeError):
@@ -282,14 +286,14 @@ def test_shape_check_builtin(exec_mode):
 @pytest.mark.parametrize("exec_mode", EXEC_MODE)
 def test_prim_value(exec_mode):
     @tvm.script.ir_module
-    class TestVMPrimValue:
+    class TestVMPrimExpr:
         @R.function
         def main():
             R.func_attr({"global_symbol": "main"})
             ret = R.prim_value(T.int64(1))
             return ret
 
-    mod = TestVMPrimValue
+    mod = TestVMPrimExpr
     target = tvm.target.Target("llvm", host="llvm")
     ex = codegen(mod, target, exec_mode)
     vm = relax.VirtualMachine(ex, tvm.cpu())
@@ -341,7 +345,7 @@ def test_vm_builtin_reshape(exec_mode):
         def main(x: R.Tensor((3, 4), "float32")):
             R.func_attr({"global_symbol": "main"})
             y = R.call_packed(
-                "vm.builtin.reshape", x, R.shape([6, 2]), sinfo_args=R.Tensor((6, 2), "float32")
+                "vm.builtin.reshape", x, R.shape([6, 2]), ty_args=R.Tensor((6, 2), "float32")
             )
             return y
 
@@ -360,23 +364,23 @@ def test_vm_builtin_reshape(exec_mode):
 
 @pytest.mark.parametrize("exec_mode", EXEC_MODE)
 def test_vm_kill_object(exec_mode):
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class TestKillObject:
-        @T.prim_func
+        @T.prim_func(s_tir=True)
         def full(T_full: T.Buffer((T.int64(4),), "float32")):
-            T.func_attr({"global_symbol": "full", "tir.noalias": True})
+            T.func_attr({"global_symbol": "full", "tirx.noalias": True})
             for ax0 in range(T.int64(4)):
-                with T.block("T_full"):
+                with T.sblock("T_full"):
                     v_ax0 = T.axis.spatial(T.int64(4), ax0)
                     T.reads()
                     T.writes(T_full[v_ax0])
                     T_full[v_ax0] = T.float32(0)
 
-        @T.prim_func
+        @T.prim_func(s_tir=True)
         def full1(T_full: T.Buffer((T.int64(4),), "float32")):
-            T.func_attr({"global_symbol": "full1", "tir.noalias": True})
+            T.func_attr({"global_symbol": "full1", "tirx.noalias": True})
             for ax0 in range(T.int64(4)):
-                with T.block("T_full"):
+                with T.sblock("T_full"):
                     v_ax0 = T.axis.spatial(T.int64(4), ax0)
                     T.reads()
                     T.writes(T_full[v_ax0])
@@ -387,7 +391,7 @@ def test_vm_kill_object(exec_mode):
         def main() -> R.Tensor((4,), dtype="float32"):
             R.func_attr({"global_symbol": "main"})
             cls = TestKillObject
-            storage: R.Object = R.vm.alloc_storage(R.shape([16]), R.prim_value(0), R.dtype("uint8"))
+            storage: R.Any = R.vm.alloc_storage(R.shape([16]), R.prim_value(0), R.dtype("uint8"))
             alloc: R.Tensor((4,), dtype="float32") = R.vm.alloc_tensor(
                 storage, R.prim_value(0), R.shape([4]), R.dtype("float32")
             )
@@ -400,9 +404,7 @@ def test_vm_kill_object(exec_mode):
             _1: R.Tuple = cls.full(alloc1)
             _1_1: R.Tuple = R.vm.kill_object(alloc1)
             y: R.Tensor((4,), dtype="float32") = alloc1
-            storage_1: R.Object = R.vm.alloc_storage(
-                R.shape([16]), R.prim_value(0), R.dtype("uint8")
-            )
+            storage_1: R.Any = R.vm.alloc_storage(R.shape([16]), R.prim_value(0), R.dtype("uint8"))
             alloc2: R.Tensor((4,), dtype="float32") = R.vm.alloc_tensor(
                 storage_1, R.prim_value(0), R.shape([4]), R.dtype("float32")
             )
@@ -423,7 +425,7 @@ def test_vm_kill_object(exec_mode):
 
 @pytest.mark.parametrize("exec_mode", EXEC_MODE)
 def test_preserve_trivial_bindings(exec_mode):
-    @I.ir_module
+    @I.ir_module(s_tir=True)
     class mod:
         @R.function(pure=False)
         def main():

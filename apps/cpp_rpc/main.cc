@@ -49,9 +49,9 @@ using namespace tvm::support;
 static const string kUsage =
     "Command line usage\n"
     " server       - Start the server\n"
-    "--host        - The hostname of the server, Default=0.0.0.0\n"
-    "--port        - The port of the RPC, Default=9090\n"
-    "--port-end    - The end search port of the RPC, Default=9099\n"
+    "--host        - The listen address of the server, Default=0.0.0.0 (any)\n"
+    "--port        - The port of the RPC server, Default=9090\n"
+    "--port-end    - The end search port of the RPC server, Default=9099\n"
     "--tracker     - The RPC tracker address in host:port format e.g. 10.1.1.2:9190 Default=\"\"\n"
     "--key         - The key used to identify the device type in tracker. Default=\"\"\n"
     "--custom-addr - Custom IP Address to Report to RPC Tracker. Default=\"\"\n"
@@ -59,15 +59,15 @@ static const string kUsage =
     "--silent      - Whether to run in silent mode. Default=False\n"
     "\n"
     "  Example\n"
-    "  ./tvm_rpc server --host=0.0.0.0 --port=9000 --port-end=9090 "
+    "  ./tvm_rpc server --host=0.0.0.0 --port=9090 --port-end=9099 "
     " --tracker=127.0.0.1:9190 --key=rasp"
     "\n";
 
 /*!
  * \brief RpcServerArgs.
- * \arg host The hostname of the server, Default=0.0.0.0
- * \arg port The port of the RPC, Default=9090
- * \arg port_end The end search port of the RPC, Default=9099
+ * \arg host The listen address of the server, Default=0.0.0.0 (any)
+ * \arg port The port of the RPC server, Default=9090
+ * \arg port_end The end search port of the RPC server, Default=9099
  * \arg tracker The address of RPC tracker in host:port format e.g. 10.77.1.234:9190 Default=""
  * \arg key The key used to identify the device type in tracker. Default=""
  * \arg custom_addr Custom IP Address to Report to RPC Tracker. Default=""
@@ -143,7 +143,7 @@ string GetCmdOption(int argc, char* argv[], string option, bool key = false) {
         return cmd;
       }
       // We assume "=" is the end of option.
-      ICHECK_EQ(*option.rbegin(), '=');
+      TVM_FFI_ICHECK_EQ(*option.rbegin(), '=');
       cmd = arg.substr(arg.find('=') + 1);
       return cmd;
     }
@@ -177,8 +177,6 @@ void ParseCmdArgs(int argc, char* argv[], struct RpcServerArgs& args) {
   const string silent = GetCmdOption(argc, argv, "--silent", true);
   if (!silent.empty()) {
     args.silent = true;
-    // Only errors and fatal is logged
-    dmlc::InitLogging("--minloglevel=2");
   }
 
   const string host = GetCmdOption(argc, argv, "--host=");
@@ -239,7 +237,6 @@ void ParseCmdArgs(int argc, char* argv[], struct RpcServerArgs& args) {
   const string mmap_path = GetCmdOption(argc, argv, "--child_proc=");
   if (!mmap_path.empty()) {
     args.mmap_path = mmap_path;
-    dmlc::InitLogging("--minloglevel=0");
   }
 #endif
   const string work_dir = GetCmdOption(argc, argv, "--work-dir=");

@@ -24,6 +24,7 @@
 #ifndef TVM_RELAX_BACKEND_CONTRIB_UTILS_H_
 #define TVM_RELAX_BACKEND_CONTRIB_UTILS_H_
 
+#include <tvm/ffi/cast.h>
 #include <tvm/relax/analysis.h>
 #include <tvm/relax/expr.h>
 
@@ -46,7 +47,7 @@ namespace backend {
 inline std::vector<int64_t> GetIntShape(const ffi::Array<PrimExpr>& shape) {
   std::vector<int64_t> ret;
   for (const auto& dim : shape) {
-    const int64_t* pval = tir::as_const_int(dim);
+    const int64_t* pval = tirx::as_const_int(dim);
     ret.push_back(pval ? *pval : -1);
   }
   return ret;
@@ -58,9 +59,7 @@ inline std::vector<int64_t> GetIntShape(const ffi::Array<PrimExpr>& shape) {
  * \param typ
  * \return std::string string format of type
  */
-inline std::string DType2String(const tvm::DataType dtype) {
-  return tvm::ffi::DLDataTypeToString(dtype);
-}
+inline std::string DType2String(DLDataType dtype) { return tvm::ffi::DLDataTypeToString(dtype); }
 
 /*!
  * \brief Check if a call node is calling an op with the given name
@@ -101,7 +100,7 @@ inline const CallNode* TryGetOpInFunction(Function f, const std::string& op_name
  */
 inline const CallNode* GetOpInFunction(Function f, const std::string& op_name) {
   const CallNode* op = TryGetOpInFunction(f, op_name);
-  ICHECK(op) << op_name << " not found in the function:\n" << f;
+  TVM_FFI_ICHECK(op) << op_name << " not found in the function:\n" << f;
   return op;
 }
 

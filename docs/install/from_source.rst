@@ -35,15 +35,30 @@ Apache TVM requires the following dependencies:
 - CMake (>= 3.24.0)
 - LLVM (recommended >= 15)
 - Git
-- A recent C++ compiler supporting C++ 17, at the minimum
-    - GCC 7.1
-    - Clang 5.0
-    - Apple Clang 9.3
-    - Visual Studio 2019 (v16.7)
-- Python (>= 3.8)
+- A recent C++ compiler supporting C++ 20, at the minimum
+    - GCC 10
+    - Clang 10
+    - Apple Clang 14
+    - Visual Studio 2022
+
+  Optional dependencies that use newer C++20 standard library facilities, such
+  as ``std::format``, may require a newer standard library (for example GCC 13
+  or newer on Linux).
+- Python (>= 3.10)
 - (Optional) Conda (Strongly Recommended)
 
-To easiest way to manage dependency is via conda, which maintains a set of toolchains
+System Dependencies (Non-Conda)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+If you are not using Conda, TVM requires several system libraries. On Ubuntu/Debian systems, install them with:
+
+.. code:: bash
+
+   sudo apt update
+   sudo apt install zlib1g-dev libxml2-dev
+
+For other operating systems, please refer to your package manager documentation.
+
+The easiest way to manage dependency is via conda, which maintains a set of toolchains
 including LLVM across platforms. To create the environment of those build dependencies,
 one may simply use:
 
@@ -60,10 +75,18 @@ one may simply use:
     # enter the build environment
     conda activate tvm-build-venv
 
+.. note::
+   **For Frontend Contributors (TFLite):** If you plan to run or contribute to the frontend tests (e.g., ``test_frontend_tflite.py``), you must install ``tensorflow==2.19.0``.
 
-Step 2. Get Source from Github
+   .. code:: bash
+
+       pip install tensorflow==2.19.0
+
+   Python 3.11 is supported.
+
+Step 2. Get Source from GitHub
 ------------------------------
-You can also choose to clone the source repo from github.
+You can also choose to clone the source repo from GitHub.
 
 .. code:: bash
 
@@ -145,7 +168,8 @@ Leaving the build environment ``tvm-build-venv``, there are two ways to install 
 .. code-block:: bash
 
     export TVM_HOME=/path-to-tvm
-    export PYTHONPATH=$TVM_HOME/python:$TVM_HOME/ffi/python:$PYTHONPATH
+    pip install --target=$TVM_HOME/python $TVM_HOME/3rdparty/tvm-ffi
+    export PYTHONPATH=$TVM_HOME/python:$PYTHONPATH
 
 - Install via pip local project
 
@@ -154,7 +178,7 @@ Leaving the build environment ``tvm-build-venv``, there are two ways to install 
     conda activate your-own-env
     conda install python # make sure python is installed
     export TVM_LIBRARY_PATH=/path-to-tvm/build
-    pip install -e /path-to-tvm/python
+    pip install -e /path-to-tvm
 
 Step 4. Validate Installation
 -----------------------------
@@ -173,8 +197,8 @@ Therefore, it is highly recommended to validate Apache TVM installation before u
 
 .. code-block:: bash
 
-    >>> python -c "import tvm; print(tvm.base._LIB)"
-    <CDLL '/some-path/lib/python3.11/site-packages/tvm/libtvm.dylib', handle 95ada510 at 0x1030e4e50>
+    >>> python -c "import tvm; print(tvm.base._LOADED_LIBS['tvm_runtime'])"
+    <CDLL '/some-path/lib/python3.11/site-packages/tvm/libtvm_runtime.dylib', handle 95ada510 at 0x1030e4e50>
 
 **Step 3. Reflect TVM build option.** Sometimes when downstream application fails, it could likely be some mistakes with a wrong TVM commit, or wrong build flags. To find it out, the following commands will be helpful:
 
@@ -211,13 +235,16 @@ Please note that the commands above verify the presence of an actual device on t
 Step 5. Extra Python Dependencies
 ---------------------------------
 Building from source does not ensure the installation of all necessary Python dependencies.
+
+Python Dependencies
+~~~~~~~~~~~~~~~~~~~
 The following commands can be used to install the extra Python dependencies:
 
 * Necessary dependencies:
 
 .. code:: bash
 
-    pip3 install numpy
+    pip3 install numpy cython
 
 * If you want to use RPC Tracker
 
@@ -231,6 +258,15 @@ The following commands can be used to install the extra Python dependencies:
 
     pip3 install tornado psutil 'xgboost>=1.1.0' cloudpickle
 
+Windows-Specific Build Notes
+----------------------------
+
+If you're building TVM on Windows, note these platform-specific considerations:
+
+Path Conventions
+~~~~~~~~~~~~~~~~
+- Use forward slashes (``/``) in Python/CMake paths, not Windows backslashes
+- Example: ``python cmake/config.cmake`` not ``python cmake\\config.cmake``
 
 Advanced Build Configuration
 ----------------------------
@@ -255,9 +291,9 @@ There are several ways to enable CCache in TVM builds:
 
 Building on Windows
 ~~~~~~~~~~~~~~~~~~~
-TVM support build via MSVC using cmake. You will need to obtain a visual studio compiler.
+TVM support build via MSVC using CMake. You will need to obtain a visual studio compiler.
 The minimum required VS version is **Visual Studio Enterprise 2019** (NOTE: we test
-against GitHub Actions' `Windows 2019 Runner <https://github.com/actions/virtual-environments/blob/main/images/win/Windows2019-Readme.md>`_, so see that page for full details.
+against GitHub Actions' `windows-latest Runner <https://github.com/actions/runner-images>`_, so see that page for full details.
 We recommend following :ref:`install-dependencies` to obtain necessary dependencies and
 get an activated tvm-build environment. Then you can run the following command to build
 
@@ -275,6 +311,21 @@ You can then run the following command to build
 
     cmake --build build --config Release -- /m
 
+CUDA Configuration
+..................
+For CUDA support on Windows:
+
+.. code-block:: batch
+
+   set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8
+   set PATH=%CUDA_PATH%\bin;%PATH%
+   cmake .. -DUSE_CUDA=ON
+
+CMake & Compiler Setup
+......................
+- Specify generator: ``cmake -G "Visual Studio 16 2019" -A x64 ..``
+- Ensure Python is in PATH or specify: ``-DPython_EXECUTABLE=C:\Python311\python.exe``
+
 
 Building ROCm support
 ~~~~~~~~~~~~~~~~~~~~~
@@ -283,7 +334,7 @@ Currently, ROCm is supported only on linux, so all the instructions are written 
 
 - Set ``set(USE_ROCM ON)``, set ROCM_PATH to the correct path.
 - You need to first install HIP runtime from ROCm. Make sure the installation system has ROCm installed in it.
-- Install latest stable version of LLVM (v6.0.1), and LLD, make sure ``ld.lld`` is available via command line.
+- Install LLVM (>= 15), and LLD, make sure ``ld.lld`` is available via command line.
 
 .. _install-from-source-cpp-tests:
 
@@ -302,4 +353,4 @@ tests in TVM. The easiest way to install GTest is from source.
     make
     sudo make install
 
-After installing GTest, the C++ tests can be built and started with ``./tests/scripts/task_cpp_unittest.sh`` or just built with ``make cpptest``.
+After installing GTest, the C++ tests can be built and started with ``./tests/scripts/task_cpp_unittest.sh``, or built via CMake with ``-DUSE_GTEST=ON`` and then running ``./build/cpptest``.

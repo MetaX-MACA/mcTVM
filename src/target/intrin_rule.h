@@ -25,22 +25,23 @@
 #define TVM_TARGET_INTRIN_RULE_H_
 
 #include <tvm/ffi/function.h>
-#include <tvm/tir/builtin.h>
-#include <tvm/tir/expr.h>
+#include <tvm/ir/type.h>
+#include <tvm/tirx/builtin.h>
+#include <tvm/tirx/expr.h>
 
 #include <string>
 
 namespace tvm {
 namespace codegen {
 namespace intrin {
-using namespace tir;
+using namespace tirx;
 
 // Add float suffix to the intrinsics
 struct FloatSuffix {
-  std::string operator()(DataType t, std::string name) const {
-    if (t == DataType::Float(32)) {
+  std::string operator()(const PrimType& ty, std::string name) const {
+    if (ty->dtype == DLDataType{kDLFloat, 32, 1}) {
       return name + 'f';
-    } else if (t == DataType::Float(64)) {
+    } else if (ty->dtype == DLDataType{kDLFloat, 64, 1}) {
       return name;
     } else {
       return "";
@@ -50,7 +51,7 @@ struct FloatSuffix {
 
 // Return the intrinsic name
 struct Direct {
-  std::string operator()(DataType t, std::string name) const { return name; }
+  std::string operator()(const PrimType& ty, std::string name) const { return name; }
 };
 
 /*!
@@ -62,28 +63,25 @@ struct Direct {
 template <typename T, bool dtype_from_arg = false>
 inline PrimExpr DispatchPureExtern(const PrimExpr& e) {
   const CallNode* call = e.as<CallNode>();
-  ICHECK(call != nullptr);
+  TVM_FFI_ICHECK(call != nullptr);
   // Use string based dispatch to extern for backward compact
   // TODO(tvm-team) replace once the new dispatching system is inplace.
   const OpNode* op = call->op.as<OpNode>();
-  ICHECK(op != nullptr);
+  TVM_FFI_ICHECK(op != nullptr);
   std::string name = op->name;
-  ICHECK_EQ(name.substr(0, 4), "tir.");
-  DataType dtype;
+  TVM_FFI_ICHECK_EQ(name.substr(0, 5), "tirx.");
   if (dtype_from_arg) {
-    ICHECK_EQ(call->args.size(), 1U);
-    dtype = call->args[0].dtype();
-  } else {
-    dtype = call->dtype;
+    TVM_FFI_ICHECK_EQ(call->args.size(), 1U);
   }
-  name = T()(dtype, name.substr(4));
+  PrimType dtype = dtype_from_arg ? call->args[0].ty() : call->ty();
+  name = T()(dtype, name.substr(5));
 
   if (name.length() != 0) {
     ffi::Array<PrimExpr> new_args = {StringImm(name)};
     for (auto arg : call->args) {
       new_args.push_back(arg);
     }
-    return Call(call->dtype, builtin::call_pure_extern(), new_args);
+    return Call(e.ty(), builtin::call_pure_extern(), new_args);
   } else {
     return e;
   }

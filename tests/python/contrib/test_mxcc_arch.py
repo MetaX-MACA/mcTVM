@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """Tests for MACA architecture detection"""
+
 import os
 import subprocess
 import unittest

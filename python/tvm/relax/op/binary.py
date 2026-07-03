@@ -16,8 +16,9 @@
 # under the License.
 # pylint: disable=redefined-builtin, invalid-name
 """Relax binary arithmetic and comparison operators."""
-from . import _ffi_api
+
 from ..expr import Expr
+from . import _ffi_api
 
 ###################### Arithmetic operators ######################
 
@@ -42,9 +43,9 @@ def add(x1: Expr, x2: Expr) -> Expr:
     .. code:: python
 
       bb = relax.BlockBuilder()
-      a = relax.Var("a", relax.TensorStructInfo(shape=(2, 3), dtype="float32"))
-      b = relax.Var("b", relax.TensorStructInfo(shape=(2, 1), dtype="float32"))
-      c = bb.normalize(relax.op.add(a, b))  # c has TensorStructInfo(shape=(2, 3), dtype="float32")
+      a = relax.Var("a", relax.TensorType(shape=(2, 3), dtype="float32"))
+      b = relax.Var("b", relax.TensorType(shape=(2, 1), dtype="float32"))
+      c = bb.normalize(relax.op.add(a, b))  # c has TensorType(shape=(2, 3), dtype="float32")
     """
     return _ffi_api.add(x1, x2)  # type: ignore
 
@@ -138,6 +139,24 @@ def power(x1: Expr, x2: Expr):
         The computed result.
     """
     return _ffi_api.power(x1, x2)  # type: ignore
+
+
+def atan2(x1: Expr, x2: Expr) -> Expr:
+    """Atan2 with numpy-style broadcasting.
+
+    Parameters
+    ----------
+    x1 : relax.Expr
+        The first input tensor (y-coordinates).
+    x2 : relax.Expr
+        The second input tensor (x-coordinates).
+
+    Returns
+    -------
+    result : relax.Expr
+        The computed result.
+    """
+    return _ffi_api.atan2(x1, x2)  # type: ignore
 
 
 def subtract(x1: Expr, x2: Expr) -> Expr:

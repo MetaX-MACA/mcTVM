@@ -19,28 +19,30 @@
 
 import os
 import shutil
+
 import tvm_ffi
-from tvm.contrib import coreml_runtime
-from tvm.contrib.xcode import compile_coreml
 
 import tvm
+from tvm.contrib import coreml_runtime
+from tvm.ir import PrimType
 from tvm.relax import transform
-from tvm.relax.struct_info import TensorStructInfo, PrimStructInfo
+from tvm.relax.dpl.pattern import is_op, wildcard
 from tvm.relax.expr import (
     BindingBlock,
     Call,
+    Constant,
     Function,
-    PrimValue,
     SeqExpr,
     Var,
     VarBinding,
-    Constant,
 )
-from tvm.relax.dpl.pattern import is_op, wildcard
 from tvm.relax.transform import PatternCheckContext
+from tvm.relax.type import TensorType
+from tvm.support.xcode import compile_coreml
+
+from ...expr_functor import PyExprVisitor, visitor
 from ..pattern_registry import get_patterns_with_prefix, register_patterns
 from ..patterns import make_matmul_pattern
-from ...expr_functor import PyExprVisitor, visitor
 
 
 def _check_default(context: PatternCheckContext) -> bool:
@@ -142,11 +144,10 @@ register_patterns(
         *default_unary_patterns(op_name="nn.relu"),
         *default_unary_patterns(op_name="expand_dims"),
         *default_unary_patterns(op_name="nn.avg_pool2d"),
+        *default_unary_patterns(op_name="nn.batch_flatten"),
         *conv2d_patterns(),
         *clip_patterns(),
         *matmul_patterns(),
-        # TODO(@tvm-team): enable when relax op is implemented
-        # ("coreml.nn.batch_flatten", is_op("relax.nn.batch_flatten")(wildcard())),
     ]
 )
 
@@ -168,7 +169,7 @@ def partition_for_coreml(mod):
     """
 
     patterns = get_patterns_with_prefix("coreml")
-    mod = transform.FoldDataflowBlockOutput()(mod)
+    mod = transform.CanonicalizeBindings()(mod)
     mod = transform.FuseOpsByPattern(patterns, bind_constants=True, annotate_codegen=False)(mod)
     mod = transform.MergeCompositeFunctions()(mod)
     return mod
@@ -271,7 +272,7 @@ _convert_map = {
     "clip": _convert_clip,
     "expand_dims": _convert_expand_dims,
     "nn.relu": _convert_relu,
-    # "nn.batch_flatten": _convert_batch_flatten,
+    "nn.batch_flatten": _convert_batch_flatten,
     "nn.softmax": _convert_softmax,
     "nn.conv2d": _convert_conv2d,
     "nn.avg_pool2d": _convert_avg_pool2d,
@@ -281,7 +282,7 @@ _convert_map = {
 @visitor
 class CallNodeInfoCollector(PyExprVisitor):
     """
-    Collect PrimValue, Constant and attributes in the inner function
+    Collect PrimExpr, Constant and attributes in the inner function
     """
 
     def __init__(self, op_name):
@@ -293,7 +294,7 @@ class CallNodeInfoCollector(PyExprVisitor):
     def visit_call_(self, call: Call) -> None:
         self.attrs.append(call.attrs)
         for arg in call.args:
-            if isinstance(arg, PrimValue):
+            if isinstance(arg, tvm.tirx.PrimExpr):
                 self.primvals.append(arg)
             if isinstance(arg, Constant):
                 self.consts.append(arg)
@@ -310,8 +311,14 @@ class CodegenCoreML(PyExprVisitor):
     """
 
     def __init__(self, model_name, function):
-        import coremltools
-        from coremltools.models.neural_network import NeuralNetworkBuilder
+        try:
+            import coremltools
+            from coremltools.models.neural_network import NeuralNetworkBuilder
+        except ImportError as err:
+            raise ImportError(
+                "coremltools is required by the CoreML backend. "
+                "Install it with: pip install coremltools"
+            ) from err
 
         self.model_name = model_name
         self.function = function
@@ -348,14 +355,14 @@ class CodegenCoreML(PyExprVisitor):
     def visit_function_(self, op) -> None:
         for var in op.params:
             name = var.name_hint
-            sinfo = var.struct_info
-            if isinstance(sinfo, TensorStructInfo):
-                shape = [int(v) for v in list(sinfo.shape)]
-            elif isinstance(sinfo, PrimStructInfo):
+            ty = var.ty
+            if isinstance(ty, TensorType):
+                shape = [int(v) for v in list(ty.shape)]
+            elif isinstance(ty, PrimType):
                 shape = []
             else:
-                raise Exception("Currently not supported: ", type(sinfo))
-            dtype = sinfo.dtype
+                raise Exception("Currently not supported: ", type(ty))
+            dtype = ty.dtype
             self.model_inputs_.append((name, shape, dtype))
 
         self.visit_expr(op.body)
@@ -407,7 +414,7 @@ class CodegenCoreML(PyExprVisitor):
 
         layer_name = op_name + "_" + str(self.buf_idx_)
 
-        assert op_name in _convert_map, "{} is not supported".format(op_name)
+        assert op_name in _convert_map, f"{op_name} is not supported"
         outputs = ["buf_" + str(self.buf_idx_)]
         _convert_map[op_name](self.builder, layer_name, inputs, outputs, args, attrs[0])
         self.buf_idx_ = self.buf_idx_ + 1
@@ -449,12 +456,12 @@ class CodegenCoreML(PyExprVisitor):
             input_desc = self.builder.spec.description.input
             input_desc[i].type.multiArrayType.dataType = FEATURE_TYPE_MAP[dtype]
 
-        output_dim = [int(n) for n in self.function.struct_info.ret.shape]
+        output_dim = [int(n) for n in self.function.ty.ret.shape]
 
         last_binding_var = self.function.body.blocks[0].bindings[-1].var
         self.builder.set_output(self.out_map[last_binding_var], [output_dim])
 
-        for i, dtype in enumerate([self.function.struct_info.ret.dtype]):
+        for i, dtype in enumerate([self.function.ty.ret.dtype]):
             assert dtype in FEATURE_TYPE_MAP
             output_desc = self.builder.spec.description.output
             output_desc[i].type.multiArrayType.dataType = FEATURE_TYPE_MAP[dtype]
@@ -479,7 +486,7 @@ def coreml_compiler(funcs, options, constant_names):
         builder = CodegenCoreML(name, func)
         builder.serialize(func)
 
-        mlmodelc_path = "{}/{}.mlmodelc".format(model_dir, name)
+        mlmodelc_path = f"{model_dir}/{name}.mlmodelc"
 
         if os.path.exists(mlmodelc_path):
             shutil.rmtree(mlmodelc_path)

@@ -41,15 +41,15 @@ C++ Code Styles
 We use ``clang-format`` to enforce the code style. Because different version
 of clang-format might change by its version, it is recommended to use the same
 version of the clang-format as the main one.
-You can also use the following command via docker.
+You can use pre-commit hooks to run formatting checks:
 
 .. code:: bash
 
-    # Run a specific file through clang-format
-    docker/bash.sh ci_lint clang-format-10 [path-to-file]
+    # Run clang-format on all files
+    pre-commit run clang-format --all-files
 
-    # Run all linters, including clang-format
-    python tests/scripts/ci.py lint
+    # Run all linters (Python + C++ + custom checks)
+    pre-commit run --all-files
 
 
 clang-format is also not perfect, when necessary, you can use disble clang-format on certain code regions.
@@ -86,8 +86,8 @@ Because clang-format may not recognize macros, it is recommended to use macro li
 Python Code Styles
 ------------------
 - The functions and classes are documented in `numpydoc <https://numpydoc.readthedocs.io/en/latest/>`_ format.
-- Check your code style using ``python tests/scripts/ci.py lint``
-- Stick to language features in ``python 3.7``
+- Check your code style using ``pre-commit run --all-files``
+- Stick to language features in ``python 3.10``
 
 - For functions with early returns, prefer ``if``/``elif``/``else``
   chains for functions with parallel and short bodies to the
@@ -98,7 +98,7 @@ Python Code Styles
 
   The pylint check ``no-else-return`` is disabled to allow for this
   distinction.  See further discussion `here
-  <https://github.com/apache/tvm/pull/11327>`.
+  <https://github.com/apache/tvm/pull/11327>`_.
 
   .. code:: python
 
@@ -128,16 +128,30 @@ Python Code Styles
 Writing Python Tests
 --------------------
 We use `pytest <https://docs.pytest.org/en/stable/>`_ for all python testing. ``tests/python`` contains all the tests.
+See :doc:`testing` for details on running tests, target parametrization,
+and the target-specific marks used by CI.
 
-If you want your test to run over a variety of targets, use the :py:func:`tvm.testing.parametrize_targets` decorator. For example:
+If you want your test to run over a variety of targets, parametrize over ``target`` with ``@pytest.mark.parametrize``, tag GPU targets with ``@pytest.mark.gpu`` so the CI routes them to GPU nodes, and skip a target that is unavailable on the current machine with :py:func:`tvm.testing.device_enabled`. For example:
 
 .. code:: python
 
-  @tvm.testing.parametrize_targets
-  def test_mytest(target, dev):
+  @pytest.mark.parametrize("target", ["llvm", pytest.param("cuda", marks=pytest.mark.gpu)])
+  def test_mytest(target):
+      if not tvm.testing.device_enabled(target):
+          pytest.skip(f"{target} not enabled")
+      dev = tvm.device(target)
+      ...
+
+will run ``test_mytest`` with ``target="llvm"`` and ``target="cuda"``, skipping any target whose device is not present. If you only want to test against a single target, drop the parametrization and hardcode the target. Mark GPU tests with ``@pytest.mark.gpu`` so the CI can select them, and skip when the required feature is unavailable with ``@pytest.mark.skipif``. For example, CUDA tests use:
+
+.. code:: python
+
+  @pytest.mark.gpu
+  @pytest.mark.skipif(not tvm.testing.env.has_cuda(), reason="need cuda")
+  def test_mycudatest():
     ...
 
-will run ``test_mytest`` with ``target="llvm"``, ``target="cuda"``, and few others. This also ensures that your test is run on the correct hardware by the CI. If you only want to test against a couple targets use ``@tvm.testing.parametrize_targets("target_1", "target_2")``. If you want to test on a single target, use the associated decorator from :py:func:`tvm.testing`. For example, CUDA tests use the ``@tvm.testing.requires_cuda`` decorator.
+The ``tvm.testing.env`` module exposes a ``has_*()`` probe for each runtime and hardware feature (e.g. ``has_cuda()``, ``has_rocm()``, ``has_vulkan()``, ``has_llvm()``). To skip a test when an optional Python package is missing, use ``pytest.importorskip("package_name")``.
 
 
 Network Resources

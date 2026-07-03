@@ -14,18 +14,21 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: E501, F841
 
 import sys
 import tempfile
 
 import numpy as np
 import pytest
+import tvm_ffi
 
 import tvm
 import tvm.testing
 from tvm import relax
-from tvm.base import TVMError
-from tvm.script import ir as I, relax as R, tir as T
+from tvm.script import ir as I
+from tvm.script import relax as R
+from tvm.script import tirx as T
 
 exec_mode = tvm.testing.parameter("bytecode", "compiled")
 
@@ -54,7 +57,7 @@ def run_cpu(mod, func_name, *args, exec_mode):
 
 
 def test_unique(exec_mode):
-    # TODO(prakalp): also add test for compiling and running on cuda device.
+    # TODO(prakalp): also add test for compiling and running on CUDA device.
     data_numpy = np.random.randint(0, 16, (16, 16))
     data = tvm.runtime.tensor(data_numpy)
     result, result_sorted = run_cpu(InputModule, "foo", data, exec_mode=exec_mode)
@@ -232,10 +235,10 @@ class ShapeOfTest:
 
 def test_op_shape_of(exec_mode):
     unit_shape = run_cpu(ShapeOfTest, "get_scalar_shape", exec_mode=exec_mode)
-    assert unit_shape == tvm.runtime.ShapeTuple([])
+    assert unit_shape == tvm_ffi.Shape([])
 
     const_shape = run_cpu(ShapeOfTest, "get_constant_shape", exec_mode=exec_mode)
-    assert const_shape == tvm.runtime.ShapeTuple([2, 2])
+    assert const_shape == tvm_ffi.Shape([2, 2])
 
     scalar_shape = run_cpu(
         ShapeOfTest,
@@ -243,7 +246,7 @@ def test_op_shape_of(exec_mode):
         tvm.runtime.tensor(np.array(1, dtype="int32")),
         exec_mode=exec_mode,
     )
-    assert scalar_shape == tvm.runtime.ShapeTuple([])
+    assert scalar_shape == tvm_ffi.Shape([])
 
     tensor_shape = run_cpu(
         ShapeOfTest,
@@ -251,7 +254,7 @@ def test_op_shape_of(exec_mode):
         tvm.runtime.tensor(np.zeros((1, 2, 3)).astype("int32")),
         exec_mode=exec_mode,
     )
-    assert tensor_shape == tvm.runtime.ShapeTuple([1, 2, 3])
+    assert tensor_shape == tvm_ffi.Shape([1, 2, 3])
 
     constrained_shape = run_cpu(
         ShapeOfTest,
@@ -259,7 +262,7 @@ def test_op_shape_of(exec_mode):
         tvm.runtime.tensor(np.zeros((1,)).astype("int32")),
         exec_mode=exec_mode,
     )
-    assert constrained_shape == tvm.runtime.ShapeTuple([1])
+    assert constrained_shape == tvm_ffi.Shape([1])
 
 
 @tvm.script.ir_module
@@ -276,34 +279,28 @@ class ShapeToTensorTest:
 
 
 def test_op_shape_to_tensor(exec_mode):
-    # Check struct info
-    isinstance(ShapeToTensorTest["const_shape"].body.struct_info, tvm.relax.TensorStructInfo)
-    assert ShapeToTensorTest["const_shape"].body.struct_info.ndim == 1
-    isinstance(ShapeToTensorTest["symbolic_shape"].body.struct_info, tvm.relax.TensorStructInfo)
-    assert ShapeToTensorTest["symbolic_shape"].body.struct_info.ndim == 1
+    # Check type
+    isinstance(ShapeToTensorTest["const_shape"].body.ty, tvm.relax.TensorType)
+    assert ShapeToTensorTest["const_shape"].body.ty.ndim == 1
+    isinstance(ShapeToTensorTest["symbolic_shape"].body.ty, tvm.relax.TensorType)
+    assert ShapeToTensorTest["symbolic_shape"].body.ty.ndim == 1
 
     # Check its functionality
-    out2d = run_cpu(
-        ShapeToTensorTest, "const_shape", tvm.runtime.ShapeTuple([3, 2]), exec_mode=exec_mode
-    )
+    out2d = run_cpu(ShapeToTensorTest, "const_shape", tvm_ffi.Shape([3, 2]), exec_mode=exec_mode)
     assert isinstance(out2d, tvm.runtime.Tensor)
     assert np.array_equal(out2d.numpy(), np.array([3, 2]))
 
-    out3d = run_cpu(
-        ShapeToTensorTest, "const_shape", tvm.runtime.ShapeTuple([3, 3, 2]), exec_mode=exec_mode
-    )
+    out3d = run_cpu(ShapeToTensorTest, "const_shape", tvm_ffi.Shape([3, 3, 2]), exec_mode=exec_mode)
     assert isinstance(out3d, tvm.runtime.Tensor)
     assert np.array_equal(out3d.numpy(), np.array([3, 3, 2]))
 
     out4d = run_cpu(
-        ShapeToTensorTest, "const_shape", tvm.runtime.ShapeTuple([3, 3, 2, 2]), exec_mode=exec_mode
+        ShapeToTensorTest, "const_shape", tvm_ffi.Shape([3, 3, 2, 2]), exec_mode=exec_mode
     )
     assert isinstance(out4d, tvm.runtime.Tensor)
     assert np.array_equal(out4d.numpy(), np.array([3, 3, 2, 2]))
 
-    outs = run_cpu(
-        ShapeToTensorTest, "symbolic_shape", tvm.runtime.ShapeTuple([3, 2]), exec_mode=exec_mode
-    )
+    outs = run_cpu(ShapeToTensorTest, "symbolic_shape", tvm_ffi.Shape([3, 2]), exec_mode=exec_mode)
     assert isinstance(outs, tvm.runtime.Tensor)
     assert np.array_equal(outs.numpy(), np.array([3, 2]))
 
@@ -314,7 +311,7 @@ def test_op_call_pure_packed(exec_mode):
         @R.function
         def pure_copy(x: R.Tensor((3, 4), "float32")):
             z = R.call_pure_packed(
-                "vm.builtin.copy", x, sinfo_args=(R.Tensor((3, 4), dtype="float32"))
+                "vm.builtin.copy", x, ty_args=(R.Tensor((3, 4), dtype="float32"))
             )
             return z
 
@@ -334,7 +331,7 @@ def test_op_call_inplace_packed(exec_mode):
                 "vm.builtin.copy",
                 x,
                 inplace_indices=0,
-                sinfo_args=(R.Tensor((3, 4), dtype="float32")),
+                ty_args=(R.Tensor((3, 4), dtype="float32")),
             )
             return z
 
@@ -357,7 +354,7 @@ def test_op_call_inplace_packed(exec_mode):
                 x,
                 y,
                 inplace_indices=0,
-                sinfo_args=(R.Tensor((3, 4), dtype="float32")),
+                ty_args=(R.Tensor((3, 4), dtype="float32")),
             )
             return z
 
@@ -392,7 +389,7 @@ def test_op_call_inplace_packed(exec_mode):
                 x,
                 y,
                 inplace_indices=[0, -1],
-                sinfo_args=(R.Tensor((3, 4), dtype="float32"), R.Tensor((3, 4), dtype="float32")),
+                ty_args=(R.Tensor((3, 4), dtype="float32"), R.Tensor((3, 4), dtype="float32")),
             )
             return z
 
@@ -457,13 +454,13 @@ def test_op_call_py_func(exec_mode):
     class CallPyFuncTest:
         @R.function
         def simple_call(x: R.Tensor((3,), "float32")):
-            result = R.call_py_func(R.str("torch_relu"), (x,), out_sinfo=R.Tensor((3,), "float32"))
+            result = R.call_py_func(R.str("torch_relu"), (x,), out_ty=R.Tensor((3,), "float32"))
             return result
 
         @R.function
         def multiple_calls(x: R.Tensor((2,), "float32")):
-            y = R.call_py_func(R.str("torch_relu"), (x,), out_sinfo=R.Tensor((2,), "float32"))
-            z = R.call_py_func(R.str("torch_sigmoid"), (y,), out_sinfo=R.Tensor((2,), "float32"))
+            y = R.call_py_func(R.str("torch_relu"), (x,), out_ty=R.Tensor((2,), "float32"))
+            z = R.call_py_func(R.str("torch_sigmoid"), (y,), out_ty=R.Tensor((2,), "float32"))
             return z
 
     np.random.seed(0)
@@ -495,7 +492,7 @@ def test_op_to_device(exec_mode):
                 x,
                 1,
                 0,
-                sinfo_args=(R.Tensor((3, 4), dtype="float32")),
+                ty_args=(R.Tensor((3, 4), dtype="float32")),
             )
             return z
 
@@ -541,7 +538,7 @@ def test_scalar_tensor_as_branch_condition(exec_mode):
 
 
 def test_prim_value_as_branch_condition(exec_mode):
-    """The condition may be a PrimValue"""
+    """The condition may be a PrimExpr"""
 
     @R.function
     def func(condition: R.Prim("bool")):

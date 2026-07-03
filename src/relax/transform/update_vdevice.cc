@@ -36,15 +36,15 @@ class VDeviceMutator : public ExprMutator {
   VDeviceMutator(const IRModule& mod, VDevice new_vdevice, int64_t index)
       : ExprMutator(mod), mod_(mod), new_vdevice_(new_vdevice) {
     ffi::Array<GlobalInfo> vdevices = mod->global_infos["vdevice"];
-    old_vdevice_ = Downcast<VDevice>(vdevices[index]);
+    old_vdevice_ = vdevices[index].as_or_throw<VDevice>();
   }
 
   using ExprMutator::VisitExpr_;
 
   Expr VisitExpr(const Expr& expr) final {
     auto visited_expr = ExprMutator::VisitExpr(expr);
-    if (visited_expr->struct_info_.defined()) {
-      auto* tinfo = GetStructInfoAs<TensorStructInfoNode>(visited_expr);
+    if (visited_expr->ty.defined()) {
+      auto* tinfo = GetTypeAs<TensorTypeNode>(visited_expr);
       bool unchanged = true;
       if (tinfo != nullptr) {
         if (tinfo->vdevice.defined()) {
@@ -56,11 +56,10 @@ class VDeviceMutator : public ExprMutator {
       }
       if (!unchanged) {
         if (tinfo->shape.defined()) {
-          visited_expr->struct_info_ =
-              TensorStructInfo(tinfo->shape.value(), tinfo->dtype, new_vdevice_, tinfo->span);
+          visited_expr->ty =
+              TensorType(tinfo->shape.value(), tinfo->dtype, new_vdevice_, tinfo->span);
         } else {
-          visited_expr->struct_info_ =
-              TensorStructInfo(tinfo->dtype, tinfo->ndim, new_vdevice_, tinfo->span);
+          visited_expr->ty = TensorType(tinfo->dtype, tinfo->ndim, new_vdevice_, tinfo->span);
         }
       }
     }
@@ -70,7 +69,7 @@ class VDeviceMutator : public ExprMutator {
   IRModule Run() {
     for (const auto& [gv, func] : mod_->functions) {
       if (func->IsInstance<relax::FunctionNode>()) {
-        relax::Function update_func = Downcast<Function>(VisitExpr(func));
+        relax::Function update_func = VisitExpr(func).as_or_throw<Function>();
         builder_->UpdateFunction(gv, update_func);
       }
     }

@@ -25,13 +25,13 @@
 #define TVM_RELAX_ATTRS_SORTING_H_
 
 #include <tvm/relax/expr.h>
-#include <tvm/tir/index_map.h>
+#include <tvm/tirx/index_map.h>
 
 namespace tvm {
 namespace relax {
 
 /*! \brief Attributes used in sort operator */
-struct SortAttrs : public AttrsNodeReflAdapter<SortAttrs> {
+struct SortAttrs : public AttrsNode {
   int axis;
   bool descending;
 
@@ -47,14 +47,14 @@ struct SortAttrs : public AttrsNodeReflAdapter<SortAttrs> {
                 "If it is not specified, it defaults to the ascending order.",
                 refl::DefaultValue(false));
   }
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.SortAttrs", SortAttrs, BaseAttrsNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.SortAttrs", SortAttrs, AttrsNode);
 };  // struct SortAttrs
 
 /*! \brief Attributes used in argsort operator */
-struct ArgsortAttrs : public AttrsNodeReflAdapter<ArgsortAttrs> {
+struct ArgsortAttrs : public AttrsNode {
   int axis;
   bool descending;
-  DataType dtype;
+  ffi::Optional<DLDataType> dtype;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -67,19 +67,18 @@ struct ArgsortAttrs : public AttrsNodeReflAdapter<ArgsortAttrs> {
                 "Whether to argsort in descending order."
                 "If it is not specified, it defaults to the ascending order.",
                 refl::DefaultValue(false))
-        .def_ro("dtype", &ArgsortAttrs::dtype, "DType of the output indices.",
-                refl::DefaultValue(NullValue<DataType>()));
+        .def_ro("dtype", &ArgsortAttrs::dtype, "DType of the output indices.");
   }
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.ArgsortAttrs", ArgsortAttrs, BaseAttrsNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.ArgsortAttrs", ArgsortAttrs, AttrsNode);
 };  // struct ArgsortAttrs
 
 /*! \brief Attributes used in topk operator */
-struct TopKAttrs : public AttrsNodeReflAdapter<TopKAttrs> {
+struct TopKAttrs : public AttrsNode {
   int k;
   int axis;
   bool largest;
   ffi::String ret_type;
-  DataType dtype;
+  ffi::Optional<DLDataType> dtype;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -97,10 +96,9 @@ struct TopKAttrs : public AttrsNodeReflAdapter<TopKAttrs> {
                 "Whether to return largest or smallest elements."
                 "By default, return the largest k elements.",
                 refl::DefaultValue(true))
-        .def_ro("dtype", &TopKAttrs::dtype, "Data type of the output indices.",
-                refl::DefaultValue(NullValue<DataType>()));
+        .def_ro("dtype", &TopKAttrs::dtype, "Data type of the output indices.");
   }
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.TopKAttrs", TopKAttrs, BaseAttrsNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.TopKAttrs", TopKAttrs, AttrsNode);
 };  // struct TopKAttrs
 
 }  // namespace relax

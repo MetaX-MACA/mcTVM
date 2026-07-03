@@ -17,7 +17,6 @@
 # pylint: disable=invalid-name, unused-argument, redefined-argument-from-local
 """Dispatch sampling operators to platform dependent implementation."""
 
-
 from tvm import relax
 from tvm.ir import Op
 from tvm.ir.module import IRModule
@@ -42,7 +41,7 @@ class SamplingDispatcher(BackendDispatcher):
             )
 
             prob, uniform_sample, sample_indices = call.args
-            tgt = self._get_target(call.struct_info)
+            tgt = self._get_target(call.ty)
             dtype = call.attrs.dtype
             _, prob_dtype = self.get_shape_dtype(prob)
             sample_shape, sample_dtype = self.get_shape_dtype(uniform_sample)
@@ -64,10 +63,10 @@ class SamplingDispatcher(BackendDispatcher):
                 return relax.call_tir(
                     gv,
                     [prob, uniform_sample, sample_indices],
-                    out_sinfo=call.struct_info,
+                    out_ty=call.ty,
                 )
             else:
-                cumsum_prob = relax.op.cumsum(prob, axis=1, dtype=prob_dtype, exclusive=False)
+                cumsum_prob = relax.op.cumsum(prob, axis=1, dtype=prob_dtype.dtype, exclusive=False)
                 gv = self.builder_.add_func(
                     generic_get_sample_index(prob_dtype, sample_dtype, sample_indices_dtype, dtype),
                     "get_sample_index",
@@ -75,7 +74,7 @@ class SamplingDispatcher(BackendDispatcher):
                 return relax.call_tir(
                     gv,
                     [cumsum_prob, uniform_sample, sample_indices],
-                    out_sinfo=call.struct_info,
+                    out_ty=call.ty,
                 )
 
         return super().visit_call_(call)

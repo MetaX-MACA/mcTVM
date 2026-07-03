@@ -28,6 +28,7 @@
 #include <tvm/relax/dataflow_matcher.h>
 #include <tvm/relax/dataflow_pattern.h>
 #include <tvm/relax/dataflow_pattern_functor.h>
+#include <tvm/tirx/op.h>
 
 #include <unordered_map>
 #include <utility>
@@ -62,7 +63,7 @@ class DFPatternMatcher : public DFPatternFunctor<bool(const DFPattern&, const Ex
   bool VisitDFPattern_(const ShapePatternNode* op, const Expr& expr) override;
   bool VisitDFPattern_(const TupleGetItemPatternNode* op, const Expr& expr) override;
   bool VisitDFPattern_(const TuplePatternNode* op, const Expr& expr) override;
-  bool VisitDFPattern_(const StructInfoPatternNode* op, const Expr& expr) override;
+  bool VisitDFPattern_(const TypePatternNode* op, const Expr& expr) override;
   bool VisitDFPattern_(const WildcardPatternNode* op, const Expr& expr) override;
   bool VisitDFPattern_(const VarPatternNode* op, const Expr& expr) override;
 
@@ -79,7 +80,7 @@ class DFPatternMatcher : public DFPatternFunctor<bool(const DFPattern&, const Ex
 
   /* \brief Simplify a boolean condition using the analyzer
    *
-   * Matching struct info can often produce conditions that do not
+   * Matching type can often produce conditions that do not
    * simplify cleanly.  For example, while the rewrite simplifier can
    * recognize that `m==0 && m==1` can be simplifies to `false`, it
    * cannot recognize that `m==0 && n==0 && m==1` can be simplified to
@@ -90,10 +91,10 @@ class DFPatternMatcher : public DFPatternFunctor<bool(const DFPattern&, const Ex
    */
   PrimExpr SimplifyCondition(PrimExpr condition);
 
-  std::unordered_map<DFPattern, Expr, ObjectPtrHash, ObjectPtrEqual> memo_;
+  std::unordered_map<DFPattern, Expr, ffi::ObjectPtrHash, ffi::ObjectPtrEqual> memo_;
   var2val_t var2val_;
   std::vector<DFPattern> matched_nodes_;
-  PrimExpr symbolic_expr_condition_{Bool(true)};
+  PrimExpr symbolic_expr_condition_{IntImm::Bool(true)};
   arith::Analyzer analyzer_;
   bool memoize_ = true;
 };

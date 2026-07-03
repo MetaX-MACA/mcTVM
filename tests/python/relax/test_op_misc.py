@@ -14,11 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: F841
+import tvm_ffi
+
 import tvm
 import tvm.testing
 from tvm import relax as rx
 from tvm.script import relax as R
-from tvm.script import tir as T
+from tvm.script import tirx as T
 
 
 @tvm.register_global_func("test.op.identity", override=True)
@@ -26,13 +29,13 @@ def identity_packed(a):
     return tvm.runtime.tensor(a.numpy())
 
 
-@T.prim_func
+@T.prim_func(s_tir=True)
 def identity_tir(a: T.handle, b: T.handle) -> None:
     A = T.match_buffer(a, [54, 96])
     B = T.match_buffer(b, [54, 96])
 
     for i, j in T.grid(54, 96):
-        with T.block("compute"):
+        with T.sblock("compute"):
             vi, vj = T.axis.remap("SS", [i, j])
             B[vi, vj] = A[vi, vj]
 
@@ -57,13 +60,13 @@ def test_call_tir_with_grad():
         te_grad_kwargs={"k": 1.0},
     )
     assert v2.attrs.te_grad_name == "identity_k_grad"
-    assert isinstance(v2.attrs.te_grad_kwargs, tvm.ir.container.Map)
-    val = list(v2.attrs.te_grad_kwargs.items())[0]
+    assert isinstance(v2.attrs.te_grad_kwargs, tvm_ffi.Map)
+    val = next(iter(v2.attrs.te_grad_kwargs.items()))
     assert val[0] == "k" and float(val[1]) == 1.0
 
 
 def test_implicit_op():
-    m, n = tvm.tir.Var("m", "int64"), tvm.tir.Var("n", "int64")
+    m, n = tvm.tirx.Var("m", "int64"), tvm.tirx.Var("n", "int64")
     x = rx.Var("x", R.Tensor([m, n], "float32"))
     y = rx.Var("y", R.Tensor([m, n], "float32"))
     func = rx.Var(
@@ -126,35 +129,35 @@ def test_implicit_op():
 
 def test_vm_alloc_tensor():
     bb = rx.BlockBuilder()
-    storage = rx.Var("storage", rx.TensorStructInfo(dtype="float32"))
+    storage = rx.Var("storage", rx.TensorType(dtype="float32"))
     alloc = rx.op.vm.alloc_tensor(storage, offset=0, shape=rx.ShapeExpr([4, 5]), dtype="float32")
     alloc = bb.normalize(alloc)
-    tvm.ir.assert_structural_equal(alloc.struct_info, R.Tensor([4, 5], "float32"))
+    tvm.ir.assert_structural_equal(alloc.ty, R.Tensor([4, 5], "float32"))
 
 
-def test_vm_alloc_tensor_infer_struct_info():
+def test_vm_alloc_tensor_infer_ty():
     bb = rx.BlockBuilder()
     s1 = rx.Var("s", R.Shape(ndim=3))
-    storage = rx.Var("storage", rx.TensorStructInfo(dtype="float32"))
+    storage = rx.Var("storage", rx.TensorType(dtype="float32"))
     alloc = rx.op.vm.alloc_tensor(storage, offset=0, shape=s1, dtype="float32")
     ret = bb.normalize(alloc)
-    tvm.ir.assert_structural_equal(ret.struct_info, R.Tensor(dtype="float32", ndim=3))
+    tvm.ir.assert_structural_equal(ret.ty, R.Tensor(dtype="float32", ndim=3))
 
 
 def test_vm_kill_object():
     bb = rx.BlockBuilder()
-    storage = rx.Var("storage", rx.TensorStructInfo(dtype="float32"))
+    storage = rx.Var("storage", rx.TensorType(dtype="float32"))
     kill = rx.op.vm.kill_object(storage)
     ret = bb.normalize(kill)
-    tvm.ir.assert_structural_equal(ret.struct_info, R.Tuple([]))
+    tvm.ir.assert_structural_equal(ret.ty, R.Tuple([]))
 
 
 def test_builtin_stop_lift_params():
     bb = rx.BlockBuilder()
-    x = rx.Var("x", rx.TensorStructInfo(shape=[4, 5], dtype="float32"))
+    x = rx.Var("x", rx.TensorType(shape=[4, 5], dtype="float32"))
     x1 = rx.op.builtin.stop_lift_params(x)
     x1 = bb.normalize(x1)
-    tvm.ir.assert_structural_equal(x1.struct_info, R.Tensor([4, 5], "float32"))
+    tvm.ir.assert_structural_equal(x1.ty, R.Tensor([4, 5], "float32"))
 
 
 if __name__ == "__main__":

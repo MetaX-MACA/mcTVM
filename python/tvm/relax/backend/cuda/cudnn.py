@@ -16,6 +16,7 @@
 # under the License.
 
 """Pattern table for cuDNN backend"""
+
 import operator
 from functools import partial, reduce
 
@@ -52,8 +53,8 @@ def _check_conv2d(context: PatternCheckContext) -> bool:
     weight_expr = context.annotated_expr["weight"]
 
     # Check if the data types of input and weights are supported by cuDNN BYOC
-    input_dtype = input_expr.struct_info.dtype
-    weight_dtype = weight_expr.struct_info.dtype
+    input_dtype = input_expr.ty.dtype
+    weight_dtype = weight_expr.ty.dtype
     if not _is_supported_dtype(input_dtype, weight_dtype):
         return False
 
@@ -70,14 +71,14 @@ def _check_stacked_attention(context: PatternCheckContext, layout: str) -> bool:
     if has_leaking_intermediate_variables(context):
         return False
     if layout == "BS3NH":
-        if not context.annotated_expr["stacked_qkv"].struct_info.ndim == 3:
+        if not context.annotated_expr["stacked_qkv"].ty.ndim == 3:
             return False
         if "split" in context.annotated_expr:
             split_op = context.annotated_expr["split"]
             if not split_op.attrs.axis == 2:
                 return False
     elif layout == "SBN3H":
-        if not context.annotated_expr["stacked_qkv"].struct_info.ndim == 4:
+        if not context.annotated_expr["stacked_qkv"].ty.ndim == 4:
             return False
         if "split" in context.annotated_expr:
             split_op = context.annotated_expr["split"]
@@ -166,7 +167,7 @@ class WorkspaceAnnotator(PyExprMutator):
     def visit_function_(self, f):
         if "Composite" not in f.attrs:
             body = super().visit_expr(f.body)
-            new_f = relax.Function(f.params, body, f.ret_struct_info, f.is_pure, f.attrs, f.span)
+            new_f = relax.Function(f.params, body, f.ret_ty, f.is_pure, f.attrs, f.span)
 
             if "global_symbol" in f.attrs and "cudnn" in f.attrs["global_symbol"]:
                 composite_func = body.blocks[0].bindings[0].value
@@ -177,11 +178,11 @@ class WorkspaceAnnotator(PyExprMutator):
 
         if "attention" in f.attrs["Composite"] and "cudnn" in f.attrs["Composite"]:
             # Workspace is needed only for larger head sizes, but for simplicity we always allocate.
-            out_dtype = f.ret_struct_info.dtype
-            out_size_1d = _shape_1d(f.ret_struct_info.shape)
+            out_dtype = f.ret_ty.dtype
+            out_size_1d = _shape_1d(f.ret_ty.shape)
             # This needs to be in sync with the actual value that the kernel expects.
             workspace_size_bytes = out_size_1d * {"float16": 2, "float32": 4}[out_dtype]
-            if not isinstance(workspace_size_bytes, (int, tvm.tir.expr.IntImm)):
+            if not isinstance(workspace_size_bytes, int | tvm.tirx.expr.IntImm):
                 # Tempororay workaround for dynamic shape workload. Will be removed when
                 # workspace for dynamic shape workload is implemented.
                 workspace_size_bytes = 8

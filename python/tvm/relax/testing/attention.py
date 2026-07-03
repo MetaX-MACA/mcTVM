@@ -16,8 +16,10 @@
 # under the License.
 
 """Relax script for attention module."""
+
 import tvm
-from tvm.script import relax as R, tir as T
+from tvm.script import relax as R
+from tvm.script import tirx as T
 from tvm.script.ir_builder import IRBuilder
 from tvm.script.ir_builder import relax as relax_builder
 
@@ -124,7 +126,7 @@ def get_relax_stacked_attention_module(
                         qkv,
                         [split_axis],
                         [split_sections[1]],
-                        [int(qkv.struct_info.shape[split_axis])],
+                        [int(qkv.ty.shape[split_axis])],
                         [1],
                     )
                 else:

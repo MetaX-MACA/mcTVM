@@ -94,6 +94,7 @@ class CodeGenCPU : public CodeGenLLVM {
   llvm::FunctionType* ftype_tvm_ffi_func_call_{nullptr};
   llvm::FunctionType* ftype_tvm_get_func_from_env_{nullptr};
   llvm::FunctionType* ftype_tvm_ffi_error_set_raised_by_c_str_{nullptr};
+  llvm::FunctionType* ftype_tvm_ffi_error_set_raised_from_c_str_parts_{nullptr};
   llvm::FunctionType* ftype_tvm_parallel_launch_{nullptr};
   llvm::FunctionType* ftype_tvm_parallel_barrier_{nullptr};
   llvm::FunctionType* ftype_tvm_register_system_symbol_{nullptr};
@@ -118,13 +119,16 @@ class CodeGenCPU : public CodeGenLLVM {
   llvm::Value* RuntimeTVMFFIFunctionCall();
   llvm::Value* RuntimeTVMGetFuncFromEnv();
   llvm::Value* RuntimeTVMFFIErrorSetRaisedFromCStr();
+  llvm::Value* RuntimeTVMFFIErrorSetRaisedFromCStrParts();
+  // Create a temp function to simplify error raising.
+  llvm::Function* GetOrCreateSetRaisedHelper(int max_n);
   llvm::Value* RuntimeTVMParallelLaunch();
   llvm::Value* RuntimeTVMParallelBarrier();
   llvm::Value* CreateStaticHandle();
   llvm::Value* GetPackedFuncHandle(const std::string& str);
   TypedPointer PackClosureData(const ffi::Array<Var>& fields, uint64_t* num_bytes,
                                std::string struct_name = "");
-  TypedPointer CreateStructRefPtr(DataType t, llvm::Value* buffer, llvm::Value* index, int kind);
+  TypedPointer CreateStructRefPtr(PrimType t, llvm::Value* buffer, llvm::Value* index, int kind);
   void UnpackClosureData(TypedPointer cdata, const ffi::Array<Var>& fields,
                          std::unordered_map<const VarNode*, llvm::Value*>* vmap);
   // Make packed call.
@@ -133,7 +137,7 @@ class CodeGenCPU : public CodeGenLLVM {
     llvm::Value* ret_type_index;
     llvm::BasicBlock* end_block;
   };
-  PackedCall MakeCallPackedLowered(const ffi::Array<PrimExpr>& args, const DataType& r_type,
+  PackedCall MakeCallPackedLowered(const ffi::Array<PrimExpr>& args, const PrimType& r_type,
                                    const int64_t begin, const int64_t end, bool use_string_lookup);
   // create call into tvm packed function.
   llvm::Value* CreateCallPacked(const CallNode* op);
@@ -166,11 +170,14 @@ class CodeGenCPU : public CodeGenLLVM {
   llvm::Function* f_tvm_ffi_func_call_{nullptr};
   llvm::Function* f_tvm_get_func_from_env_{nullptr};
   llvm::Function* f_tvm_ffi_set_raised_by_c_str_{nullptr};
+  llvm::Function* f_tvm_ffi_set_raised_from_c_str_parts_{nullptr};
   llvm::Function* f_tvm_parallel_launch_{nullptr};
   llvm::Function* f_tvm_parallel_barrier_{nullptr};
   llvm::Function* f_tvm_register_system_symbol_{nullptr};
   // Current parallel environment scope.
   ParallelEnv parallel_env_;
+  // cached noinline helper functions for SetRaisedFromCStrParts
+  std::unordered_map<int, llvm::Function*> set_raised_helpers_;
   // global to packed function handle
   std::unordered_map<std::string, llvm::GlobalVariable*> func_handle_map_;
   // List of symbols to be exported to TVM system lib.

@@ -23,11 +23,12 @@
  * \brief Run codegen for annotated relax functions.
  */
 
+#include <tvm/ffi/cast.h>
+#include <tvm/ffi/extra/module.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/analysis.h>
 #include <tvm/relax/expr_functor.h>
 #include <tvm/relax/transform.h>
-#include <tvm/runtime/module.h>
 
 #include "../../support/ordered_set.h"
 #include "utils.h"
@@ -45,7 +46,7 @@ class CodeGenRunner : ExprMutator {
                ffi::Array<ffi::String> entry_function_names) {
     IRModule mod = builder_->GetContextIRModule();
 
-    support::OrderedSet<GlobalVar, ObjectPtrHash, ObjectPtrEqual> entry_functions;
+    support::OrderedSet<GlobalVar, ffi::ObjectPtrHash, ffi::ObjectPtrEqual> entry_functions;
     // Any user-provided functions are treated as entry functions.
     for (const auto& name : entry_function_names) {
       entry_functions.insert(mod->GetGlobalVar(name));
@@ -74,7 +75,7 @@ class CodeGenRunner : ExprMutator {
     }
 
     for (const auto& gvar : entry_functions) {
-      builder_->UpdateFunction(gvar, Downcast<BaseFunc>(VisitExpr(mod->Lookup(gvar))));
+      builder_->UpdateFunction(gvar, VisitExpr(mod->Lookup(gvar)).as_or_throw<BaseFunc>());
     }
 
     auto ext_mods = InvokeCodegen(mod, target_options.value_or({}));
@@ -92,7 +93,7 @@ class CodeGenRunner : ExprMutator {
       // Some backends (e.g. TensorRT) expect constants to be passed when they are instantiated
       ffi::Map<ffi::String, runtime::Tensor> constants;
       for (const auto& [constant, name] : constant_names) {
-        ICHECK(!constants.count(name)) << "More than one constant with the name " << name;
+        TVM_FFI_ICHECK(!constants.count(name)) << "More than one constant with the name " << name;
         constants.Set(name, constant->data);
       }
       out_mod = WithAttr(out_mod, tvm::attr::kConstNameToConstant, std::move(constants));
@@ -105,23 +106,22 @@ class CodeGenRunner : ExprMutator {
   using ExprMutator::VisitExpr_;
 
   Expr VisitExpr_(const CallNode* call_node) override {
-    auto call = Downcast<Call>(ExprMutator::VisitExpr_(call_node));
+    auto call = ExprMutator::VisitExpr_(call_node).as_or_throw<Call>();
     if (auto const* gvar_node = call_node->op.as<GlobalVarNode>()) {
       const GlobalVar gvar = ffi::GetRef<GlobalVar>(gvar_node);
 
-      auto create_call_dps_packed = [call_node, this](Expr extern_func,
-                                                      StructInfo ret_struct_info) {
+      auto create_call_dps_packed = [call_node, this](Expr extern_func, Type ret_ty) {
         ffi::Array<Expr> new_args({extern_func});
         new_args.push_back(Tuple(call_node->args.Map([this](Expr arg) { return VisitExpr(arg); })));
 
         static const Op& call_op = Op::Get("relax.call_dps_packed");
 
-        return Call(call_op, new_args, tvm::Attrs(), {ret_struct_info});
+        return Call(call_op, new_args, tvm::Attrs(), {ret_ty});
       };
 
-      auto ret_sinfo = GetStructInfo(call);
+      auto ret_ty = GetType(call);
       if (auto it = extern_funcs_.find(gvar_node); it != extern_funcs_.end()) {
-        return create_call_dps_packed(it->second, ret_sinfo);
+        return create_call_dps_packed(it->second, ret_ty);
       } else if (auto opt_func = builder_->GetContextIRModule()->Lookup(gvar).as<Function>()) {
         // TODO(@sunggg): Is there any better way to get this func?
         Function func = opt_func.value();
@@ -132,11 +132,11 @@ class CodeGenRunner : ExprMutator {
           // Remove the global symbol and codegen attributes from the function so that it can be
           // removed the module.
           const auto RemoveFuncAttrFunc = tvm::ffi::Function::GetGlobal("ir.BaseFuncWithoutAttr");
-          ICHECK(RemoveFuncAttrFunc.has_value());
+          TVM_FFI_ICHECK(RemoveFuncAttrFunc.has_value());
           func = (*RemoveFuncAttrFunc)(func, tvm::attr::kGlobalSymbol).cast<Function>();
           func = (*RemoveFuncAttrFunc)(func, attr::kCodegen).cast<Function>();
           builder_->UpdateFunction(gvar, func);
-          return create_call_dps_packed(new_func, ret_sinfo);
+          return create_call_dps_packed(new_func, ret_ty);
         }
       }
     }
@@ -145,7 +145,7 @@ class CodeGenRunner : ExprMutator {
       new_args.push_back(VisitExpr(arg));
     }
 
-    return Call(call_node->op, new_args, call_node->attrs, call_node->sinfo_args, call_node->span);
+    return Call(call_node->op, new_args, call_node->attrs, call_node->ty_args, call_node->span);
   }
 
   Expr VisitExpr_(const FunctionNode* func_node) override {
@@ -154,11 +154,11 @@ class CodeGenRunner : ExprMutator {
     if (opt_codegen) {
       auto ext_symbol = GetExtSymbol(func);
       size_t count = 0;
-      PostOrderVisit(func->body, [=, &count](Expr e) {
+      PostOrderVisit(func->body, [=, this, &count](Expr e) {
         if (e->IsInstance<ConstantNode>()) {
           // Make sure to pick a unique name
           auto name = ext_symbol + "_" + opt_codegen.value() + "_const_" + std::to_string(count++);
-          auto constant = Downcast<Constant>(e);
+          auto constant = e.as_or_throw<Constant>();
           constant_names.Set(constant, name);
         }
       });
@@ -174,12 +174,12 @@ class CodeGenRunner : ExprMutator {
     std::unordered_map<std::string, ffi::Array<Function>> target_functions;
 
     for (const auto& entry : mod->functions) {
-      if (entry.second->IsInstance<tir::PrimFuncNode>()) {
+      if (entry.second->IsInstance<tirx::PrimFuncNode>()) {
         continue;
       }
       PostOrderVisit(entry.second, [&target_functions](Expr e) {
         if (e->IsInstance<FunctionNode>()) {
-          auto f = Downcast<Function>(e);
+          auto f = e.as_or_throw<Function>();
           if (auto target_opt = f->GetAttr<ffi::String>(attr::kCodegen)) {
             ffi::String target = target_opt.value();
             target_functions[target].push_back(f);
@@ -196,7 +196,7 @@ class CodeGenRunner : ExprMutator {
       // Get the codegen with its ffi key.
       ffi::String codegen_name = "relax.ext." + target;
       const auto codegen = tvm::ffi::Function::GetGlobal(codegen_name);
-      ICHECK(codegen.has_value()) << "Codegen is not found: " << codegen_name << "\n";
+      TVM_FFI_ICHECK(codegen.has_value()) << "Codegen is not found: " << codegen_name << "\n";
 
       ffi::Array<ffi::Module> compiled_functions =
           (*codegen)(functions, options, constant_names).cast<ffi::Array<ffi::Module>>();

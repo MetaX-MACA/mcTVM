@@ -25,17 +25,18 @@
 #define TVM_RELAX_TRANSFORM_UTILS_H_
 
 #include <builtin_fp16.h>
+#include <tvm/ffi/cast.h>
 #include <tvm/ir/module.h>
 #include <tvm/relax/expr.h>
 #include <tvm/relax/expr_functor.h>
-#include <tvm/tir/expr_functor.h>
+#include <tvm/tirx/expr_functor.h>
 
 #include <algorithm>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
-#include "../../support/array.h"
 #include "../analysis/graph_partitioner.h"
 #include "../op/nn/convolution.h"
 #include "../op/nn/nn.h"
@@ -73,7 +74,7 @@ class MemoizedExprTranslator : public ::tvm::relax::ExprFunctor<OutputType(const
    * \return The result of the call
    */
   virtual OutputType VisitExpr(const Expr& n) {
-    ICHECK(n.defined());
+    TVM_FFI_ICHECK(n.defined());
     auto it = memo_.find(n);
     if (it != memo_.end()) {
       return it->second;
@@ -84,12 +85,12 @@ class MemoizedExprTranslator : public ::tvm::relax::ExprFunctor<OutputType(const
   }
 
   virtual OutputType VisitExpr_(const VarNode* vn) {
-    ICHECK(memo_.count(ffi::GetRef<Expr>(vn)));
+    TVM_FFI_ICHECK(memo_.count(ffi::GetRef<Expr>(vn)));
     return memo_[ffi::GetRef<Expr>(vn)];
   }
 
   virtual OutputType VisitBinding_(const VarBindingNode* binding) {
-    ICHECK_EQ(memo_.count(binding->var), 0);
+    TVM_FFI_ICHECK_EQ(memo_.count(binding->var), 0);
     auto v = VisitExpr(binding->value);
     memo_[binding->var] = v;
     return v;
@@ -97,7 +98,7 @@ class MemoizedExprTranslator : public ::tvm::relax::ExprFunctor<OutputType(const
 
  protected:
   /*! \brief Internal map used for memoization. */
-  std::unordered_map<Expr, OutputType, ObjectPtrHash, ObjectPtrEqual> memo_;
+  std::unordered_map<Expr, OutputType, ffi::ObjectPtrHash, ffi::ObjectPtrEqual> memo_;
 };
 
 /*!
@@ -125,7 +126,7 @@ TVM_DLL IRModule DeadCodeElimination(const IRModule& mod, ffi::Array<ffi::String
  */
 inline std::string GetExtSymbol(const Function& func) {
   const auto name_node = func->GetAttr<ffi::String>(tvm::attr::kGlobalSymbol);
-  ICHECK(name_node.has_value()) << "Fail to retrieve external symbol.";
+  TVM_FFI_ICHECK(name_node.has_value()) << "Fail to retrieve external symbol.";
   return std::string(name_node.value());
 }
 
@@ -141,16 +142,16 @@ inline std::string GetExtSymbol(const Function& func) {
  * \return A new module containing grouped functions.
  */
 IRModule MakeGroupedFunctions(
-    IRModule mod, const std::unordered_map<const Object*, GraphPartitioner::Group*>& partition,
+    IRModule mod, const std::unordered_map<const ffi::Object*, GraphPartitioner::Group*>& partition,
     bool lift_constants = true, const ffi::Array<ffi::String>& entry_function_names = {});
 
 /*!
- * \brief Check if the given StructInfo is a scalar tensor. The sinfo should be an instance of
- * TensorStructInfo; its shape must be ShapeExpr.
- * \param sinfo The StructInfo to be checked.
- * \return true if the given StructInfo is a scalar tensor.
+ * \brief Check if the given Type is a scalar tensor. The ty should be an instance of
+ * TensorType; its shape must be ShapeExpr.
+ * \param ty The Type to be checked.
+ * \return true if the given Type is a scalar tensor.
  */
-bool IsScalarTensor(const StructInfo& sinfo);
+bool IsScalarTensor(const Type& ty);
 
 /*!
  * \brief Check if the given expr is a scalar tensor. Now the shape of the tensor expr must be
@@ -161,32 +162,32 @@ bool IsScalarTensor(const StructInfo& sinfo);
 bool IsScalarTensor(const Expr& expr);
 
 /*!
- * \brief Check if the given StructInfo is a nested tensor StructInfo satisfying the given
+ * \brief Check if the given Type is a nested tensor Type satisfying the given
  * condition f_condition.
- * \param sinfo The StructInfo to be checked.
- * \param f_condition The condition function for each leaf StructInfo with signature
- * `bool f_condition(TensorStructInfo)`.
+ * \param ty The Type to be checked.
+ * \param f_condition The condition function for each leaf Type with signature
+ * `bool f_condition(TensorType)`.
  * \tparam FType The condition function type.
- * \return true if the given StructInfo is a nested tensor satisfying the given f_condition.
+ * \return true if the given Type is a nested tensor satisfying the given f_condition.
  */
 template <typename FType>
-bool IsNestedTensorConditioned(const StructInfo& sinfo, FType f_condition) {
-  if (const auto* tensor_sinfo = sinfo.as<TensorStructInfoNode>()) {
-    return f_condition(ffi::GetRef<TensorStructInfo>(tensor_sinfo));
-  } else if (const auto* tuple_sinfo = sinfo.as<TupleStructInfoNode>()) {
-    return !std::any_of(
-        tuple_sinfo->fields.begin(), tuple_sinfo->fields.end(),
-        [&](const StructInfo& field) { return !IsNestedTensorConditioned(field, f_condition); });
+bool IsNestedTensorConditioned(const Type& ty, FType f_condition) {
+  if (const auto* tensor_ty = ty.as<TensorTypeNode>()) {
+    return f_condition(ffi::GetRef<TensorType>(tensor_ty));
+  } else if (const auto* tuple_ty = ty.as<TupleTypeNode>()) {
+    return !std::any_of(tuple_ty->fields.begin(), tuple_ty->fields.end(), [&](const Type& field) {
+      return !IsNestedTensorConditioned(field, f_condition);
+    });
   }
   return false;
 }
 
 /*!
- * \brief Check if the given StructInfo is a nested tensor.
- * \param sinfo The StructInfo to be checked.
- * \return true if the given StructInfo is a nested tensor.
+ * \brief Check if the given Type is a nested tensor.
+ * \param ty The Type to be checked.
+ * \return true if the given Type is a nested tensor.
  */
-bool IsNestedTensor(const StructInfo& sinfo);
+bool IsNestedTensor(const Type& ty);
 
 /*!
  * \brief Check if the given expr is a nested tensor.
@@ -198,7 +199,7 @@ bool IsNestedTensor(const Expr& expr);
 // TODO(@bohan): implements some postorder function accepts a visitor closure
 class VarReplacer : public ExprMutator {
  public:
-  using VarMap = std::unordered_map<Id, Var, ObjectPtrHash, ObjectPtrEqual>;
+  using VarMap = std::unordered_map<Id, Var, ffi::ObjectPtrHash, ffi::ObjectPtrEqual>;
 
   explicit VarReplacer(const VarMap& var_remap) : var_remap_(var_remap) {}
 
@@ -222,32 +223,32 @@ class VarReplacer : public ExprMutator {
  * \details This mutator is used to prevent the same symbolic var from being used in different
  *          functions, which is malformed.
  */
-class SymbolicVarRenewMutator : public ExprMutator, tir::ExprMutator {
+class SymbolicVarRenewMutator : public ExprMutator, tirx::ExprMutator {
  public:
   static Function Renew(const Function& function) {
     SymbolicVarRenewMutator mutator;
-    return Downcast<Function>(mutator.VisitExpr(function));
+    return mutator.VisitExpr(function).as_or_throw<Function>();
   }
   SymbolicVarRenewMutator() = default;
 
  protected:
   using relax::ExprMutator::VisitExpr;
   using relax::ExprMutator::VisitExpr_;
-  using tir::ExprMutator::VisitExpr_;
+  using tirx::ExprMutator::VisitExpr_;
 
-  PrimExpr VisitPrimExpr(const PrimExpr& expr) final { return tir::ExprMutator::VisitExpr(expr); }
+  PrimExpr VisitPrimExpr(const PrimExpr& expr) final { return tirx::ExprMutator::VisitExpr(expr); }
 
   // TODO(Siyuan): enhance the method to the following steps:
-  // 1. Visit and replace all tir::Vars at the definition point
+  // 1. Visit and replace all tirx::Vars at the definition point
   // 2. Revisit the function again and update the use side.
-  PrimExpr VisitExpr_(const tir::VarNode* op) final {
-    auto it = var_map_.find(ffi::GetRef<tir::Var>(op));
+  PrimExpr VisitExpr_(const tirx::VarNode* op) final {
+    auto it = var_map_.find(ffi::GetRef<tirx::Var>(op));
     if (it != var_map_.end()) {
       return (*it).second;
     } else {
-      auto n = ffi::make_object<tir::VarNode>(*op);
-      tir::Var v(n);
-      var_map_.Set(ffi::GetRef<tir::Var>(op), v);
+      auto n = ffi::make_object<tirx::VarNode>(*op);
+      tirx::Var v(n);
+      var_map_.Set(ffi::GetRef<tirx::Var>(op), v);
       return v;
     }
   }
@@ -269,23 +270,23 @@ class SymbolicVarRenewMutator : public ExprMutator, tir::ExprMutator {
     if (all_params_unchanged && body.same_as(op->body)) {
       return ffi::GetRef<Expr>(op);
     } else {
-      auto new_ret_sinfo = this->VisitExprDepStructInfoField(op->ret_struct_info);
-      return Function(params, body, new_ret_sinfo, op->is_pure, op->attrs);
+      auto new_ret_ty = this->VisitExprDepTypeField(op->ret_ty);
+      return Function(params, body, new_ret_ty, op->is_pure, op->attrs);
     }
   }
 
-  ffi::Map<tir::Var, tir::Var> var_map_;
+  ffi::Map<tirx::Var, tirx::Var> var_map_;
 };
 
 /*!
- * \brief Copy a function while renewing the relax Vars and the tir Vars.
+ * \brief Copy a function while renewing the relax Vars and the tirx Vars.
  * \details All variables that are bound inside the original function would be copied to satisfy
  * the restriction in the well-formed check: Variables in Relax must be bound exactly once.
  */
 class FunctionCopier : public SymbolicVarRenewMutator {
  public:
   FunctionCopier() = default;
-  Function Copy(Function func) { return Downcast<Function>(VisitExpr(func)); }
+  Function Copy(Function func) { return VisitExpr(func).as_or_throw<Function>(); }
   ffi::Map<Var, Var> GetVarMap() { return relax_var_map_; }
 
  private:
@@ -293,7 +294,7 @@ class FunctionCopier : public SymbolicVarRenewMutator {
 
   Var VisitVarDef_(const DataflowVarNode* var) override {
     Var new_var = SymbolicVarRenewMutator::VisitVarDef_(var);
-    Var copied_var = DataflowVar(new_var->name_hint(), GetStructInfo(new_var), new_var->span);
+    Var copied_var = DataflowVar(new_var->name_hint(), GetType(new_var), new_var->span);
     var_remap_[var->vid] = copied_var;
     relax_var_map_.Set(ffi::GetRef<Var>(var), copied_var);
     return copied_var;
@@ -301,7 +302,7 @@ class FunctionCopier : public SymbolicVarRenewMutator {
 
   Var VisitVarDef_(const VarNode* var) override {
     Var new_var = SymbolicVarRenewMutator::VisitVarDef_(var);
-    Var copied_var = Var(new_var->name_hint(), GetStructInfo(new_var), new_var->span);
+    Var copied_var = Var(new_var->name_hint(), GetType(new_var), new_var->span);
     var_remap_[var->vid] = copied_var;
     relax_var_map_.Set(ffi::GetRef<Var>(var), copied_var);
     return copied_var;
@@ -318,69 +319,86 @@ class FunctionCopier : public SymbolicVarRenewMutator {
  * \return A Constant.
  */
 template <typename T>
-inline Constant MakeConstantScalar(T value, DataType dtype) {
+inline Constant MakeConstantScalar(T value, DLDataType dtype) {
   runtime::Tensor arr = runtime::Tensor::Empty({}, dtype, {kDLCPU, 0});
-  if (dtype == DataType::Float(32)) {
+  if (dtype == DLDataType{kDLFloat, 32, 1}) {
     *static_cast<float*>(arr->data) = static_cast<float>(value);
-  } else if (dtype == DataType::Float(64)) {
+  } else if (dtype == DLDataType{kDLFloat, 64, 1}) {
     *static_cast<double*>(arr->data) = static_cast<double>(value);
-  } else if (dtype == DataType::Int(32)) {
+  } else if (dtype == DLDataType{kDLInt, 32, 1}) {
     *static_cast<int32_t*>(arr->data) = static_cast<int32_t>(value);
-  } else if (dtype == DataType::Int(64)) {
+  } else if (dtype == DLDataType{kDLInt, 64, 1}) {
     *static_cast<int64_t*>(arr->data) = static_cast<int64_t>(value);
-  } else if (dtype == DataType::Bool()) {
+  } else if (dtype == DLDataType{kDLBool, 8, 1}) {
     *static_cast<bool*>(arr->data) = static_cast<bool>(value);
-  } else if (dtype == DataType::UInt(8)) {
+  } else if (dtype == DLDataType{kDLUInt, 8, 1}) {
     *static_cast<uint8_t*>(arr->data) = static_cast<uint8_t>(value);
-  } else if (dtype == DataType::UInt(16)) {
+  } else if (dtype == DLDataType{kDLUInt, 16, 1}) {
     *static_cast<uint16_t*>(arr->data) = static_cast<uint16_t>(value);
-  } else if (dtype == DataType::UInt(32)) {
+  } else if (dtype == DLDataType{kDLUInt, 32, 1}) {
     *static_cast<uint32_t*>(arr->data) = static_cast<uint32_t>(value);
-  } else if (dtype == DataType::UInt(64)) {
+  } else if (dtype == DLDataType{kDLUInt, 64, 1}) {
     *static_cast<uint64_t*>(arr->data) = static_cast<uint64_t>(value);
-  } else if (dtype == DataType::Int(8)) {
+  } else if (dtype == DLDataType{kDLInt, 8, 1}) {
     *static_cast<int8_t*>(arr->data) = static_cast<int8_t>(value);
-  } else if (dtype == DataType::Int(16)) {
+  } else if (dtype == DLDataType{kDLInt, 16, 1}) {
     *static_cast<int16_t*>(arr->data) = static_cast<int16_t>(value);
-  } else if (dtype == DataType::Int(32)) {
+  } else if (dtype == DLDataType{kDLInt, 32, 1}) {
     *static_cast<int32_t*>(arr->data) = static_cast<int32_t>(value);
-  } else if (dtype == DataType::Int(64)) {
+  } else if (dtype == DLDataType{kDLInt, 64, 1}) {
     *static_cast<int64_t*>(arr->data) = static_cast<int64_t>(value);
-  } else if (dtype == DataType::Float(16)) {
+  } else if (dtype == DLDataType{kDLFloat, 16, 1}) {
     // convert to float16 storage is uint16_t
     *static_cast<uint16_t*>(arr->data) =
         __truncXfYf2__<float, uint32_t, 23, uint16_t, uint16_t, 10>(static_cast<float>(value));
-  } else if (dtype == DataType::BFloat(16)) {
+  } else if (dtype == DLDataType{kDLBfloat, 16, 1}) {
     // convert to bfloat16 storage is uint16_t
     *static_cast<uint16_t*>(arr->data) =
         __truncXfYf2__<float, uint32_t, 23, uint16_t, uint16_t, 7>(static_cast<float>(value));
   } else {
-    LOG(FATAL) << "Unsupported dtype " << dtype;
+    TVM_FFI_THROW(InternalError) << "Unsupported dtype " << dtype;
   }
   return Constant(arr);
 }
 
-inline ffi::Array<Integer> GetOrderedPositiveAxes(const ffi::Array<Integer>& axes, int ndim) {
+inline ffi::Array<int64_t> GetOrderedPositiveAxes(const ffi::Array<int64_t>& axes, int ndim) {
   std::vector<int64_t> ret;
   ret.reserve(axes.size());
-  for (const auto& axis : axes) {
-    int64_t axis_val = axis->value;
+  for (int64_t axis_val : axes) {
     if (axis_val < 0) {
       axis_val += ndim;
     }
-    ICHECK(axis_val >= 0 && axis_val < ndim) << "axis " << axis << " is out of bounds for array of "
-                                             << "dimension " << ndim;
+    TVM_FFI_ICHECK(axis_val >= 0 && axis_val < ndim)
+        << "axis " << axis_val << " is out of bounds for array of "
+        << "dimension " << ndim;
     ret.push_back(axis_val);
   }
   std::sort(ret.begin(), ret.end());
-  return support::AsArray<int64_t, Integer>(ret);
+  ffi::Array<int64_t> result;
+  result.reserve(ret.size());
+  for (int64_t x : ret) result.push_back(x);
+  return result;
 }
 
 inline ffi::String GetCodegenName(const std::string& composite_name) {
   auto delim_pos = composite_name.find(".");
-  ICHECK(delim_pos != std::string::npos) << "The pattern name for a composite function should "
-                                            "start with a compiler name followed by period.";
+  TVM_FFI_ICHECK(delim_pos != std::string::npos)
+      << "The pattern name for a composite function should "
+         "start with a compiler name followed by period.";
   return composite_name.substr(0, delim_pos);
+}
+
+inline int GetDeviceIndexByScope(const IRModule& mod, const ffi::String& scope) {
+  if (mod->global_infos.find("vdevice") == mod->global_infos.end()) {
+    return 0;
+  }
+  ffi::Array<GlobalInfo> vdevices = mod->global_infos["vdevice"];
+  for (int i = 0; i < static_cast<int>(vdevices.size()); ++i) {
+    if (scope == vdevices[i].as<VDevice>().value()->memory_scope) {
+      return i;
+    }
+  }
+  return 0;
 }
 
 inline int GetDeviceIndex(const IRModule& mod, const VDevice& vdevice) {
@@ -390,8 +408,19 @@ inline int GetDeviceIndex(const IRModule& mod, const VDevice& vdevice) {
       return i;
     }
   }
-  LOG(FATAL) << "The vdevice is not in the ir_module.";
+  TVM_FFI_THROW(InternalError) << "The vdevice is not in the ir_module.";
   return -1;
+}
+
+inline ffi::Optional<VDevice> GetGlobalVDevice(const IRModule& mod, const int index) {
+  ffi::Optional<VDevice> ret;
+  if (mod->global_infos.find("vdevice") != mod->global_infos.end()) {
+    ffi::Array<GlobalInfo> vdevices = mod->global_infos["vdevice"];
+    if (index < static_cast<int>(vdevices.size())) {
+      ret = vdevices[index].as<VDevice>();
+    }
+  }
+  return ret;
 }
 
 /* \brief Eliminate common subexpressions

@@ -14,19 +14,22 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: F401
 """Provide abstraction for defining optimizers and a set of common optimizers."""
 
 from decimal import Decimal
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import numpy as np  # type: ignore
+import tvm_ffi
 
 import tvm
 
 from ..block_builder import BlockBuilder
-from ..struct_info import TensorStructInfo, TupleStructInfo
-from ..op import add, subtract, multiply, divide, sqrt
-from ..expr import const, Var, Function, TupleGetItem, Tuple as RxTuple
+from ..expr import Function, TupleGetItem, Var, const
+from ..expr import Tuple as RxTuple
+from ..op import add, divide, multiply, sqrt, subtract
+from ..type import TensorType, TupleType
 
 
 # TODO(chaofan, yixin): Migrate key logics to C++
@@ -51,7 +54,7 @@ class Optimizer:
     param_list : List[Var]
         The list of variables to optimize. Will be set in `init()`.
 
-    state : tvm.ir.Array
+    state : tvm_ffi.Array
         `state` is an runtime Array representing the state of the optimizer. Will be set in
         `init()`.
 
@@ -69,6 +72,7 @@ class Optimizer:
     For detailed examples, please see the tutorial.
 
     .. code-block:: python
+
         # Construct the optimizer
         opt = relax.optimizer.SGD(0.1)
 
@@ -99,8 +103,8 @@ class Optimizer:
 
     dtype: str
     name: str
-    param_list: List[Var]
-    state: tvm.ir.Array
+    param_list: list[Var]
+    state: tvm_ffi.Array
 
     def __init__(self, name: str) -> None:
         self.name = name
@@ -108,7 +112,7 @@ class Optimizer:
         self.state = None
         self.dtype = None
 
-    def init(self, params: Union[Var, List[Var]]) -> "Optimizer":
+    def init(self, params: Var | list[Var]) -> "Optimizer":
         """Set the parameters, determine the dtype, and construct the initial state for the
         optimizer.
 
@@ -133,31 +137,31 @@ class Optimizer:
         self.state = None
         return self
 
-    def _set_params_and_dtype(self, params: List[Var]) -> None:
+    def _set_params_and_dtype(self, params: list[Var]) -> None:
         """Check params is legal and set the param_list and dtype of the optimizer."""
         params_set = set()
         dtype = None
         for x in params:
             if not isinstance(x, Var):
                 raise ValueError(f"Parameter {x} is not a Var")
-            if not isinstance(x.struct_info, TensorStructInfo):
+            if not isinstance(x.ty, TensorType):
                 raise ValueError(
                     f"Optimizers only support Tensor parameters, but parameter {x.name_hint} has "
-                    f"struct info {x.struct_info}"
+                    f"type {x.ty}"
                 )
-            data_type = tvm.DataType(x.struct_info.dtype)
-            if not data_type.type_code in (tvm.DataTypeCode.BFLOAT, tvm.DataTypeCode.FLOAT):
+            data_type = tvm.DataType(x.ty.dtype.dtype)
+            if data_type.type_code not in (tvm.DataTypeCode.BFLOAT, tvm.DataTypeCode.FLOAT):
                 raise ValueError(
                     f"Optimizers only support Tensor parameters of floating point dtype, but dtype "
-                    f"of {x.name_hint} is {x.struct_info.dtype}"
+                    f"of {x.name_hint} is {x.ty.dtype}"
                 )
             if dtype is None:
-                dtype = x.struct_info.dtype
+                dtype = x.ty.dtype
             else:
-                if dtype != x.struct_info.dtype:
+                if dtype != x.ty.dtype:
                     raise ValueError(
                         f"All parameters should have the same dtype, but parameter {x.name_hint} "
-                        f"has dtype {x.struct_info.dtype}, which differs from the previous dtype "
+                        f"has dtype {x.ty.dtype}, which differs from the previous dtype "
                         f"{dtype}"
                     )
             if x in params_set:
@@ -192,6 +196,7 @@ class Optimizer:
         gradient descent method with lr = 0.1.
 
         .. code-block:: python
+
             @R.function
             def SGD(
                 params: R.Tuple(R.Tensor((3, 3), "float32"), R.Tensor((3,), "float32")),
@@ -225,8 +230,8 @@ class Optimizer:
 
 
 # TODO(chaofan, yixin): Support symbolic shapes
-def _get_shape_as_int_list(var: Var) -> List[int]:
-    return [int(val) for val in var.struct_info.shape]
+def _get_shape_as_int_list(var: Var) -> list[int]:
+    return [int(val) for val in var.ty.shape]
 
 
 # We need to subtract on hyperparameters, but do not want to introduce floating point error.
@@ -242,6 +247,7 @@ class SGD(Optimizer):
     The returned function of `get_function()` is equivalent to the following numpy code:
 
     .. code-block:: python
+
         def SGD(param_tuple, grad_tuple, state_tuple):
             num_steps = state_tuple[0]
             param_tuple_new, state_tuple_new = [], []
@@ -266,7 +272,7 @@ class SGD(Optimizer):
         self.lr = float(lr)
         self.weight_decay = float(weight_decay)
 
-    def init(self, params: Union[Var, List[Var]]) -> "SGD":
+    def init(self, params: Var | list[Var]) -> "SGD":
         """Set the parameters, determine the dtype, and construct the initial state for the
         optimizer.
 
@@ -311,9 +317,9 @@ class SGD(Optimizer):
         dtype = self.dtype
 
         # input variables
-        param_var = Var("params", TupleStructInfo([p.struct_info for p in plist]))
-        grad_var = Var("gradients", TupleStructInfo([p.struct_info for p in plist]))
-        state_var = Var("optim_states", TupleStructInfo([TensorStructInfo((), "int64")]))
+        param_var = Var("params", TupleType([p.ty for p in plist]))
+        grad_var = Var("gradients", TupleType([p.ty for p in plist]))
+        state_var = Var("optim_states", TupleType([TensorType((), "int64")]))
 
         # constants
         lr = const(self.lr, dtype)
@@ -354,6 +360,7 @@ class MomentumSGD(Optimizer):
     The returned function of `get_function()` is equivalent to the following numpy code:
 
     .. code-block:: python
+
         def MomentumSGD(param_tuple, grad_tuple, state_tuple):
             num_steps = state_tuple[0]
             param_tuple_new, state_tuple_new = [], []
@@ -407,7 +414,7 @@ class MomentumSGD(Optimizer):
         self.dampening = float(dampening)
         self.nesterov = nesterov
 
-    def init(self, params: Union[Var, List[Var]]) -> "MomentumSGD":
+    def init(self, params: Var | list[Var]) -> "MomentumSGD":
         """Set the parameters, determine the dtype, and construct the initial state for the
         optimizer.
 
@@ -436,7 +443,7 @@ class MomentumSGD(Optimizer):
             tvm.runtime.tensor(np.zeros((), "int64")),
             # v_{param} is initialized to all zeros
             *(
-                tvm.runtime.tensor(np.zeros(_get_shape_as_int_list(p), p.struct_info.dtype))
+                tvm.runtime.tensor(np.zeros(_get_shape_as_int_list(p), p.ty.dtype.dtype))
                 for p in self.param_list
             ),
         )
@@ -457,11 +464,11 @@ class MomentumSGD(Optimizer):
         dtype = self.dtype
 
         # input variables
-        param_var = Var("params", TupleStructInfo([p.struct_info for p in plist]))
-        grad_var = Var("gradients", TupleStructInfo([p.struct_info for p in plist]))
+        param_var = Var("params", TupleType([p.ty for p in plist]))
+        grad_var = Var("gradients", TupleType([p.ty for p in plist]))
         state_var = Var(
             "optim_states",
-            TupleStructInfo([TensorStructInfo((), "int64"), *(p.struct_info for p in plist)]),
+            TupleType([TensorType((), "int64"), *(p.ty for p in plist)]),
         )
 
         # constants
@@ -513,6 +520,7 @@ class Adam(Optimizer):
     The returned function of `get_function()` is equivalent to the following numpy code:
 
     .. code-block:: python
+
         def Adam(param_tuple, grad_tuple, state_tuple):
             num_steps = state_tuple[0]
             num_steps_new = num_steps + 1
@@ -559,7 +567,7 @@ class Adam(Optimizer):
     def __init__(
         self,
         lr: float,
-        betas: Tuple[float, float] = (0.9, 0.999),
+        betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-08,
         weight_decay: float = 0,
     ) -> None:
@@ -570,13 +578,14 @@ class Adam(Optimizer):
         self.eps = float(eps)
         self.weight_decay = float(weight_decay)
 
-    def init(self, params: Union[Var, List[Var]]) -> "Adam":
+    def init(self, params: Var | list[Var]) -> "Adam":
         """Set the parameters, determine the dtype, and construct the initial state for the
         optimizer.
 
         The state of Adam is
 
         .. code-block:: python
+
             (
                 num_steps,
                 beta_0_prod, # beta0 ** num_steps
@@ -609,12 +618,12 @@ class Adam(Optimizer):
             tvm.runtime.tensor(np.ones((), self.dtype)),
             # first_momentum
             *(
-                tvm.runtime.tensor(np.zeros(_get_shape_as_int_list(p), p.struct_info.dtype))
+                tvm.runtime.tensor(np.zeros(_get_shape_as_int_list(p), p.ty.dtype.dtype))
                 for p in self.param_list
             ),
             # second_momentum
             *(
-                tvm.runtime.tensor(np.zeros(_get_shape_as_int_list(p), p.struct_info.dtype))
+                tvm.runtime.tensor(np.zeros(_get_shape_as_int_list(p), p.ty.dtype.dtype))
                 for p in self.param_list
             ),
         )
@@ -635,17 +644,17 @@ class Adam(Optimizer):
         dtype = self.dtype
 
         # input variables
-        param_var = Var("params", TupleStructInfo([p.struct_info for p in plist]))
-        grad_var = Var("gradients", TupleStructInfo([p.struct_info for p in plist]))
+        param_var = Var("params", TupleType([p.ty for p in plist]))
+        grad_var = Var("gradients", TupleType([p.ty for p in plist]))
         state_var = Var(
             "optim_states",
-            TupleStructInfo(
+            TupleType(
                 [
-                    TensorStructInfo((), "int64"),
-                    TensorStructInfo((), dtype),
-                    TensorStructInfo((), dtype),
-                    *(p.struct_info for p in plist),
-                    *(p.struct_info for p in plist),
+                    TensorType((), "int64"),
+                    TensorType((), dtype),
+                    TensorType((), dtype),
+                    *(p.ty for p in plist),
+                    *(p.ty for p in plist),
                 ]
             ),
         )

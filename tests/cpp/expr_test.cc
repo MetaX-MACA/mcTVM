@@ -18,38 +18,48 @@
  */
 
 #include <gtest/gtest.h>
-#include <tvm/node/structural_equal.h>
+#include <tvm/ffi/cast.h>
+#include <tvm/ffi/extra/structural_equal.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/te/operation.h>
 
 TEST(Expr, Basic) {
   using namespace tvm;
-  using namespace tvm::tir;
+  using namespace tvm::tirx;
   Var x("x");
   auto z = max(x + 1 + 2, 100);
-  ObjectRef tmp = z;
-  PrimExpr zz = Downcast<PrimExpr>(tmp);
+  ffi::ObjectRef tmp = z;
+  PrimExpr zz = tmp.as_or_throw<PrimExpr>();
   std::ostringstream os;
   os << z;
-  ICHECK(zz.same_as(z));
-  ICHECK(os.str() == "T.max(x + 1 + 2, 100)");
+  TVM_FFI_ICHECK(zz.same_as(z));
+  TVM_FFI_ICHECK(os.str() == "T.max(x + 1 + 2, 100)");
 }
 
 TEST(Expr, VarTypeAnnotation) {
   using namespace tvm;
-  using namespace tvm::tir;
-  Var x("x", DataType::Float(32));
-  Var y("y", PrimType(DataType::Float(32)));
-  StructuralEqual checker;
-  ICHECK(checker(x->dtype, y->dtype));
-  ICHECK(checker(x->type_annotation, y->type_annotation));
+  using namespace tvm::tirx;
+  Var x("x", PrimType::Float(32));
+  Var y("y", PrimType::Float(32));
+  tvm::ffi::StructuralEqual checker;
+  TVM_FFI_ICHECK(checker(x.ty(), y.ty()));
+  TVM_FFI_ICHECK(checker(x->type_annotation, y->type_annotation));
+}
+
+TEST(Expr, PrimTypeBoolLanes) {
+  using namespace tvm;
+  PrimType boolx4 = PrimType::Bool(4);
+  TVM_FFI_ICHECK(boolx4.IsFixedLengthVector());
+  TVM_FFI_ICHECK(boolx4.MatchesCode(DLDataTypeCode::kDLBool));
+  TVM_FFI_ICHECK_EQ(boolx4.lanes(), 4);
+  TVM_FFI_ICHECK(boolx4.MatchesElementType(DLDataTypeCode::kDLBool, 8));
 }
 
 TEST(ExprNodeRef, Basic) {
   using namespace tvm;
-  using namespace tvm::tir;
+  using namespace tvm::tirx;
   Var x("x");
   PrimExpr z = max(x + 1 + 2, 100);
-  const tir::MaxNode* op = z.as<tir::MaxNode>();
-  ICHECK(ffi::GetRef<ObjectRef>(op).same_as(z));
+  const tirx::MaxNode* op = z.as<tirx::MaxNode>();
+  TVM_FFI_ICHECK(ffi::GetRef<ffi::ObjectRef>(op).same_as(z));
 }

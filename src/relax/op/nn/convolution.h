@@ -36,40 +36,40 @@ namespace tvm {
 namespace relax {
 
 template <typename T>
-inline Expr MakeConv(Expr data, Expr weight, ffi::Array<IntImm> strides, ffi::Array<IntImm> padding,
-                     ffi::Array<IntImm> dilation, int groups, ffi::String data_layout,
-                     ffi::String kernel_layout, ffi::String out_layout, DataType out_dtype,
-                     std::string op_name) {
+inline Expr MakeConv(Expr data, Expr weight, ffi::Array<int64_t> strides,
+                     ffi::Array<int64_t> padding, ffi::Array<int64_t> dilation, int groups,
+                     ffi::String data_layout, ffi::String kernel_layout, ffi::String out_layout,
+                     ffi::Optional<DLDataType> out_dtype, std::string op_name) {
   auto attrs = ffi::make_object<T>();
-  attrs->strides = ConvertIntImmToInt64(strides);
-  attrs->padding = ConvertIntImmToInt64(padding);
-  attrs->dilation = ConvertIntImmToInt64(dilation);
+  attrs->strides = std::move(strides);
+  attrs->padding = std::move(padding);
+  attrs->dilation = std::move(dilation);
   attrs->groups = groups;
   attrs->data_layout = std::move(data_layout);
   attrs->kernel_layout = std::move(kernel_layout);
   attrs->out_layout = std::move(out_layout);
-  attrs->out_dtype = std::move(out_dtype);
+  attrs->out_dtype = out_dtype;
   const Op& op = Op::Get(op_name);
   return Call(op, {data, weight}, Attrs(attrs), {});
 }
 
 /*! \brief 1D convolution */
-Expr conv1d(Expr data, Expr weight, ffi::Array<IntImm> strides, ffi::Array<IntImm> padding,
-            ffi::Array<IntImm> dilation, int groups, ffi::String data_layout,
+Expr conv1d(Expr data, Expr weight, ffi::Array<int64_t> strides, ffi::Array<int64_t> padding,
+            ffi::Array<int64_t> dilation, int groups, ffi::String data_layout,
             ffi::String kernel_layout, ffi::Optional<ffi::String> out_layout,
-            ffi::Optional<DataType> out_dtype);
+            ffi::Optional<DLDataType> out_dtype);
 
 /*! \brief 2D convolution */
-Expr conv2d(Expr data, Expr weight, ffi::Array<IntImm> strides, ffi::Array<IntImm> padding,
-            ffi::Array<IntImm> dilation, int groups, ffi::String data_layout,
+Expr conv2d(Expr data, Expr weight, ffi::Array<int64_t> strides, ffi::Array<int64_t> padding,
+            ffi::Array<int64_t> dilation, int groups, ffi::String data_layout,
             ffi::String kernel_layout, ffi::Optional<ffi::String> out_layout,
-            ffi::Optional<DataType> out_dtype);
+            ffi::Optional<DLDataType> out_dtype);
 
 /*! \brief 3D convolution */
-Expr conv3d(Expr data, Expr weight, ffi::Array<IntImm> strides, ffi::Array<IntImm> padding,
-            ffi::Array<IntImm> dilation, int groups, ffi::String data_layout,
+Expr conv3d(Expr data, Expr weight, ffi::Array<int64_t> strides, ffi::Array<int64_t> padding,
+            ffi::Array<int64_t> dilation, int groups, ffi::String data_layout,
             ffi::String kernel_layout, ffi::Optional<ffi::String> out_layout,
-            ffi::Optional<DataType> out_dtype);
+            ffi::Optional<DLDataType> out_dtype);
 
 /*!
  * \brief One dimensional transposed convolution operator.
@@ -77,11 +77,11 @@ Expr conv3d(Expr data, Expr weight, ffi::Array<IntImm> strides, ffi::Array<IntIm
  * This operator is intended to be the backward operator of conv1d. It can be used to calculate the
  * gradient of the result of conv1d w.r.t. the input of conv1d.
  */
-Expr conv1d_transpose(Expr data, Expr weight, ffi::Array<IntImm> strides,
-                      ffi::Array<IntImm> padding, ffi::Array<IntImm> output_padding,
-                      ffi::Array<IntImm> dilation, int groups, ffi::String data_layout,
+Expr conv1d_transpose(Expr data, Expr weight, ffi::Array<int64_t> strides,
+                      ffi::Array<int64_t> padding, ffi::Array<int64_t> output_padding,
+                      ffi::Array<int64_t> dilation, int groups, ffi::String data_layout,
                       ffi::String kernel_layout, ffi::Optional<ffi::String> out_layout,
-                      ffi::Optional<DataType> out_dtype);
+                      ffi::Optional<DLDataType> out_dtype);
 
 /*!
  * \brief Two dimensional transposed convolution operator.
@@ -89,11 +89,23 @@ Expr conv1d_transpose(Expr data, Expr weight, ffi::Array<IntImm> strides,
  * This operator is intended to be the backward operator of conv2d. It can be used to calculate the
  * gradient of the result of conv2d w.r.t. the input of conv2d.
  */
-Expr conv2d_transpose(Expr data, Expr weight, ffi::Array<IntImm> strides,
-                      ffi::Array<IntImm> padding, ffi::Array<IntImm> output_padding,
-                      ffi::Array<IntImm> dilation, int groups, ffi::String data_layout,
+Expr conv2d_transpose(Expr data, Expr weight, ffi::Array<int64_t> strides,
+                      ffi::Array<int64_t> padding, ffi::Array<int64_t> output_padding,
+                      ffi::Array<int64_t> dilation, int groups, ffi::String data_layout,
                       ffi::String kernel_layout, ffi::Optional<ffi::String> out_layout,
-                      ffi::Optional<DataType> out_dtype);
+                      ffi::Optional<DLDataType> out_dtype);
+
+/*!
+ * \brief Three dimensional transposed convolution operator.
+ *
+ * This operator is intended to be the backward operator of conv3d. It can be used to calculate the
+ * gradient of the result of conv3d w.r.t. the input of conv3d.
+ */
+Expr conv3d_transpose(Expr data, Expr weight, ffi::Array<int64_t> strides,
+                      ffi::Array<int64_t> padding, ffi::Array<int64_t> output_padding,
+                      ffi::Array<int64_t> dilation, int groups, ffi::String data_layout,
+                      ffi::String kernel_layout, ffi::Optional<ffi::String> out_layout,
+                      ffi::Optional<DLDataType> out_dtype);
 
 }  // namespace relax
 }  // namespace tvm

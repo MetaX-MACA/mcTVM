@@ -20,40 +20,41 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/expr_functor.h>
 #include <tvm/relax/transform.h>
-#include <tvm/tir/analysis.h>
-#include <tvm/tir/builtin.h>
-#include <tvm/tir/stmt_functor.h>
+#include <tvm/s_tir/transform.h>
+#include <tvm/tirx/analysis.h>
+#include <tvm/tirx/builtin.h>
+#include <tvm/tirx/stmt_functor.h>
 
 namespace tvm {
 namespace relax {
 
 namespace {
 
-class PrimValueComputeInjector : public ExprMutator {
+class PrimExprComputeInjector : public ExprMutator {
  public:
   IRModule Finalize() const { return builder_->Finalize(); }
 
   using ExprMutator::VisitExpr_;
 
-  Expr VisitExpr_(const PrimValueNode* op) override {
-    auto node = Downcast<PrimValue>(ExprMutator::VisitExpr_(op));
+  Expr VisitExpr_(const PrimExprNode* op) override {
+    auto node = ExprMutator::VisitExpr_(op).as_or_throw<PrimExpr>();
 
-    if (node->value->IsInstance<tir::IntImmNode>() || node->value->IsInstance<tir::VarNode>()) {
+    if (node->IsInstance<tirx::IntImmNode>() || node->IsInstance<tirx::VarNode>()) {
       return node;
     }
 
-    auto ret_dtype = node->value->dtype;
-    auto param_vars = tir::UndefinedVars(node->value);
-    tir::Stmt body = tir::Evaluate(tir::Call(ret_dtype, tir::builtin::ret(), {node->value}));
+    tvm::PrimType ret_ty = node.ty();
+    auto param_vars = tirx::UndefinedVars(node);
+    tirx::Stmt body = tirx::Evaluate(tirx::Call(node.ty(), tirx::builtin::ret(), {node}));
 
-    tir::PrimFunc func(param_vars, body, PrimType(ret_dtype), {},
-                       DictAttrs({{tir::attr::kIsHostFunc, true}}));
-    func = tir::RenewDefs(func);
+    tirx::PrimFunc func(param_vars, body, ret_ty, {},
+                        DictAttrs({{tirx::attr::kIsHostFunc, true}, {tvm::attr::kSTir, true}}));
+    func = s_tir::RenewDefs(func);
 
     auto callee = builder_->AddFunction(func, "compute_symbolic_expr");
 
-    return relax::Call(callee, param_vars.Map([](const tir::Var& tir_var) -> relax::Expr {
-      return relax::PrimValue(tir_var);
+    return relax::Call(callee, param_vars.Map([](const tirx::Var& tir_var) -> relax::Expr {
+      return PrimExpr(tir_var);
     }));
   }
 };
@@ -64,12 +65,12 @@ namespace transform {
 
 Pass ComputePrimValue() {
   auto pass_func = [=](IRModule mod, PassContext pc) -> IRModule {
-    PrimValueComputeInjector mutator;
+    PrimExprComputeInjector mutator;
 
     IRModule updates;
     for (const auto& [gvar, base_func] : mod->functions) {
       if (auto func = base_func.as<Function>()) {
-        auto updated = Downcast<Function>(mutator(func.value()));
+        auto updated = mutator(func.value()).as_or_throw<Function>();
         if (!updates.same_as(base_func)) {
           updates->Add(gvar, updated);
         }

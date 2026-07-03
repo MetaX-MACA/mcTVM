@@ -18,12 +18,13 @@
 
 Restrictions: all shape lowered, explicit allocation.
 """
+
 import tvm
 import tvm.testing
 from tvm import relax
 from tvm.ir import assert_structural_equal
 from tvm.script import relax as R
-from tvm.script import tir as T
+from tvm.script import tirx as T
 
 
 def get_tir_mod(mod):
@@ -37,12 +38,12 @@ def test_add():
         @R.function(pure=False)
         def foo(x: R.Tensor):
             R.func_attr({"global_symbol": "foo"})
-            z = R.call_packed("test.vm.add", x, x, sinfo_args=(R.Tensor))
+            z = R.call_packed("test.vm.add", x, x, ty_args=(R.Tensor))
             return z
 
     @tvm.script.ir_module
     class Expected:
-        @T.prim_func
+        @T.prim_func(s_tir=True)
         def __vmtir__foo(ctx_ptr: T.handle, r: T.handle, c: T.handle, f: T.handle):
             T.func_attr({"global_symbol": "__vmtir__foo"})
             T.anylist_setitem_call_packed(
@@ -65,7 +66,7 @@ def test_add():
 def test_tir_call():
     @tvm.script.ir_module
     class Before:
-        @T.prim_func
+        @T.prim_func(s_tir=True)
         def shape_func(H: T.Buffer(T.int64(4), "int64")):
             T.func_attr({"global_symbol": "shape_func"})
             # generated compute function
@@ -79,13 +80,13 @@ def test_tir_call():
 
     @tvm.script.ir_module
     class Expected:
-        @T.prim_func
+        @T.prim_func(s_tir=True)
         def shape_func(H: T.Buffer(T.int64(4), "int64")):
             T.func_attr({"global_symbol": "shape_func"})
             # generated compute function
             H[T.int64(0)] = H[T.int64(0)] + T.int64(1)
 
-        @T.prim_func
+        @T.prim_func(s_tir=True)
         def __vmtir__foo(ctx_ptr: T.handle, r: T.handle, c: T.handle, f: T.handle):
             T.func_attr({"global_symbol": "__vmtir__foo"})
             T.call_cpacked("shape_func", T.anylist_getitem(r, T.int32(0)))
@@ -106,19 +107,19 @@ def test_if_cond():
         def ife(cond: R.Tensor((), "bool"), x: R.Tensor) -> R.Tensor:
             R.func_attr({"global_symbol": "ife"})
             if cond:
-                w = R.call_packed("test.vm.add", x, x, sinfo_args=(R.Tensor))
+                w = R.call_packed("test.vm.add", x, x, ty_args=(R.Tensor))
             else:
-                w = R.call_packed("test.vm.mul", x, x, sinfo_args=(R.Tensor))
+                w = R.call_packed("test.vm.mul", x, x, ty_args=(R.Tensor))
             return w
 
     @tvm.script.ir_module
     class Expected:
-        @T.prim_func
+        @T.prim_func(s_tir=True)
         def __vmtir__ife(ctx_ptr: T.handle, r: T.handle, c: T.handle, f: T.handle):
             T.func_attr({"global_symbol": "__vmtir__ife"})
             if T.Call(
                 "bool",
-                tvm.ir.Op.get("tir.tvm_call_packed"),
+                tvm.ir.Op.get("tirx.tvm_call_packed"),
                 ["vm.builtin.read_if_cond", T.anylist_getitem(r, T.int32(0))],
             ):
                 T.anylist_setitem_call_packed(
@@ -164,7 +165,7 @@ def test_const():
 
     @tvm.script.ir_module
     class Expected:
-        @T.prim_func
+        @T.prim_func(s_tir=True)
         def __vmtir__main(ctx_ptr: T.handle, r: T.handle, c: T.handle, f: T.handle):
             # function attr dict
             T.func_attr({"global_symbol": "__vmtir__main"})
@@ -194,12 +195,12 @@ def test_const_call():
         def main(x: R.Tensor):
             R.func_attr({"global_symbol": "main"})
             y = R.const([1, 2])
-            z = R.call_packed("test.vm.add", x, y, sinfo_args=(R.Tensor))
+            z = R.call_packed("test.vm.add", x, y, ty_args=(R.Tensor))
             return z
 
     @tvm.script.ir_module
     class Expected:
-        @T.prim_func
+        @T.prim_func(s_tir=True)
         def __vmtir__main(ctx_ptr: T.handle, r: T.handle, c: T.handle, f: T.handle):
             # function attr dict
             T.func_attr({"global_symbol": "__vmtir__main"})

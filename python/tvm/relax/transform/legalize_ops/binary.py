@@ -16,10 +16,18 @@
 # under the License.
 # pylint: disable=invalid-name
 """Default legalization function for binary operators."""
+
 from tvm import topi
+
 from ...block_builder import BlockBuilder
 from ...expr import Call, Expr
-from .common import TEFunc, LegalizeFunc, _try_convert_to_scalar_const, register_legalize
+from .common import (
+    LegalizeFunc,
+    TEFunc,
+    _is_relax_expr,
+    _try_convert_to_scalar_const,
+    register_legalize,
+)
 
 
 def _binary(te_func: TEFunc) -> LegalizeFunc:
@@ -34,7 +42,7 @@ def _binary(te_func: TEFunc) -> LegalizeFunc:
         # If it is not, we then check if arg0 is a constant scalar.
         arg0 = call.args[0]
         arg1 = _try_convert_to_scalar_const(call.args[1])
-        if isinstance(arg1, Expr):  # type: ignore
+        if _is_relax_expr(arg1):
             arg0 = _try_convert_to_scalar_const(arg0)
         return bb.call_te(te_func, arg0, arg1)
 
@@ -47,6 +55,7 @@ register_legalize("relax.floor_divide", _binary(topi.floor_divide))
 register_legalize("relax.log_add_exp", _binary(topi.log_add_exp))
 register_legalize("relax.multiply", _binary(topi.multiply))
 register_legalize("relax.power", _binary(topi.power))
+register_legalize("relax.atan2", _binary(topi.atan2))
 register_legalize("relax.subtract", _binary(topi.subtract))
 register_legalize("relax.equal", _binary(topi.equal))
 register_legalize("relax.mod", _binary(topi.mod))

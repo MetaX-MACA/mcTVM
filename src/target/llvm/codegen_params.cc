@@ -61,7 +61,8 @@ struct LLVMConstantGetter<T, std::enable_if_t<std::is_floating_point<T>::value>>
   static llvm::Constant* getElement(llvm::Type* ty, T t) { return llvm::ConstantFP::get(ty, t); }
 };
 
-template <typename T, typename = std::enable_if<std::is_pod<T>::value>>
+template <typename T, typename = std::enable_if_t<std::is_standard_layout<T>::value &&
+                                                  std::is_trivial<T>::value>>
 void BuildLLVMVector(llvm::Type* element_type, void* tensor_data, size_t num_elements,
                      std::vector<llvm::Constant*>* elements) {
   elements->resize(num_elements, nullptr);
@@ -74,10 +75,11 @@ llvm::ConstantArray* TensorToLLVMArray(llvm::LLVMContext* ctx, ::tvm::runtime::T
   llvm::Type* element_type = nullptr;
 
   auto arr_type = arr.DataType();
-  CHECK(arr.IsContiguous()) << "CodegenParams: only support contiguous arrays";
-  CHECK_EQ(arr->device.device_type, kDLCPU) << "CodegenParams: only support contiguous arrays";
-  CHECK_EQ(arr_type.lanes(), 1) << "CodegenParams: only support generating 1-lane parameters; saw "
-                                << arr_type.lanes();
+  TVM_FFI_ICHECK(arr.IsContiguous()) << "CodegenParams: only support contiguous arrays";
+  TVM_FFI_ICHECK_EQ(arr->device.device_type, kDLCPU)
+      << "CodegenParams: only support contiguous arrays";
+  TVM_FFI_ICHECK_EQ(arr_type.lanes, 1)
+      << "CodegenParams: only support generating 1-lane parameters; saw " << arr_type.lanes;
 
   auto shape = arr.Shape();
   int num_elements = 1;
@@ -87,15 +89,15 @@ llvm::ConstantArray* TensorToLLVMArray(llvm::LLVMContext* ctx, ::tvm::runtime::T
 
   std::vector<llvm::Constant*> elements;
 
-  switch (arr_type.code()) {
-    case runtime::DataType::kInt:
-      CHECK(arr_type.bits() == 8 || arr_type.bits() == 16 || arr_type.bits() == 32 ||
-            arr_type.bits() == 64)
+  switch (arr_type.code) {
+    case kDLInt:
+      TVM_FFI_ICHECK(arr_type.bits == 8 || arr_type.bits == 16 || arr_type.bits == 32 ||
+                     arr_type.bits == 64)
           << "CodegenParams: only support generating 8-, 16-, 32-, or 64-bit integer params; saw "
-          << arr_type.bits() << "-bit array";
-      element_type = llvm::Type::getIntNTy(*ctx, arr_type.bits());
+          << arr_type.bits << "-bit array";
+      element_type = llvm::Type::getIntNTy(*ctx, arr_type.bits);
 
-      switch (arr_type.bits()) {
+      switch (arr_type.bits) {
         case 8:
           BuildLLVMVector<int8_t>(element_type, arr->data, num_elements, &elements);
           break;
@@ -109,19 +111,19 @@ llvm::ConstantArray* TensorToLLVMArray(llvm::LLVMContext* ctx, ::tvm::runtime::T
           BuildLLVMVector<int64_t>(element_type, arr->data, num_elements, &elements);
           break;
         default:
-          ICHECK(false) << "should not get here";
+          TVM_FFI_ICHECK(false) << "should not get here";
           break;
       }
       break;
 
-    case runtime::DataType::TypeCode::kUInt:
-      CHECK(arr_type.bits() == 8 || arr_type.bits() == 16 || arr_type.bits() == 32 ||
-            arr_type.bits() == 64)
+    case kDLUInt:
+      TVM_FFI_ICHECK(arr_type.bits == 8 || arr_type.bits == 16 || arr_type.bits == 32 ||
+                     arr_type.bits == 64)
           << "CodegenParams: only support generating 8-, 16-, 32-, or 64-bit integer params; saw "
-          << arr_type.bits() << "-bit array";
-      element_type = llvm::Type::getIntNTy(*ctx, arr_type.bits());
+          << arr_type.bits << "-bit array";
+      element_type = llvm::Type::getIntNTy(*ctx, arr_type.bits);
 
-      switch (arr_type.bits()) {
+      switch (arr_type.bits) {
         case 8:
           BuildLLVMVector<uint8_t>(element_type, arr->data, num_elements, &elements);
           break;
@@ -135,16 +137,16 @@ llvm::ConstantArray* TensorToLLVMArray(llvm::LLVMContext* ctx, ::tvm::runtime::T
           BuildLLVMVector<uint64_t>(element_type, arr->data, num_elements, &elements);
           break;
         default:
-          ICHECK(false) << "should not get here";
+          TVM_FFI_ICHECK(false) << "should not get here";
           break;
       }
       break;
 
-    case runtime::DataType::TypeCode::kFloat:
-      switch (arr_type.bits()) {
+    case kDLFloat:
+      switch (arr_type.bits) {
         case 16:
           // NOTE: float16 is treated as uint16_t.
-          element_type = llvm::Type::getIntNTy(*ctx, arr_type.bits());
+          element_type = llvm::Type::getIntNTy(*ctx, arr_type.bits);
           BuildLLVMVector<uint16_t>(element_type, arr->data, num_elements, &elements);
           break;
         case 32:
@@ -156,20 +158,20 @@ llvm::ConstantArray* TensorToLLVMArray(llvm::LLVMContext* ctx, ::tvm::runtime::T
           BuildLLVMVector<double>(element_type, arr->data, num_elements, &elements);
           break;
         default:
-          CHECK(false) << "CodegenParams: only support 32- or 64-bit floating point; saw "
-                       << arr_type.bits() << "-bit array";
+          TVM_FFI_ICHECK(false) << "CodegenParams: only support 32- or 64-bit floating point; saw "
+                                << arr_type.bits << "-bit array";
           break;
       }
       break;
 
-    case runtime::DataType::TypeCode::kBFloat:
-      CHECK(arr_type.bits() == 16)
-          << "CodegenParams: only support 16-bit bfloat; saw " << arr_type.bits() << "-bit array";
-      element_type = llvm::Type::getIntNTy(*ctx, arr_type.bits());
+    case kDLBfloat:
+      TVM_FFI_ICHECK(arr_type.bits == 16)
+          << "CodegenParams: only support 16-bit bfloat; saw " << arr_type.bits << "-bit array";
+      element_type = llvm::Type::getIntNTy(*ctx, arr_type.bits);
       BuildLLVMVector<uint16_t>(element_type, arr->data, num_elements, &elements);
 
     default:
-      CHECK(false) << "Data type not supported";
+      TVM_FFI_ICHECK(false) << "Data type not supported";
   }
 
   return llvm::cast<llvm::ConstantArray>(llvm::ConstantArray::get(

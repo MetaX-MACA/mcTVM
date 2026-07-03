@@ -22,12 +22,12 @@
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/shape.h>
+#include <tvm/ffi/dtype.h>
+#include <tvm/ffi/error.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/reflection/registry.h>
-#include <tvm/runtime/data_type.h>
 #include <tvm/runtime/device_api.h>
-#include <tvm/runtime/logging.h>
 #include <tvm/runtime/memory/memory_manager.h>
 #include <tvm/runtime/tensor.h>
 #include <tvm/runtime/vm/builtin.h>
@@ -43,7 +43,7 @@ namespace vm {
 using tvm::runtime::Tensor;
 
 //-------------------------------------------------
-//  Shape/StructInfo handling.
+//  Shape/Type handling.
 //-------------------------------------------------
 /*!
  * \brief Builtin function to allocate shape heap.
@@ -60,7 +60,7 @@ Tensor AllocShapeHeap(void* ctx_ptr, int64_t size) {
   if (vm->devices[0].device_type == kDLHexagon) {
     host_device_index = 0;
   } else {
-    ICHECK_EQ(vm->devices[host_device_index].device_type, kDLCPU);
+    TVM_FFI_ICHECK_EQ(vm->devices[host_device_index].device_type, kDLCPU);
   }
   auto* alloc = vm->allocators[host_device_index];
   return alloc->Empty({size}, DLDataType{kDLInt, 64, 1}, vm->devices[host_device_index]);
@@ -95,17 +95,18 @@ void MatchPrimValue(int64_t input_value, DLTensor* heap, int code_value, int64_t
   MatchShapeCode code = static_cast<MatchShapeCode>(code_value);
 
   if (code == MatchShapeCode::kAssertEqualToImm) {
-    CHECK_EQ(input_value, reg) << "RuntimeError: " << err_ctx.value_or("") << " match_cast error, "
-                               << " PrimValue mismatch to specified constant.";
+    TVM_FFI_CHECK_EQ(input_value, reg, RuntimeError)
+        << err_ctx.value_or("") << " match_cast error, "
+        << " PrimExpr mismatch to specified constant.";
   } else if (code == MatchShapeCode::kStoreToHeap) {
     heap_data[reg] = input_value;
   } else if (code == MatchShapeCode::kNoOp) {
   } else if (code == MatchShapeCode::kAssertEqualToLoad) {
-    CHECK_EQ(input_value, heap_data[reg])
-        << "RuntimeError: " << err_ctx.value_or("") << " match_cast error, "
-        << " PrimValue mismatch to a previous populated value.";
+    TVM_FFI_CHECK_EQ(input_value, heap_data[reg], RuntimeError)
+        << err_ctx.value_or("") << " match_cast error, "
+        << " PrimExpr mismatch to a previous populated value.";
   } else {
-    LOG(FATAL) << "Unknown match shape code: " << static_cast<int>(code);
+    TVM_FFI_THROW(InternalError) << "Unknown match shape code: " << static_cast<int>(code);
   }
 }
 
@@ -136,30 +137,30 @@ void MatchShape(ffi::PackedArgs args, ffi::Any* rv) {
   int64_t* heap_data = heap.has_value() ? static_cast<int64_t*>((*heap)->data) : nullptr;
   int64_t size = args[2].cast<int64_t>();
   const int64_t kBeginCode = 3;
-  ICHECK_LE(kBeginCode + size * 2, args.size());
+  TVM_FFI_ICHECK_LE(kBeginCode + size * 2, args.size());
   // a function that lazily get context for error reporting
   const int64_t kErrorContextOffset = kBeginCode + size * 2;
   ffi::Optional<ffi::String> err_ctx = args[kErrorContextOffset].cast<ffi::String>();
 
-  CHECK_EQ(input_shape.size(), size)
-      << "RuntimeError: " << err_ctx.value_or("") << " match_cast shape size mismatch.";
+  TVM_FFI_CHECK_EQ(input_shape.size(), size, RuntimeError)
+      << err_ctx.value_or("") << " match_cast shape size mismatch.";
 
   for (int64_t i = 0; i < size; ++i) {
     MatchShapeCode code = static_cast<MatchShapeCode>(args[kBeginCode + i * 2].cast<int>());
     int64_t reg = args[kBeginCode + i * 2 + 1].cast<int64_t>();
 
     if (code == MatchShapeCode::kAssertEqualToImm) {
-      CHECK_EQ(input_shape[i], reg)
-          << "RuntimeError: " << err_ctx.value_or("") << " match_cast error, "
+      TVM_FFI_CHECK_EQ(input_shape[i], reg, RuntimeError)
+          << err_ctx.value_or("") << " match_cast error, "
           << " shape[" << i << "]"
           << " mismatch to specified constant.";
     } else if (code == MatchShapeCode::kStoreToHeap) {
       heap_data[reg] = input_shape[i];
     } else if (code == MatchShapeCode::kNoOp) {
     } else {
-      ICHECK(code == MatchShapeCode::kAssertEqualToLoad);
-      CHECK_EQ(input_shape[i], heap_data[reg])
-          << "RuntimeError: " << err_ctx.value_or("") << " match_cast error, "
+      TVM_FFI_ICHECK(code == MatchShapeCode::kAssertEqualToLoad);
+      TVM_FFI_CHECK_EQ(input_shape[i], heap_data[reg], RuntimeError)
+          << err_ctx.value_or("") << " match_cast error, "
           << " shape[" << i << "]"
           << " mismatch to a previous populated value.";
     }
@@ -189,7 +190,7 @@ int64_t MakePrimValue(DLTensor* heap, int shape_code, int64_t reg) {
   } else if (code == MakeShapeCode::kLoadShape) {
     return heap_data[reg];
   } else {
-    LOG(FATAL) << "Invalid shape code: " << shape_code;
+    TVM_FFI_THROW(InternalError) << "Invalid shape code: " << shape_code;
   }
 }
 
@@ -220,7 +221,7 @@ void MakeShape(ffi::PackedArgs args, ffi::Any* rv) {
     if (code == MakeShapeCode::kUseImm) {
       shape[i] = reg;
     } else {
-      ICHECK(code == MakeShapeCode::kLoadShape);
+      TVM_FFI_ICHECK(code == MakeShapeCode::kLoadShape);
       shape[i] = heap_data[reg];
     }
   }
@@ -242,31 +243,31 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 void CheckTensorInfo(ffi::PackedArgs args, ffi::Any* rv) {
   ffi::AnyView arg = args[0];
   int ndim = args[1].cast<int>();
-  DataType dtype;
+  ffi::Optional<DLDataType> dtype;
   ffi::Optional<ffi::String> err_ctx;
 
   if (args.size() == 3) {
-    dtype = DataType::Void();
+    dtype = std::nullopt;
     err_ctx = args[2].cast<ffi::Optional<ffi::String>>();
   } else {
-    dtype = args[2].cast<DataType>();
+    dtype = args[2].cast<ffi::Optional<DLDataType>>();
     err_ctx = args[3].cast<ffi::Optional<ffi::String>>();
   }
 
   auto opt_ptr = arg.try_cast<DLTensor*>();
-  CHECK(opt_ptr.has_value()) << "TypeError: " << err_ctx.value_or("") << " expect a Tensor but get "
-                             << arg.GetTypeKey();
+  TVM_FFI_CHECK(opt_ptr.has_value(), TypeError)
+      << err_ctx.value_or("") << " expect a Tensor but get " << arg.GetTypeKey();
 
   DLTensor* ptr = opt_ptr.value();
   if (ndim != -1) {
-    CHECK(ptr->ndim == ndim) << "ValueError: " << err_ctx.value_or("")
-                             << " expect Tensor with ndim " << ndim << " but get " << ptr->ndim;
+    TVM_FFI_CHECK(ptr->ndim == ndim, ValueError)
+        << err_ctx.value_or("") << " expect Tensor with ndim " << ndim << " but get " << ptr->ndim;
   }
 
-  if (dtype != DataType::Void()) {
-    CHECK(DataType(ptr->dtype) == dtype)
-        << "ValueError: " << err_ctx.value_or("") << " expect Tensor with dtype " << dtype
-        << " but get " << DataType(ptr->dtype);
+  if (dtype) {
+    TVM_FFI_CHECK(ptr->dtype == dtype.value(), ValueError)
+        << err_ctx.value_or("") << " expect Tensor with dtype " << dtype.value() << " but get "
+        << ptr->dtype;
   }
 }
 
@@ -281,15 +282,14 @@ TVM_FFI_STATIC_INIT_BLOCK() {
  * \param ndim Expected size of the shape, can be -1 (indicate unknown).
  * \param err_ctx Additional context if error occurs.
  */
-void CheckShapeInfo(ObjectRef arg, int ndim, ffi::Optional<ffi::String> err_ctx) {
+void CheckShapeInfo(ffi::ObjectRef arg, int ndim, ffi::Optional<ffi::String> err_ctx) {
   // a function that lazily get context for error reporting
   auto* ptr = arg.as<ffi::Shape::ContainerType>();
-  CHECK(ptr != nullptr) << "TypeError: " << err_ctx.value_or("") << " expect a Shape but get "
-                        << arg->GetTypeKey();
+  TVM_FFI_CHECK(ptr != nullptr, TypeError)
+      << err_ctx.value_or("") << " expect a Shape but get " << arg->GetTypeKey();
   if (ndim != -1) {
-    CHECK(ptr->size == static_cast<uint64_t>(ndim))
-        << "ValueError: " << err_ctx.value_or("") << " expect Shape with ndim " << ndim
-        << " but get " << ptr->size;
+    TVM_FFI_CHECK(ptr->size == static_cast<uint64_t>(ndim), ValueError)
+        << err_ctx.value_or("") << " expect Shape with ndim " << ndim << " but get " << ptr->size;
   }
 }
 
@@ -299,27 +299,29 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 }
 
 /*!
- * \brief Builtin function to check if arg is PrimValue(dtype)
+ * \brief Builtin function to check if arg is PrimExpr(dtype)
  * \param arg The input argument.
- * \param dtype Expected dtype of the PrimValue.  Can be DataType::Void() for unknown dtype.
+ * \param dtype Expected dtype of the PrimExpr.  Can be DLDataType{kDLOpaqueHandle, 0, 0} for
+ * unknown dtype.
  * \param err_ctx Additional context if error occurs.
  */
-void CheckPrimValueInfo(ffi::AnyView arg, DataType dtype, ffi::Optional<ffi::String> err_ctx) {
-  if (auto opt_obj = arg.as<ObjectRef>()) {
-    LOG(FATAL) << "TypeError: " << err_ctx.value_or("") << ", expected dtype " << dtype
-               << ", but received ObjectRef of type " << opt_obj.value()->GetTypeKey();
-  } else if (dtype.is_bool()) {
+void CheckPrimValueInfo(ffi::AnyView arg, DLDataType dtype, ffi::Optional<ffi::String> err_ctx) {
+  if (auto opt_obj = arg.as<ffi::ObjectRef>()) {
+    TVM_FFI_THROW(TypeError) << err_ctx.value_or("") << ", expected dtype " << dtype
+                             << ", but received ObjectRef of type "
+                             << opt_obj.value()->GetTypeKey();
+  } else if (((dtype).code == kDLBool)) {
     arg.cast<bool>();
-  } else if (dtype.is_int()) {
+  } else if (((dtype).code == kDLInt)) {
     arg.cast<int64_t>();
-  } else if (dtype.is_uint()) {
+  } else if (((dtype).code == kDLUInt)) {
     arg.cast<uint64_t>();
-  } else if (dtype.is_float()) {
+  } else if (((dtype).code == kDLFloat)) {
     arg.cast<double>();
-  } else if (dtype.is_handle()) {
+  } else if (dtype.code == kDLOpaqueHandle && !(dtype.bits == 0 && dtype.lanes == 0)) {
     arg.cast<void*>();
   } else {
-    LOG(FATAL) << "TypeError: " << err_ctx.value_or("") << ", unsupported dtype " << dtype;
+    TVM_FFI_THROW(TypeError) << err_ctx.value_or("") << ", unsupported dtype " << dtype;
   }
 }
 
@@ -334,13 +336,13 @@ TVM_FFI_STATIC_INIT_BLOCK() {
  * \param size The expected size of the tuple.
  * \param err_ctx Additional context if error occurs.
  */
-void CheckTupleInfo(ObjectRef arg, int64_t size, ffi::Optional<ffi::String> err_ctx) {
+void CheckTupleInfo(ffi::ObjectRef arg, int64_t size, ffi::Optional<ffi::String> err_ctx) {
   // a function that lazily get context for error reporting
   auto* ptr = arg.as<ffi::ArrayObj>();
-  CHECK(ptr != nullptr) << "TypeError: " << err_ctx.value_or("") << " expect a Tuple but get "
-                        << arg->GetTypeKey();
-  CHECK(static_cast<int64_t>(ptr->size()) == size)
-      << "ValueError: " << err_ctx.value_or("") << " expect a Tuple with " << size << " elements, "
+  TVM_FFI_CHECK(ptr != nullptr, TypeError)
+      << err_ctx.value_or("") << " expect a Tuple but get " << arg->GetTypeKey();
+  TVM_FFI_CHECK(static_cast<int64_t>(ptr->size()) == size, ValueError)
+      << err_ctx.value_or("") << " expect a Tuple with " << size << " elements, "
       << " but get a Tuple with " << ptr->size() << " elements.";
 }
 
@@ -354,11 +356,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
  * \param arg The input argument.
  * \param err_ctx Additional context if error occurs.
  */
-void CheckFuncInfo(ObjectRef arg, ffi::Optional<ffi::String> err_ctx) {
+void CheckFuncInfo(ffi::ObjectRef arg, ffi::Optional<ffi::String> err_ctx) {
   // a function that lazily get context for error reporting
   bool is_func = arg.as<ffi::Function::ContainerType>() || arg.as<VMClosure::ContainerType>();
-  CHECK(is_func) << "TypeError: " << err_ctx.value_or("") << " expect a Function but get "
-                 << arg->GetTypeKey();
+  TVM_FFI_CHECK(is_func, TypeError)
+      << err_ctx.value_or("") << " expect a Function but get " << arg->GetTypeKey();
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
@@ -373,7 +375,7 @@ Storage VMAllocStorage(void* ctx_ptr, ffi::Shape buffer_shape, Index device_inde
                        DLDataType dtype_hint, ffi::String mem_scope) {
   VirtualMachine* vm = static_cast<VirtualMachine*>(ctx_ptr);
 
-  ICHECK_LT(device_index, vm->devices.size())
+  TVM_FFI_ICHECK_LT(device_index, vm->devices.size())
       << "The device index is out of VM physical devices list";
 
   if (device_index == -1) {
@@ -382,7 +384,7 @@ Storage VMAllocStorage(void* ctx_ptr, ffi::Shape buffer_shape, Index device_inde
   }
 
   auto* alloc = vm->allocators[device_index];
-  ICHECK(alloc) << "Did you forget to init the VirtualMachine with devices?";
+  TVM_FFI_ICHECK(alloc) << "Did you forget to init the VirtualMachine with devices?";
 
   auto buffer = alloc->Alloc(vm->devices[device_index], buffer_shape, dtype_hint, mem_scope);
 
@@ -393,7 +395,18 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("vm.builtin.alloc_storage", VMAllocStorage)
-      .def_method("vm.builtin.alloc_tensor", &StorageObj::AllocTensor);
+      .def_packed("vm.builtin.alloc_tensor", [](ffi::PackedArgs args, ffi::Any* rv) {
+        Storage sobj = args[0].cast<Storage>();
+        int64_t offset = args[1].cast<int64_t>();
+        ffi::Shape shape = args[2].cast<ffi::Shape>();
+        DLDataType dtype = args[3].cast<DLDataType>();
+        if (args.size() == 5) {
+          ffi::String scope = args[4].cast<ffi::String>();
+          *rv = sobj->AllocTensorScoped(offset, shape, dtype, scope);
+        } else {
+          *rv = sobj->AllocTensor(offset, shape, dtype);
+        }
+      });
 }
 
 //-------------------------------------------------
@@ -417,7 +430,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                   [](ffi::PackedArgs args, ffi::Any* rv) {
                     // args[0]: vm; args[1]: closure; args[2, 3, ...]: function arguments
                     VirtualMachine* vm = VirtualMachine::GetContextPtr(args[0]);
-                    ObjectRef vm_closure = args[1].cast<ObjectRef>();
+                    ffi::ObjectRef vm_closure = args[1].cast<ffi::ObjectRef>();
                     vm->InvokeClosurePacked(vm_closure, args.Slice(2), rv);
                   })
       .def_packed("vm.builtin.call_tir_dyn", [](ffi::PackedArgs args, ffi::Any* rv) {
@@ -462,7 +475,7 @@ void RegisterPyFunc(const std::string& name, ffi::Function func) { py_func_regis
 ffi::Function GetPyFunc(const std::string& name) {
   auto it = py_func_registry.find(name);
   if (it == py_func_registry.end()) {
-    LOG(FATAL) << "Python function '" << name << "' not found in registry";
+    TVM_FFI_THROW(InternalError) << "Python function '" << name << "' not found in registry";
   }
   return it->second;
 }
@@ -475,12 +488,13 @@ ffi::Function GetPyFunc(const std::string& name) {
 void CallPyFunc(ffi::PackedArgs args, ffi::Any* rv) {
   // args[0] should be a tuple containing (func_name, args_tuple)
   if (args.size() != 1) {
-    LOG(FATAL) << "vm.builtin.call_py_func expects exactly 1 argument (tuple)";
+    TVM_FFI_THROW(InternalError) << "vm.builtin.call_py_func expects exactly 1 argument (tuple)";
   }
 
   auto tuple_arg = args[0].cast<ffi::Array<ffi::Any>>();
   if (tuple_arg.size() != 2) {
-    LOG(FATAL) << "vm.builtin.call_py_func tuple should contain (func_name, args)";
+    TVM_FFI_THROW(InternalError)
+        << "vm.builtin.call_py_func tuple should contain (func_name, args)";
   }
 
   // Get function name
@@ -513,15 +527,50 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
-      .def_method("vm.builtin.shape_of", [](Tensor data) -> ffi::Shape { return data.Shape(); })
+      .def_method("vm.builtin.shape_of",
+                  [](ffi::Any any) -> ffi::Shape {
+                    if (auto opt_tensor = any.try_cast<Tensor>()) {
+                      return opt_tensor.value().Shape();
+                    } else if (auto opt_dltensor = any.try_cast<DLTensor*>()) {
+                      DLTensor* ptr = opt_dltensor.value();
+                      return ffi::Shape(ptr->shape, ptr->shape + ptr->ndim);
+                    } else {
+                      TVM_FFI_THROW(TypeError)
+                          << "vm.builtin.shape_of expects a Tensor or DLTensor*, but get "
+                          << any.GetTypeKey();
+                    }
+                  })
       .def("vm.builtin.copy", [](ffi::Any a) -> ffi::Any { return a; })
-      .def(
-          "vm.builtin.reshape",
-          [](Tensor data, ffi::Shape new_shape) { return data.CreateView(new_shape, data->dtype); })
+      .def("vm.builtin.reshape",
+           [](ffi::Any any, ffi::Shape new_shape) {
+             if (auto opt_tensor = any.try_cast<Tensor>()) {
+               Tensor data = opt_tensor.value();
+               return data.CreateView(new_shape, data->dtype);
+             } else if (auto opt_dltensor = any.try_cast<DLTensor*>()) {
+               DLTensor* ptr = opt_dltensor.value();
+               auto tmp = std::make_unique<DLManagedTensor>();
+               tmp->dl_tensor = *ptr;
+               tmp->manager_ctx = nullptr;
+               tmp->deleter = nullptr;
+               Tensor data = Tensor::FromDLPack(tmp.release());
+               return data.CreateView(new_shape, data->dtype);
+             } else {
+               TVM_FFI_THROW(TypeError)
+                   << "vm.builtin.reshape expects a Tensor or DLTensor*, but get "
+                   << any.GetTypeKey();
+             }
+           })
       .def("vm.builtin.null_value", []() -> std::nullptr_t { return nullptr; })
-      .def("vm.builtin.to_device", [](Tensor data, int dev_type, int dev_id) {
+      .def_packed("vm.builtin.to_device", [](ffi::PackedArgs args, ffi::Any* rv) {
+        Tensor data = args[0].cast<Tensor>();
+        int dev_type = args[1].cast<int>();
+        int dev_id = args[2].cast<int>();
         Device dst_device = {(DLDeviceType)dev_type, dev_id};
-        return data.CopyTo(dst_device);
+        ffi::String mem_scope = "global";
+        if (args.size() == 4) {
+          mem_scope = args[3].cast<ffi::String>();
+        }
+        *rv = data.CopyTo(dst_device, mem_scope);
       });
 }
 
@@ -538,7 +587,8 @@ bool ReadIfCond(ffi::AnyView cond) {
   if (arr->device.device_type != kDLCPU) {
     arr = arr.CopyTo(DLDevice{kDLCPU, 0});
   }
-  ICHECK(arr->dtype.code == kDLInt || arr->dtype.code == kDLUInt || arr->dtype.code == kDLBool);
+  TVM_FFI_ICHECK(arr->dtype.code == kDLInt || arr->dtype.code == kDLUInt ||
+                 arr->dtype.code == kDLBool);
   int64_t result;
   switch (arr->dtype.bits) {
     case 1: {
@@ -562,7 +612,8 @@ bool ReadIfCond(ffi::AnyView cond) {
       break;
     }
     default:
-      LOG(FATAL) << "Unknown scalar int type: " << DLDataTypeToString(arr->dtype);
+      TVM_FFI_THROW(InternalError)
+          << "Unknown scalar int type: " << ffi::DLDataTypeToString(arr->dtype);
       throw;
   }
   return result != 0;
@@ -581,15 +632,17 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def_packed(
       "vm.builtin.invoke_debug_func", [](ffi::PackedArgs args, ffi::Any* rv) -> void {
-        ICHECK_GE(args.size(), 3);
+        TVM_FFI_ICHECK_GE(args.size(), 3);
         int num_args = args.size() - 3;
-        ObjectRef io_effect = args[0].cast<ObjectRef>();
-        ICHECK(!io_effect.defined()) << "ValueError: IOEffect is expected to be lowered to None.";
+        ffi::ObjectRef io_effect = args[0].cast<ffi::ObjectRef>();
+        TVM_FFI_CHECK(!io_effect.defined(), ValueError)
+            << "IOEffect is expected to be lowered to None.";
         ffi::String debug_func_name = args[1].cast<ffi::String>();
         const auto debug_func = tvm::ffi::Function::GetGlobal(debug_func_name);
-        CHECK(debug_func.has_value()) << "ValueError: " << debug_func_name << " is not found. "
-                                      << "Use the decorator `@tvm.register_global_func(\""
-                                      << debug_func_name << "\")` to register it.";
+        TVM_FFI_CHECK(debug_func.has_value(), ValueError)
+            << debug_func_name << " is not found. "
+            << "Use the decorator `@tvm.register_global_func(\"" << debug_func_name
+            << "\")` to register it.";
         ffi::String line_info = args[2].cast<ffi::String>();
         std::vector<ffi::AnyView> call_args(num_args + 1);
         {
@@ -630,8 +683,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                arr = data.CopyTo(DLDevice{kDLCPU, 0});
              }
 
-             ICHECK_EQ(arr->ndim, 1);
-             ICHECK_EQ(arr->dtype.code, kDLInt);
+             TVM_FFI_ICHECK_EQ(arr->ndim, 1);
+             TVM_FFI_ICHECK_EQ(arr->dtype.code, kDLInt);
 
              std::vector<int64_t> out_shape;
              for (int i = 0; i < arr.Shape()[0]; ++i) {
@@ -650,7 +703,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                    break;
                  }
                  default:
-                   LOG(FATAL) << "Unknown scalar int type: " << DLDataTypeToString(arr->dtype);
+                   TVM_FFI_THROW(InternalError)
+                       << "Unknown scalar int type: " << ffi::DLDataTypeToString(arr->dtype);
                    throw;
                }
                out_shape.push_back(result);
@@ -694,15 +748,15 @@ extern "C" {
  * \param arg_offset The offset of argument.
  * \return 0 when no error is thrown, -1 when failure happens
  */
-TVM_DLL int TVMBackendAnyListSetPackedArg(void* anylist, int index, TVMFFIAny* args,
-                                          int arg_offset);
+TVM_RUNTIME_DLL int TVMBackendAnyListSetPackedArg(void* anylist, int index, TVMFFIAny* args,
+                                                  int arg_offset);
 /*!
  * \brief Backend function to get anylist item and set into Packed Func call arg stack.
  *
  * \param anylist The handle to the anylist, backed by ffi::Any*
  * \param int The index.
  */
-TVM_DLL int TVMBackendAnyListResetItem(void* anylist, int index);
+TVM_RUNTIME_DLL int TVMBackendAnyListResetItem(void* anylist, int index);
 
 /*!
  * \brief Backend function to set anylist item by moving from packed func return.
@@ -714,8 +768,8 @@ TVM_DLL int TVMBackendAnyListResetItem(void* anylist, int index);
  * \param arg_offset The offset of argument.
  * \return 0 when no error is thrown, -1 when failure happens.
  */
-TVM_DLL int TVMBackendAnyListMoveFromPackedReturn(void* anylist, int index, TVMFFIAny* args,
-                                                  int ret_offset);
+TVM_RUNTIME_DLL int TVMBackendAnyListMoveFromPackedReturn(void* anylist, int index, TVMFFIAny* args,
+                                                          int ret_offset);
 
 int TVMBackendAnyListSetPackedArg(void* anylist, int index, TVMFFIAny* args, int arg_offset) {
   using namespace tvm::runtime;

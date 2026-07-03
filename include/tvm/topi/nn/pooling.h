@@ -52,11 +52,11 @@ inline Tensor pool_grad_impl(const Tensor& out_grad, const Tensor& x,
                              const ffi::Array<PrimExpr>& padding_size, PoolType pool_type,
                              bool ceil_mode, const size_t height_axis, const size_t width_axis,
                              bool count_include_pad) {
-  ICHECK(out_grad->shape.size() >= 2) << "Pooling grad output must >= 2-D (H, W)";
-  ICHECK(x->shape.size() >= 2) << "Pooling input must >= 2-D (H, W)";
-  ICHECK_EQ(kernel_size.size(), 2) << "Pooling kernel_size must have 2 elements";
-  ICHECK_EQ(stride_size.size(), 2) << "Pooling stride_size must have 2 elements";
-  ICHECK_EQ(padding_size.size(), 4) << "Pooling padding_size must have 4 elements";
+  TVM_FFI_ICHECK(out_grad->shape.size() >= 2) << "Pooling grad output must >= 2-D (H, W)";
+  TVM_FFI_ICHECK(x->shape.size() >= 2) << "Pooling input must >= 2-D (H, W)";
+  TVM_FFI_ICHECK_EQ(kernel_size.size(), 2) << "Pooling kernel_size must have 2 elements";
+  TVM_FFI_ICHECK_EQ(stride_size.size(), 2) << "Pooling stride_size must have 2 elements";
+  TVM_FFI_ICHECK_EQ(padding_size.size(), 4) << "Pooling padding_size must have 4 elements";
 
   auto kernel_height = kernel_size[0];
   auto kernel_width = kernel_size[1];
@@ -87,9 +87,9 @@ inline Tensor pool_grad_impl(const Tensor& out_grad, const Tensor& x,
   pad_after.Set(width_axis, pad_right);
   arith::Analyzer analyzer;
   auto out_height =
-      analyzer.Simplify((height - kernel_height + pad_top + pad_bottom) / stride_height + 1);
+      analyzer->Simplify((height - kernel_height + pad_top + pad_bottom) / stride_height + 1);
   auto out_width =
-      analyzer.Simplify((width - kernel_width + pad_left + pad_right) / stride_width + 1);
+      analyzer->Simplify((width - kernel_width + pad_left + pad_right) / stride_width + 1);
 
   auto dheight = tvm::te::reduce_axis(Range(0, kernel_height), "dh");
   auto dwidth = tvm::te::reduce_axis(Range(0, kernel_width), "dw");
@@ -117,7 +117,8 @@ inline Tensor pool_grad_impl(const Tensor& out_grad, const Tensor& x,
         tvm::te::reduce_axis(Range(0, (kernel_width + stride_width - 1) / stride_width), "ww");
 
     auto argmax = MakeArgmaxReducer();
-    auto pad_x = do_pad ? pad(x, pad_before, pad_after, tvm::min_value(x->dtype), "pad_temp") : x;
+    auto pad_x =
+        do_pad ? pad(x, pad_before, pad_after, tvm::min_value(PrimType(x->dtype)), "pad_temp") : x;
 
     auto mp_argmax = tvm::te::compute(
         out_shape,
@@ -144,18 +145,18 @@ inline Tensor pool_grad_impl(const Tensor& out_grad, const Tensor& x,
           out_idx.Set(height_axis, (inds[height_axis] + pad_top) / stride_height - windowh);
           out_idx.Set(width_axis, (inds[width_axis] + pad_left) / stride_width - windoww);
 
-          PrimExpr out_idx_lower_h = tir::Select(
-              pad_inds[height_axis] < kernel_height, make_const(pad_inds[height_axis].dtype(), 0),
+          PrimExpr out_idx_lower_h = tirx::Select(
+              pad_inds[height_axis] < kernel_height, IntImm(pad_inds[height_axis].ty(), 0),
               (pad_inds[height_axis] - kernel_height) / stride_height + 1);
-          PrimExpr out_idx_lower_w = tir::Select(
-              pad_inds[width_axis] < kernel_width, make_const(pad_inds[width_axis].dtype(), 0),
+          PrimExpr out_idx_lower_w = tirx::Select(
+              pad_inds[width_axis] < kernel_width, IntImm(pad_inds[width_axis].ty(), 0),
               (pad_inds[width_axis] - kernel_width) / stride_width + 1);
 
           return tvm::sum(
-              tvm::if_then_else(tir::And(tir::And(out_idx[height_axis] >= out_idx_lower_h,
-                                                  out_idx[width_axis] >= out_idx_lower_w),
-                                         mp_inds(out_idx) == idx),
-                                out_grad(out_idx), make_const(x->dtype, 0)),
+              tvm::if_then_else(tirx::And(tirx::And(out_idx[height_axis] >= out_idx_lower_h,
+                                                    out_idx[width_axis] >= out_idx_lower_w),
+                                          mp_inds(out_idx) == idx),
+                                out_grad(out_idx), MakeConst(PrimType(x->dtype), 0)),
               {windowh, windoww});
         },
         "T_pool_grad", "pool_grad_max");
@@ -176,11 +177,11 @@ inline Tensor pool_grad_impl(const Tensor& out_grad, const Tensor& x,
           out_idx.Set(width_axis, (pad_w_idx / stride_width - windoww));
 
           PrimExpr out_idx_lower_h =
-              tir::Select(pad_h_idx < kernel_height, make_const(pad_h_idx.dtype(), 0),
-                          (pad_h_idx - kernel_height) / stride_height + 1);
+              tirx::Select(pad_h_idx < kernel_height, IntImm(pad_h_idx.ty(), 0),
+                           (pad_h_idx - kernel_height) / stride_height + 1);
           PrimExpr out_idx_lower_w =
-              tir::Select(pad_w_idx < kernel_width, make_const(pad_w_idx.dtype(), 0),
-                          (pad_w_idx - kernel_width) / stride_width + 1);
+              tirx::Select(pad_w_idx < kernel_width, IntImm(pad_w_idx.ty(), 0),
+                           (pad_w_idx - kernel_width) / stride_width + 1);
 
           PrimExpr divide_factor;  // number of pooled elements
           if (count_include_pad) {
@@ -191,17 +192,17 @@ inline Tensor pool_grad_impl(const Tensor& out_grad, const Tensor& x,
 
             PrimExpr h_end = min(h_start + kernel_height, height);
             PrimExpr w_end = min(w_start + kernel_width, width);
-            h_start = max(h_start, make_const(h_start.dtype(), 0));
-            w_start = max(w_start, make_const(w_start.dtype(), 0));
-            divide_factor =
-                max((h_end - h_start) * (w_end - w_start), make_const(h_end.dtype(), 1));
+            h_start = max(h_start, IntImm(h_start.ty(), 0));
+            w_start = max(w_start, IntImm(w_start.ty(), 0));
+            divide_factor = max((h_end - h_start) * (w_end - w_start), MakeConst(h_end.ty(), 1));
           }
           return tvm::sum(
-              tvm::if_then_else(tir::And(tir::And(out_idx[height_axis] >= out_idx_lower_h,
-                                                  out_idx[height_axis] < out_height),
-                                         tir::And(out_idx[width_axis] >= out_idx_lower_w,
-                                                  out_idx[width_axis] < out_width)),
-                                out_grad(out_idx) / divide_factor, make_const(out_grad->dtype, 0)),
+              tvm::if_then_else(tirx::And(tirx::And(out_idx[height_axis] >= out_idx_lower_h,
+                                                    out_idx[height_axis] < out_height),
+                                          tirx::And(out_idx[width_axis] >= out_idx_lower_w,
+                                                    out_idx[width_axis] < out_width)),
+                                out_grad(out_idx) / divide_factor,
+                                MakeConst(PrimType(out_grad->dtype), 0)),
               {windowh, windoww});
         },
         "T_pool_grad", "pool_grad_avg");
@@ -298,7 +299,8 @@ inline Tensor pool_grad(const Tensor& out_grad, const Tensor& x,
                         bool ceil_mode, const std::string& layout = "NCHW",
                         bool count_include_pad = true) {
   int height_axis = -1, width_axis = -1;
-  ICHECK(find_height_width(layout, &height_axis, &width_axis)) << "Unsupported layout " << layout;
+  TVM_FFI_ICHECK(find_height_width(layout, &height_axis, &width_axis))
+      << "Unsupported layout " << layout;
   return pool_grad_impl(out_grad, x, kernel_size, stride_size, padding_size, pool_type, ceil_mode,
                         height_axis, width_axis, count_include_pad);
 }
@@ -309,7 +311,7 @@ inline PrimExpr start_index(const Var& out_index, const PrimExpr& odim, const Pr
 
 inline PrimExpr end_index(const Var& out_index, const PrimExpr& odim, const PrimExpr& idim) {
   PrimExpr tmp = indexdiv((out_index + 1) * idim, odim);
-  return tvm::tir::Select(indexmod((out_index + 1) * idim, odim) == 0, tmp, tmp + 1);
+  return tvm::tirx::Select(indexmod((out_index + 1) * idim, odim) == 0, tmp, tmp + 1);
 }
 
 /*!
@@ -325,7 +327,7 @@ inline PrimExpr end_index(const Var& out_index, const PrimExpr& odim, const Prim
 inline Tensor adaptive_pool_impl(const Tensor& x, const ffi::Array<PrimExpr>& output_size,
                                  PoolType pool_type, const std::vector<int>& axes) {
   const auto n_dim = output_size.size();
-  ICHECK_EQ(axes.size(), n_dim) << "The number of axes not equal to the in/out dimension";
+  TVM_FFI_ICHECK_EQ(axes.size(), n_dim) << "The number of axes not equal to the in/out dimension";
 
   ffi::Array<PrimExpr> data_shape = x->shape;
   ffi::Array<PrimExpr> out_shape = data_shape;
@@ -339,7 +341,7 @@ inline Tensor adaptive_pool_impl(const Tensor& x, const ffi::Array<PrimExpr>& ou
   auto get_iter_vars = [=](const ffi::Array<Var>& output, bool reduce_indices) {
     ffi::Array<PrimExpr> indices;
     for (size_t i = 0; i < output.size(); ++i) indices.push_back(output[i]);
-    ffi::Array<tir::IterVar> reduce_axes;
+    ffi::Array<tirx::IterVar> reduce_axes;
     for (size_t i = 0; i < n_dim; ++i) {
       auto i_start = start_index(output[axes[i]], out_size[i], in_size[i]);
       auto i_end = end_index(output[axes[i]], out_size[i], in_size[i]);
@@ -360,7 +362,7 @@ inline Tensor adaptive_pool_impl(const Tensor& x, const ffi::Array<PrimExpr>& ou
         out_shape,
         [&](const ffi::Array<Var>& output) {
           ffi::Array<PrimExpr> indices;
-          ffi::Array<tir::IterVar> reduce_axes;
+          ffi::Array<tirx::IterVar> reduce_axes;
           std::tie(indices, reduce_axes) = get_iter_vars(output, true);
           return tvm::max(x(indices), reduce_axes);  // NOLINT(*)
         },
@@ -371,7 +373,7 @@ inline Tensor adaptive_pool_impl(const Tensor& x, const ffi::Array<PrimExpr>& ou
         out_shape,
         [&](const ffi::Array<Var>& output) {
           ffi::Array<PrimExpr> indices;
-          ffi::Array<tir::IterVar> reduce_axes;
+          ffi::Array<tirx::IterVar> reduce_axes;
           std::tie(indices, reduce_axes) = get_iter_vars(output, true);
           return tvm::sum(x(indices), reduce_axes);
         },
@@ -381,12 +383,12 @@ inline Tensor adaptive_pool_impl(const Tensor& x, const ffi::Array<PrimExpr>& ou
         out_shape,
         [&](const ffi::Array<Var>& output) {
           ffi::Array<PrimExpr> indices;
-          ffi::Array<tir::IterVar> reduce_axes;
+          ffi::Array<tirx::IterVar> reduce_axes;
           std::tie(indices, reduce_axes) = get_iter_vars(output, false);
 
-          PrimExpr divide_factor = tvm::cast(x->dtype, 1);
+          PrimExpr divide_factor = tvm::cast(PrimType(x->dtype), 1);
           for (size_t i = 0; i < n_dim; ++i) {
-            divide_factor *= tvm::cast(DataType::Int(32), reduce_axes[i]->dom->extent);
+            divide_factor *= tvm::cast(PrimType::Int(32), reduce_axes[i]->dom->extent);
           }
 
           return div(pool_sum(indices), divide_factor);
@@ -427,7 +429,8 @@ inline Tensor adaptive_pool_impl(const Tensor& x, const ffi::Array<PrimExpr>& ou
 inline Tensor adaptive_pool(const Tensor& x, const ffi::Array<PrimExpr>& output_size,
                             PoolType pool_type, const std::string& layout = "NCHW") {
   int height_axis = -1, width_axis = -1;
-  ICHECK(find_height_width(layout, &height_axis, &width_axis)) << "Unsupported layout " << layout;
+  TVM_FFI_ICHECK(find_height_width(layout, &height_axis, &width_axis))
+      << "Unsupported layout " << layout;
   return adaptive_pool_impl(x, output_size, pool_type, {height_axis, width_axis});
 }
 
@@ -442,7 +445,7 @@ inline Tensor adaptive_pool(const Tensor& x, const ffi::Array<PrimExpr>& output_
 inline Tensor adaptive_pool3d(const Tensor& x, const ffi::Array<PrimExpr>& output_size,
                               PoolType pool_type, const std::string& layout = "NCDHW") {
   int depth_axis = -1, height_axis = -1, width_axis = -1;
-  ICHECK(find_depth_height_width(layout, &depth_axis, &height_axis, &width_axis))
+  TVM_FFI_ICHECK(find_depth_height_width(layout, &depth_axis, &height_axis, &width_axis))
       << "Unsupported layout " << layout;
   return adaptive_pool_impl(x, output_size, pool_type, {depth_axis, height_axis, width_axis});
 }
@@ -458,7 +461,7 @@ inline Tensor adaptive_pool3d(const Tensor& x, const ffi::Array<PrimExpr>& outpu
 inline Tensor adaptive_pool1d(const Tensor& x, const ffi::Array<PrimExpr>& output_size,
                               PoolType pool_type, const std::string& layout = "NCW") {
   int width_axis = -1;
-  ICHECK(find_width(layout, &width_axis)) << "Unsupported layout " << layout;
+  TVM_FFI_ICHECK(find_width(layout, &width_axis)) << "Unsupported layout " << layout;
   return adaptive_pool_impl(x, output_size, pool_type, {width_axis});
 }
 
@@ -514,10 +517,12 @@ inline Tensor pool_impl_nd(const Tensor& x, const ffi::Array<PrimExpr>& kernel_s
                            bool ceil_mode, const std::vector<int>& axis, bool count_include_pad) {
   int k_size = kernel_size.size();
   int x_size = x->shape.size();
-  ICHECK_EQ(stride_size.size(), k_size) << "Pooling stride_size must have same elements as kernel";
-  ICHECK_EQ(padding_size.size(), k_size * 2) << "Pooling padding_size must has double elements of"
-                                                " kernel";
-  ICHECK_EQ(axis.size(), k_size) << "axis must have same elements as kernel";
+  TVM_FFI_ICHECK_EQ(stride_size.size(), k_size)
+      << "Pooling stride_size must have same elements as kernel";
+  TVM_FFI_ICHECK_EQ(padding_size.size(), k_size * 2)
+      << "Pooling padding_size must has double elements of"
+         " kernel";
+  TVM_FFI_ICHECK_EQ(axis.size(), k_size) << "axis must have same elements as kernel";
 
   ffi::Array<IterVar> daxis;
   std::vector<PrimExpr> kernel(k_size);
@@ -563,13 +568,24 @@ inline Tensor pool_impl_nd(const Tensor& x, const ffi::Array<PrimExpr>& kernel_s
 
     PrimExpr numerator =
         data_shape[ii] - (kernel[i] - 1) * dilation[i] - 1 + pad_head[i] + pad_tail[i];
-    auto out_dim = analyzer.Simplify(indexdiv(numerator, stride[i]) + 1);
-    out_shape.Set(ii, out_dim);
+    auto raw_out = indexdiv(numerator, stride[i]) + 1;
+    if (ceil_mode) {
+      // In the case of ceil_mode=True, we need to check if the last pooling window is valid.
+      // If not, we skip the last window as it would start in the bottom padded region,
+      // we need to minus 1 to get the correct output shape.
+      auto invalid_last = (raw_out - 1) * stride[i] >= data_shape[ii] + pad_head[i];
+      auto out_dim = analyzer->Simplify(if_then_else(invalid_last, raw_out - 1, raw_out));
+      out_shape.Set(ii, out_dim);
+    } else {
+      auto out_dim = analyzer->Simplify(raw_out);
+      out_shape.Set(ii, out_dim);
+    }
   }
 
   ffi::Map<ffi::String, ffi::Any> attrs;
   if (pool_type == kMaxPool) {
-    auto temp = do_pad ? pad(x, pad_before, pad_after, tvm::min_value(x->dtype), "pad_temp") : x;
+    auto temp =
+        do_pad ? pad(x, pad_before, pad_after, tvm::min_value(PrimType(x->dtype)), "pad_temp") : x;
     attrs.Set("schedule_rule", tvm::ffi::String("meta_schedule.pool_max"));
     return tvm::te::compute(
         out_shape,
@@ -613,7 +629,7 @@ inline Tensor pool_impl_nd(const Tensor& x, const ffi::Array<PrimExpr>& kernel_s
           if (count_include_pad) {
             std::vector<PrimExpr> start(k_size);
             std::vector<PrimExpr> end(k_size);
-            auto num_el = make_const(DataType::Int(32), 1);
+            auto num_el = IntImm::Int32(1);
             for (int i = 0; i < k_size; i++) {
               int ii = axis[i];
               start[i] = output[ii] * stride[i] - pad_head[i];
@@ -629,7 +645,7 @@ inline Tensor pool_impl_nd(const Tensor& x, const ffi::Array<PrimExpr>& kernel_s
           } else {
             std::vector<PrimExpr> start(k_size);
             std::vector<PrimExpr> end(k_size);
-            auto num_el = make_const(DataType::Int(32), 1);
+            auto num_el = IntImm::Int32(1);
             for (int i = 0; i < k_size; i++) {
               int ii = axis[i];
 
@@ -644,13 +660,13 @@ inline Tensor pool_impl_nd(const Tensor& x, const ffi::Array<PrimExpr>& kernel_s
               // number that represents the number of steps along the dilated kernel to reach a
               // non-padded value. Otherwise this should be 0.
               PrimExpr jumps_to_non_pad = (dilation[i] - 1 - start[i]) / dilation[i];
-              jumps_to_non_pad = max(jumps_to_non_pad, make_const(jumps_to_non_pad.dtype(), 0));
+              jumps_to_non_pad = max(jumps_to_non_pad, IntImm(jumps_to_non_pad.ty(), 0));
 
               end[i] = min(end[i], data_shape[ii] - 1);
               num_el *= (end[i] - (start[i] + dilation[i] * jumps_to_non_pad)) / dilation[i] + 1;
             }
 
-            PrimExpr divide_factor = max(num_el, make_const(DataType::Int(32), 1));
+            PrimExpr divide_factor = max(num_el, IntImm::Int32(1));
             return div(pool_sum(indices), divide_factor);
           }
         },
@@ -697,7 +713,7 @@ inline Tensor pool1d(const Tensor& x, const ffi::Array<PrimExpr>& kernel_size,
                      const ffi::Array<PrimExpr>& padding_size, PoolType pool_type, bool ceil_mode,
                      const std::string& layout = "NCW", bool count_include_pad = true) {
   int width_axis = -1;
-  ICHECK(find_width(layout, &width_axis)) << "Unsupported layout " << layout;
+  TVM_FFI_ICHECK(find_width(layout, &width_axis)) << "Unsupported layout " << layout;
   std::vector<int> axis = {width_axis};
   return pool_impl_nd(x, kernel_size, stride_size, dilation_size, padding_size, pool_type,
                       ceil_mode, axis, count_include_pad);
@@ -739,7 +755,8 @@ inline Tensor pool2d(const Tensor& x, const ffi::Array<PrimExpr>& kernel_size,
                      const ffi::Array<PrimExpr>& padding_size, PoolType pool_type, bool ceil_mode,
                      const std::string& layout = "NCHW", bool count_include_pad = true) {
   int height_axis = -1, width_axis = -1;
-  ICHECK(find_height_width(layout, &height_axis, &width_axis)) << "Unsupported layout " << layout;
+  TVM_FFI_ICHECK(find_height_width(layout, &height_axis, &width_axis))
+      << "Unsupported layout " << layout;
   std::vector<int> axis = {height_axis, width_axis};
   return pool_impl_nd(x, kernel_size, stride_size, dilation_size, padding_size, pool_type,
                       ceil_mode, axis, count_include_pad);
@@ -782,7 +799,7 @@ inline Tensor pool3d(const Tensor& x, const ffi::Array<PrimExpr>& kernel_size,
                      const ffi::Array<PrimExpr>& padding_size, PoolType pool_type, bool ceil_mode,
                      const std::string& layout = "NCDHW", bool count_include_pad = true) {
   int depth_axis = -1, height_axis = -1, width_axis = -1;
-  ICHECK(find_depth_height_width(layout, &depth_axis, &height_axis, &width_axis))
+  TVM_FFI_ICHECK(find_depth_height_width(layout, &depth_axis, &height_axis, &width_axis))
       << "Unsupported layout " << layout;
   std::vector<int> axis = {depth_axis, height_axis, width_axis};
   return pool_impl_nd(x, kernel_size, stride_size, dilation_size, padding_size, pool_type,

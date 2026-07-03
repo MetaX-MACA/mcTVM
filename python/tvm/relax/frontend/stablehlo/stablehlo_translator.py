@@ -17,10 +17,12 @@
 # pylint: disable=import-outside-toplevel, unused-argument
 
 """StableHLO frontend of Relax."""
-from typing import Callable, Dict, List, Tuple, Union, Any
+
+from collections.abc import Callable
+from typing import Any
 
 import tvm
-from tvm import relax, tir
+from tvm import relax, tirx
 
 
 class StableHLOImporter:
@@ -32,7 +34,7 @@ class StableHLOImporter:
     def __init__(self) -> None:
         from jaxlib import mlir
 
-        self._nodes: Dict[Union[str, mlir.ir.Operation], relax.Expr] = {}
+        self._nodes: dict[str | mlir.ir.Operation, relax.Expr] = {}
         self.block_builder: relax.BlockBuilder = None
         self.create_convert_map()
 
@@ -72,9 +74,9 @@ class StableHLOImporter:
         else:
             raise NotImplementedError(f"input_type {input_type} is not handled yet")
 
-    def _attr2value(self, node) -> Union[Any, List[Any]]:
-        from jaxlib import mlir
+    def _attr2value(self, node) -> Any | list[Any]:
         import numpy as np
+        from jaxlib import mlir
 
         if mlir.ir.IntegerAttr.isinstance(node):
             int_attr = mlir.ir.IntegerAttr(node)
@@ -106,7 +108,7 @@ class StableHLOImporter:
             return self._nodes[node]
         if isinstance(node, tuple):
             return tuple(self._retrieve_operands(x) for x in node)
-        if isinstance(node, (list, mlir.ir.OpOperandList)):
+        if isinstance(node, list | mlir.ir.OpOperandList):
             return [self._retrieve_operands(x) for x in node]
         if isinstance(node, dict):
             return {self._retrieve_operands(k): self._retrieve_operands(v) for k, v in node.items()}
@@ -117,7 +119,7 @@ class StableHLOImporter:
             return self._retrieve_operands(node.owner)
         return node
 
-    def get_shape(self, inpt_type) -> List[Any]:
+    def get_shape(self, inpt_type) -> list[Any]:
         """Get the shape from Type like tensor<?x?xf32>"""
         from jaxlib import mlir
 
@@ -128,7 +130,7 @@ class StableHLOImporter:
         for i in range(shape_type.rank):
             # get_dim_size
             if shape_type.is_dynamic_dim(i):
-                n = tir.Var("n", "int64")
+                n = tirx.Var("n", "int64")
                 ret.append(n)
             else:
                 ret.append(shape_type.get_dim_size(i))
@@ -143,10 +145,10 @@ class StableHLOImporter:
         if isinstance(lhs, relax.Expr) and isinstance(rhs, relax.Expr):
             return lhs, rhs
         if isinstance(lhs, relax.Expr):
-            assert isinstance(lhs.struct_info, relax.TensorStructInfo)
-            return lhs, relax.const(rhs, lhs.struct_info.dtype)
-        assert isinstance(rhs.struct_info, relax.TensorStructInfo)
-        return relax.const(lhs, rhs.struct_info.dtype), rhs
+            assert isinstance(lhs.ty, relax.TensorType)
+            return lhs, relax.const(rhs, lhs.ty.dtype)
+        assert isinstance(rhs.ty, relax.TensorType)
+        return relax.const(lhs, rhs.ty.dtype), rhs
 
     def _call_binary_op(self, op, lhs, rhs):
         lhs, rhs = StableHLOImporter._promote_binary_op_args(lhs, rhs)
@@ -256,9 +258,9 @@ class StableHLOImporter:
 
         if node.body is not None:
             reducer_op = node.body.blocks[0].operations[0].OPERATION_NAME
-            assert (
-                reducer_op == "stablehlo.maximum"
-            ), f"the reducer {reducer_op} in reduce_window is not supported"
+            assert reducer_op == "stablehlo.maximum", (
+                f"the reducer {reducer_op} in reduce_window is not supported"
+            )
 
         pool_size = []
         for i, window_dim in enumerate(window_dimensions):
@@ -324,7 +326,7 @@ class StableHLOImporter:
     def create_convert_map(self):
         from jaxlib import mlir
 
-        self.convert_map: Dict[str, Callable[[mlir.ir.Operation], relax.Var]] = {
+        self.convert_map: dict[str, Callable[[mlir.ir.Operation], relax.Var]] = {
             "stablehlo.add": self._add,
             "stablehlo.broadcast_in_dim": self._broadcast_in_dim,
             "stablehlo.constant": self._const,
@@ -350,7 +352,7 @@ class StableHLOImporter:
             "stablehlo.return": self._return,
         }
 
-    def from_stablehlo(self, model, input_info: List[Tuple[Tuple[int], str]]) -> tvm.IRModule:
+    def from_stablehlo(self, model, input_info: list[tuple[tuple[int], str]]) -> tvm.IRModule:
         """Convert a StableHLO Module to a Relax program.
 
         Parameters
@@ -379,7 +381,7 @@ class StableHLOImporter:
             ipt_shape = self.get_shape(arg_shape)
             ipt_dtype = self._convert_data_type(arg_shape.element_type)
             ipt_name = "arg" + str(idx)
-            ipt_var = relax.Var(f"arg{idx}", relax.TensorStructInfo(ipt_shape, ipt_dtype))
+            ipt_var = relax.Var(f"arg{idx}", relax.TensorType(ipt_shape, ipt_dtype))
             self._nodes[ipt_name] = ipt_var
             inputs.append(ipt_var)
 
@@ -394,7 +396,7 @@ class StableHLOImporter:
             with self.block_builder.dataflow():
                 block = model.body.operations[0].regions[0].blocks[0]
                 for operation in block.operations:
-                    if isinstance(operation, (mlir.dialects.func.ReturnOp, stablehlo.ReturnOp)):
+                    if isinstance(operation, mlir.dialects.func.ReturnOp | stablehlo.ReturnOp):
                         operation = operation.operands[0].owner
                         # TODO (yongwww): handle multiple outputs
                         output = self.block_builder.emit_output(self._nodes[operation])
@@ -415,7 +417,7 @@ class StableHLOImporter:
 
 def from_stablehlo(
     stablehlo_module,
-    input_info: List[Tuple[Tuple[int], str]] = None,
+    input_info: list[tuple[tuple[int], str]] | None = None,
 ) -> tvm.IRModule:
     """Convert a StableHLO Module to a Relax program
 

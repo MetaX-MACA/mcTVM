@@ -25,12 +25,12 @@
 #ifndef TVM_RELAX_EXPR_FUNCTOR_H_
 #define TVM_RELAX_EXPR_FUNCTOR_H_
 
-#include <tvm/node/functor.h>
+#include <tvm/ir/node_functor.h>
 #include <tvm/relax/block_builder.h>
 #include <tvm/relax/expr.h>
-#include <tvm/relax/struct_info.h>
-#include <tvm/relax/struct_info_functor.h>
-#include <tvm/tir/function.h>
+#include <tvm/relax/type.h>
+#include <tvm/relax/type_functor.h>
+#include <tvm/tirx/function.h>
 
 #include <unordered_map>
 #include <utility>
@@ -52,13 +52,50 @@ template <typename FType>
 class ExprFunctor;
 
 // functions to be overriden.
-#define EXPR_FUNCTOR_DEFAULT \
-  { return VisitExprDefault_(op, std::forward<Args>(args)...); }
+#define EXPR_FUNCTOR_DEFAULT                                   \
+  {                                                            \
+    return VisitExprDefault_(op, std::forward<Args>(args)...); \
+  }
 
-#define RELAX_EXPR_FUNCTOR_DISPATCH(OP)                                                    \
-  vtable.template set_dispatch<OP>([](const ObjectRef& n, TSelf* self, Args... args) {     \
-    return self->VisitExpr_(static_cast<const OP*>(n.get()), std::forward<Args>(args)...); \
+#define RELAX_EXPR_FUNCTOR_DISPATCH(OP)                                                     \
+  vtable.template set_dispatch<OP>([](const ffi::ObjectRef& n, TSelf* self, Args... args) { \
+    return self->VisitExpr_(static_cast<const OP*>(n.get()), std::forward<Args>(args)...);  \
   });
+
+#define RELAX_PRIM_EXPR_NODE_DISPATCH_LIST(V) \
+  V(::tvm::IntImmNode)                        \
+  V(::tvm::FloatImmNode)                      \
+  V(::tvm::tirx::VarNode)                     \
+  V(::tvm::tirx::SizeVarNode)                 \
+  V(::tvm::tirx::StringImmNode)               \
+  V(::tvm::tirx::CastNode)                    \
+  V(::tvm::tirx::AddNode)                     \
+  V(::tvm::tirx::SubNode)                     \
+  V(::tvm::tirx::MulNode)                     \
+  V(::tvm::tirx::DivNode)                     \
+  V(::tvm::tirx::ModNode)                     \
+  V(::tvm::tirx::FloorDivNode)                \
+  V(::tvm::tirx::FloorModNode)                \
+  V(::tvm::tirx::MinNode)                     \
+  V(::tvm::tirx::MaxNode)                     \
+  V(::tvm::tirx::EQNode)                      \
+  V(::tvm::tirx::NENode)                      \
+  V(::tvm::tirx::LTNode)                      \
+  V(::tvm::tirx::LENode)                      \
+  V(::tvm::tirx::GTNode)                      \
+  V(::tvm::tirx::GENode)                      \
+  V(::tvm::tirx::AndNode)                     \
+  V(::tvm::tirx::OrNode)                      \
+  V(::tvm::tirx::NotNode)                     \
+  V(::tvm::tirx::SelectNode)                  \
+  V(::tvm::tirx::BufferLoadNode)              \
+  V(::tvm::tirx::ProducerLoadNode)            \
+  V(::tvm::tirx::RampNode)                    \
+  V(::tvm::tirx::BroadcastNode)               \
+  V(::tvm::tirx::LetNode)                     \
+  V(::tvm::tirx::CallNode)                    \
+  V(::tvm::tirx::ShuffleNode)                 \
+  V(::tvm::tirx::ReduceNode)
 
 #define PY_EXPR_VISITOR_DEFAULT(N, PY_FUNC, DEFAULT_FUNC) \
   {                                                       \
@@ -78,34 +115,38 @@ class ExprFunctor;
     }                                                               \
   }
 
-#define PY_EXPR_VISITOR_DISPATCH(OP, PY_FUNC)                            \
-  vtable.template set_dispatch<OP>([](const ObjectRef& n, TSelf* self) { \
-    if (self->PY_FUNC != nullptr)                                        \
-      self->PY_FUNC(n);                                                  \
-    else                                                                 \
-      self->VisitExpr_(static_cast<const OP*>(n.get()));                 \
+#define PY_EXPR_VISITOR_DISPATCH(OP, PY_FUNC)                                 \
+  vtable.template set_dispatch<OP>([](const ffi::ObjectRef& n, TSelf* self) { \
+    if (self->PY_FUNC != nullptr)                                             \
+      self->PY_FUNC(n);                                                       \
+    else                                                                      \
+      self->VisitExpr_(static_cast<const OP*>(n.get()));                      \
   });
 
-#define PY_EXPR_MUTATOR_DISPATCH(OP, PY_FUNC)                            \
-  vtable.template set_dispatch<OP>([](const ObjectRef& n, TSelf* self) { \
-    if (self->PY_FUNC != nullptr) {                                      \
-      Expr expr = self->PY_FUNC(n).cast<Expr>();                         \
-      return expr;                                                       \
-    } else {                                                             \
-      return self->VisitExpr_(static_cast<const OP*>(n.get()));          \
-    }                                                                    \
+#define PY_EXPR_VISITOR_DISPATCH_PRIM_EXPR(OP) PY_EXPR_VISITOR_DISPATCH(OP, f_visit_prim_expr_)
+
+#define PY_EXPR_MUTATOR_DISPATCH(OP, PY_FUNC)                                 \
+  vtable.template set_dispatch<OP>([](const ffi::ObjectRef& n, TSelf* self) { \
+    if (self->PY_FUNC != nullptr) {                                           \
+      Expr expr = self->PY_FUNC(n).cast<Expr>();                              \
+      return expr;                                                            \
+    } else {                                                                  \
+      return self->VisitExpr_(static_cast<const OP*>(n.get()));               \
+    }                                                                         \
   });
 
-#define PY_EXPR_MUTATOR_VISIT_EXPR_POST_ORDER_DISPATCH(OP)                          \
-  post_order_vtable.template set_dispatch<OP>([](const ObjectRef& n, TSelf* self) { \
-    return self->VisitExprPostOrder_(static_cast<const OP*>(n.get()));              \
+#define PY_EXPR_MUTATOR_DISPATCH_PRIM_EXPR(OP) PY_EXPR_MUTATOR_DISPATCH(OP, f_visit_prim_expr_)
+
+#define PY_EXPR_MUTATOR_VISIT_EXPR_POST_ORDER_DISPATCH(OP)                               \
+  post_order_vtable.template set_dispatch<OP>([](const ffi::ObjectRef& n, TSelf* self) { \
+    return self->VisitExprPostOrder_(static_cast<const OP*>(n.get()));                   \
   });
 
 template <typename R, typename... Args>
 class ExprFunctor<R(const Expr& n, Args...)> {
  private:
   using TSelf = ExprFunctor<R(const Expr& n, Args...)>;
-  using FType = tvm::NodeFunctor<R(const ObjectRef& n, TSelf* self, Args...)>;
+  using FType = tvm::NodeFunctor<R(const ffi::ObjectRef& n, TSelf* self, Args...)>;
 
  public:
   /*! \brief the result type of this functor */
@@ -126,8 +167,9 @@ class ExprFunctor<R(const Expr& n, Args...)> {
    * \return The result of the call
    */
   virtual R VisitExpr(const Expr& n, Args... args) {
-    ICHECK(n.defined()) << "Found null pointer node while traversing AST. The previous pass may "
-                           "have generated invalid data.";
+    TVM_FFI_ICHECK(n.defined())
+        << "Found null pointer node while traversing AST. The previous pass may "
+           "have generated invalid data.";
     static FType vtable = InitVTable();
     return vtable(n, this, std::forward<Args>(args)...);
   }
@@ -147,11 +189,11 @@ class ExprFunctor<R(const Expr& n, Args...)> {
   virtual R VisitExpr_(const IfNode* op, Args... args) EXPR_FUNCTOR_DEFAULT;
   virtual R VisitExpr_(const OpNode* op, Args... args) EXPR_FUNCTOR_DEFAULT;
   virtual R VisitExpr_(const TupleGetItemNode* op, Args... args) EXPR_FUNCTOR_DEFAULT;
-  virtual R VisitExpr_(const PrimValueNode* op, Args... args) EXPR_FUNCTOR_DEFAULT;
+  virtual R VisitExpr_(const PrimExprNode* op, Args... args) EXPR_FUNCTOR_DEFAULT;
   virtual R VisitExpr_(const StringImmNode* op, Args... args) EXPR_FUNCTOR_DEFAULT;
   virtual R VisitExpr_(const DataTypeImmNode* op, Args... args) EXPR_FUNCTOR_DEFAULT;
-  virtual R VisitExprDefault_(const Object* op, Args...) {
-    LOG(FATAL) << "Do not have a default for " << op->GetTypeKey();
+  virtual R VisitExprDefault_(const ffi::Object* op, Args...) {
+    TVM_FFI_THROW(InternalError) << "Do not have a default for " << op->GetTypeKey();
     throw;
   }
 
@@ -173,7 +215,7 @@ class ExprFunctor<R(const Expr& n, Args...)> {
     RELAX_EXPR_FUNCTOR_DISPATCH(IfNode);
     RELAX_EXPR_FUNCTOR_DISPATCH(OpNode);
     RELAX_EXPR_FUNCTOR_DISPATCH(TupleGetItemNode);
-    RELAX_EXPR_FUNCTOR_DISPATCH(PrimValueNode);
+    RELAX_PRIM_EXPR_NODE_DISPATCH_LIST(RELAX_EXPR_FUNCTOR_DISPATCH);
     RELAX_EXPR_FUNCTOR_DISPATCH(StringImmNode);
     RELAX_EXPR_FUNCTOR_DISPATCH(DataTypeImmNode);
     vtable.Finalize();
@@ -206,7 +248,7 @@ class ExprVisitor : public ExprFunctor<void(const Expr&)> {
   void VisitExpr_(const IfNode* op) override;
   void VisitExpr_(const OpNode* op) override;
   void VisitExpr_(const TupleGetItemNode* op) override;
-  void VisitExpr_(const PrimValueNode* op) override;
+  void VisitExpr_(const PrimExprNode* op) override;
   void VisitExpr_(const StringImmNode* op) override;
   void VisitExpr_(const DataTypeImmNode* op) override;
 
@@ -233,7 +275,7 @@ class ExprVisitor : public ExprFunctor<void(const Expr&)> {
   virtual void VisitBinding_(const VarBindingNode* binding, const IfNode* val);
   virtual void VisitBinding_(const VarBindingNode* binding, const OpNode* val);
   virtual void VisitBinding_(const VarBindingNode* binding, const TupleGetItemNode* val);
-  virtual void VisitBinding_(const VarBindingNode* binding, const PrimValueNode* val);
+  virtual void VisitBinding_(const VarBindingNode* binding, const PrimExprNode* val);
   virtual void VisitBinding_(const VarBindingNode* binding, const StringImmNode* val);
   virtual void VisitBinding_(const VarBindingNode* binding, const DataTypeImmNode* val);
   /*!
@@ -253,20 +295,20 @@ class ExprVisitor : public ExprFunctor<void(const Expr&)> {
   virtual void VisitVarDef(const Var& var);
 
   /*!
-   * \brief Visit struct_info may recursively contain Expr/PrimExpr.
+   * \brief Visit ty may recursively contain Expr/PrimExpr.
    *
-   * By default, this function recurse into struct info such as
-   * TensorStructInfo and ShapeStructInfo and call VisitExpr/VisitPrimExpr
-   * accordingly. It does not recurse into FunctionStructInfo as it does
+   * By default, this function recurse into type such as
+   * TensorType and ShapeType and call VisitExpr/VisitPrimExpr
+   * accordingly. It does not recurse into FunctionType as it does
    * not contain Expr defined in the current scope.
    *
    * Pass writers can overload this function to change to other behaviors.
-   * For example, if we are not interested in Expr in StructInfo, we can
+   * For example, if we are not interested in Expr in Type, we can
    * override this function by a no-op.
    *
-   * \param struct_info Input struct info field.
+   * \param ty Input type field.
    */
-  virtual void VisitExprDepStructInfoField(const StructInfo& struct_info);
+  virtual void VisitExprDepTypeField(const Type& ty);
 
   // specific leaf level visitor functions
   virtual void VisitVarDef_(const VarNode* var);
@@ -277,34 +319,34 @@ class ExprVisitor : public ExprFunctor<void(const Expr&)> {
 
  private:
   using TSelf = ExprVisitor;
-  using VisitBindingVTable =
-      tvm::NodeFunctor<void(const ObjectRef& n, ExprVisitor* self, const VarBindingNode* binding)>;
+  using VisitBindingVTable = tvm::NodeFunctor<void(const ffi::ObjectRef& n, ExprVisitor* self,
+                                                   const VarBindingNode* binding)>;
   // initialize the vtable.
   static VisitBindingVTable InitVisitBindingVTable();
   /*!
-   * \brief Private internal struct info field visitor.
+   * \brief Private internal type field visitor.
    *
-   *  Support default visiting of struct info field and recursive into
+   *  Support default visiting of type field and recursive into
    *  their Expr fields.
    *
    *  We use component instead of sub-classing so there can be other
-   *  joint inheritance between ExprVisitor and StructInfoVisitor.
+   *  joint inheritance between ExprVisitor and TypeVisitor.
    */
-  class DefaultStructInfoFieldVisitor : public StructInfoVisitor {
+  class DefaultTypeFieldVisitor : public TypeVisitor {
    public:
-    explicit DefaultStructInfoFieldVisitor(ExprVisitor* parent);
+    explicit DefaultTypeFieldVisitor(ExprVisitor* parent);
 
-    // Override defaults in struct info visitor.
-    void VisitStructInfoExprField(const Expr& expr) final;
-    void VisitStructInfoExprField(const PrimExpr& expr) final;
-    void VisitStructInfo_(const FuncStructInfoNode* op) final;
+    // Override defaults in type visitor.
+    void VisitTypeExprField(const Expr& expr) final;
+    void VisitTypeExprField(const PrimExpr& expr) final;
+    void VisitType_(const FuncTypeNode* op) final;
 
    private:
     ExprVisitor* parent_;
   };
   // This visitor is not visible to child classes and only
   // used to supported default visiting behavior.
-  DefaultStructInfoFieldVisitor default_struct_info_field_visitor_{this};
+  DefaultTypeFieldVisitor default_tyfield_visitor_{this};
 };
 
 void PostOrderVisit(const Expr& node, std::function<void(const Expr&)> fvisit);
@@ -312,7 +354,7 @@ void PostOrderVisit(const Expr& node, std::function<void(const Expr&)> fvisit);
 /*!
  * \brief A mutator works in unnormalized form.
  *
- * ExprMutatorBase expects input AST to be in the unnormalized form, i.e., struct_info_
+ * ExprMutatorBase expects input AST to be in the unnormalized form, i.e., ty
  * of expressions can be nullptr, and the expressions may nest(and as a result the AST is not in
  * ANF).
  */
@@ -333,7 +375,7 @@ class ExprMutatorBase : public ExprFunctor<Expr(const Expr&)> {
   Expr VisitExpr_(const IfNode* op) override;
   Expr VisitExpr_(const OpNode* op) override;
   Expr VisitExpr_(const TupleGetItemNode* op) override;
-  Expr VisitExpr_(const PrimValueNode* op) override;
+  Expr VisitExpr_(const PrimExprNode* op) override;
   Expr VisitExpr_(const StringImmNode* op) override;
   Expr VisitExpr_(const DataTypeImmNode* op) override;
 
@@ -352,34 +394,34 @@ class ExprMutatorBase : public ExprFunctor<Expr(const Expr&)> {
   virtual PrimExpr VisitPrimExpr(const PrimExpr& expr);
 
   /*!
-   * \brief Visit struct_info that may recursively contain Expr/PrimExpr.
+   * \brief Visit ty that may recursively contain Expr/PrimExpr.
    *
-   * By default, this function recurse into struct info such as
-   * TensorStructInfo and ShapeStructInfo and call VisitExpr/VisitPrimExpr
-   * accordingly. It does not recurse into FunctionStructInfo as it does
+   * By default, this function recurse into type such as
+   * TensorType and ShapeType and call VisitExpr/VisitPrimExpr
+   * accordingly. It does not recurse into FunctionType as it does
    * not contain Expr defined in the current scope.
    *
    * Pass writers can overload this function to change to other behaviors.
-   * For example, if in Expr in StructInfo won't change, we can
+   * For example, if in Expr in Type won't change, we can
    * override this function by an identity function.
    *
-   * \param struct_info Input struct info field.
-   * \return The updated struct info.
+   * \param ty Input type field.
+   * \return The updated type.
    */
-  virtual StructInfo VisitExprDepStructInfoField(const StructInfo& struct_info);
+  virtual Type VisitExprDepTypeField(const Type& ty);
 
  protected:
   /*!
-   * \brief Check whether VisitExprDepStructInfoField change struct_info.
-   * \return Whether struct info changed.
+   * \brief Check whether VisitExprDepTypeField change ty.
+   * \return Whether type changed.
    * \note This function is used by mutator implementations to check if
-   *       previous Expr update will trigger a change in struct_info.
+   *       previous Expr update will trigger a change in ty.
    *       If change is detected, the implementation can generate a fresh
-   *       node without struct_info, and trigger normalizer to re-derive.
+   *       node without ty, and trigger normalizer to re-derive.
    */
-  bool VisitAndCheckStructInfoFieldUnchanged(const ObjectRef& struct_info) {
-    if (const StructInfoNode* sinfo = struct_info.as<StructInfoNode>()) {
-      return this->VisitExprDepStructInfoField(ffi::GetRef<StructInfo>(sinfo)).same_as(struct_info);
+  bool VisitAndCheckTypeFieldUnchanged(const ffi::ObjectRef& ty) {
+    if (const TypeNode* ty_node = ty.as<TypeNode>()) {
+      return this->VisitExprDepTypeField(ffi::GetRef<Type>(ty_node)).same_as(ty);
     } else {
       return true;
     }
@@ -387,34 +429,34 @@ class ExprMutatorBase : public ExprFunctor<Expr(const Expr&)> {
 
  private:
   /*!
-   * \brief Private internal struct info field visitor to support
-   *  Default visiting of struct info field and recursive into their Expr fields.
+   * \brief Private internal type field visitor to support
+   *  Default visiting of type field and recursive into their Expr fields.
    *
    *  We use component instead of sub-classing so there can be other
-   *  joint inheritance between ExprMutator and StructInfoMutator.
+   *  joint inheritance between ExprMutator and TypeMutator.
    */
-  class DefaultStructInfoFieldMutator : public StructInfoMutator {
+  class DefaultTypeFieldMutator : public TypeMutator {
    public:
-    explicit DefaultStructInfoFieldMutator(ExprMutatorBase* parent);
+    explicit DefaultTypeFieldMutator(ExprMutatorBase* parent);
 
-    // Override defaults in struct info visitor.
-    Expr VisitStructInfoExprField(const Expr& expr) final;
-    PrimExpr VisitStructInfoExprField(const PrimExpr& expr) final;
-    StructInfo VisitStructInfo_(const FuncStructInfoNode* op) final;
+    // Override defaults in type visitor.
+    Expr VisitTypeExprField(const Expr& expr) final;
+    PrimExpr VisitTypeExprField(const PrimExpr& expr) final;
+    Type VisitType_(const FuncTypeNode* op) final;
 
    private:
     ExprMutatorBase* parent_;
   };
   // This visitor is not visible to child classes and only
   // used to supported default visiting behavior.
-  DefaultStructInfoFieldMutator default_struct_info_field_mutator_{this};
+  DefaultTypeFieldMutator default_tyfield_mutator_{this};
 };
 
 /*!
  * \brief A mutator works in normal form.
  *
  * ExprMutator expects input AST to be in the normal form, i.e., the expressions are normalized(no
- * nesting and hence the AST is in ANF), and all struct_info_ of expressions are
+ * nesting and hence the AST is in ANF), and all ty of expressions are
  * available.
  */
 class ExprMutator : public ExprMutatorBase {
@@ -452,7 +494,7 @@ class ExprMutator : public ExprMutatorBase {
   virtual void VisitBinding_(const VarBindingNode* binding, const IfNode* val);
   virtual void VisitBinding_(const VarBindingNode* binding, const OpNode* val);
   virtual void VisitBinding_(const VarBindingNode* binding, const TupleGetItemNode* val);
-  virtual void VisitBinding_(const VarBindingNode* binding, const PrimValueNode* val);
+  virtual void VisitBinding_(const VarBindingNode* binding, const PrimExprNode* val);
   virtual void VisitBinding_(const VarBindingNode* binding, const StringImmNode* val);
   virtual void VisitBinding_(const VarBindingNode* binding, const DataTypeImmNode* val);
   /*!
@@ -541,24 +583,24 @@ class ExprMutator : public ExprMutatorBase {
   }
 
   /*!
-   * \brief Create a new var with specified struct_info if the original var's shape or type does
-   * not match with the specified ones.
+   * \brief Create a new var with specified type if the original var's shape or type does not
+   * match with the specified ones.
    * \param var The var to be updated.
-   * \param struct_info The struct info to be updated.
-   * \return The var filled with struct_info
+   * \param ty The type to be updated.
+   * \return The var filled with type information.
    */
-  Var WithStructInfo(Var var, StructInfo struct_info);
+  Var WithType(Var var, Type ty);
 
   /*! \brief Internal block builder to emit bindings during rewriting. */
   BlockBuilder builder_;
 
   /*! \brief Remap a var to a new var in use-site. */
-  std::unordered_map<Id, Var, ObjectPtrHash, ObjectPtrEqual> var_remap_;
+  std::unordered_map<Id, Var, ffi::ObjectPtrHash, ffi::ObjectPtrEqual> var_remap_;
 
  private:
   using TSelf = ExprMutator;
-  using VisitBindingVTable =
-      tvm::NodeFunctor<void(const ObjectRef& n, ExprMutator* self, const VarBindingNode* binding)>;
+  using VisitBindingVTable = tvm::NodeFunctor<void(const ffi::ObjectRef& n, ExprMutator* self,
+                                                   const VarBindingNode* binding)>;
   // initialize the vtable.
   static VisitBindingVTable InitVisitBindingVTable();
 };

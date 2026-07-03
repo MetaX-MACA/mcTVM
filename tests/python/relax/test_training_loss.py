@@ -17,7 +17,8 @@
 import tvm.testing
 from tvm import relax
 from tvm.ir.base import assert_structural_equal
-from tvm.script import relax as R, ir as I
+from tvm.script import ir as I
+from tvm.script import relax as R
 
 
 @I.ir_module
@@ -38,8 +39,8 @@ class Module:
 def test_l1_loss():
     N = 3
     C = 5
-    predictions = relax.TensorStructInfo((N, C), "float32")
-    targets = relax.TensorStructInfo((N, C), "float32")
+    predictions = relax.TensorType((N, C), "float32")
+    targets = relax.TensorType((N, C), "float32")
     l1_loss = relax.training.loss.L1Loss()
 
     @R.function
@@ -58,7 +59,7 @@ def test_l1_loss():
 
 
 def test_l1_loss_append():
-    s = Module["forward"].ret_struct_info
+    s = Module["forward"].ret_ty
     l1_loss = relax.training.loss.L1Loss(reduction="sum")
     After = relax.training.AppendLoss("forward", l1_loss(s, s), l1_loss.num_backbone_outputs)(
         Module
@@ -73,7 +74,7 @@ def test_l1_loss_append():
     ) -> R.Tensor((), "float32"):
         R.func_attr({"global_symbol": "forward_loss"})
         with R.dataflow():
-            lv: R.Tensor((2, 4), "float32") = R.matmul(x, w, out_dtype="")
+            lv: R.Tensor((2, 4), "float32") = R.matmul(x, w)
             out: R.Tensor((2, 4), "float32") = R.add(lv, b)
             lv1: R.Tensor((2, 4), "float32") = R.subtract(out, targets)
             lv11: R.Tensor((2, 4), "float32") = R.abs(lv1)
@@ -87,8 +88,8 @@ def test_l1_loss_append():
 def test_mse_loss():
     N = 3
     C = 5
-    predictions = relax.TensorStructInfo((N, C), "float32")
-    targets = relax.TensorStructInfo((N, C), "float32")
+    predictions = relax.TensorType((N, C), "float32")
+    targets = relax.TensorType((N, C), "float32")
     mse_loss = relax.training.loss.MSELoss()
 
     @R.function
@@ -107,7 +108,7 @@ def test_mse_loss():
 
 
 def test_mse_loss_append():
-    s = Module["forward"].ret_struct_info
+    s = Module["forward"].ret_ty
     mse_loss = relax.training.loss.MSELoss(reduction="sum")
     After = relax.training.AppendLoss("forward", mse_loss(s, s), mse_loss.num_backbone_outputs)(
         Module
@@ -122,7 +123,7 @@ def test_mse_loss_append():
     ) -> R.Tensor((), "float32"):
         R.func_attr({"global_symbol": "forward_loss"})
         with R.dataflow():
-            lv: R.Tensor((2, 4), "float32") = R.matmul(x, w, out_dtype="")
+            lv: R.Tensor((2, 4), "float32") = R.matmul(x, w)
             out: R.Tensor((2, 4), "float32") = R.add(lv, b)
             lv1: R.Tensor((2, 4), "float32") = R.subtract(out, targets)
             lv11: R.Tensor((2, 4), "float32") = R.multiply(lv1, lv1)
@@ -136,9 +137,9 @@ def test_mse_loss_append():
 def test_cross_entropy_loss():
     N = 3
     C = 5
-    predictions = relax.TensorStructInfo((N, C), "float32")
-    targets = relax.TensorStructInfo((N,), "int64")
-    weights = relax.TensorStructInfo((C,), "float32")
+    predictions = relax.TensorType((N, C), "float32")
+    targets = relax.TensorType((N,), "int64")
+    weights = relax.TensorType((C,), "float32")
     cross_entropy_loss = relax.training.loss.CrossEntropyLoss(reduction="sum", ignore_index=1)
 
     @R.function
@@ -162,8 +163,8 @@ def test_cross_entropy_loss():
 def test_cross_entropy_loss_without_weights():
     N = 3
     C = 5
-    predictions = relax.TensorStructInfo((N, C), "float32")
-    targets = relax.TensorStructInfo((N,), "int64")
+    predictions = relax.TensorType((N, C), "float32")
+    targets = relax.TensorType((N,), "int64")
     cross_entropy_loss = relax.training.loss.CrossEntropyLoss()
 
     @R.function
@@ -183,11 +184,11 @@ def test_cross_entropy_loss_without_weights():
 
 
 def test_cross_entropy_loss_append():
-    s = Module["forward"].ret_struct_info
+    s = Module["forward"].ret_ty
     N = s.shape[0]
     C = s.shape[1]
-    targets = relax.TensorStructInfo((N,), "int64")
-    weights = relax.TensorStructInfo((C,), "float32")
+    targets = relax.TensorType((N,), "int64")
+    weights = relax.TensorType((C,), "float32")
     cross_entropy_loss = relax.training.loss.CrossEntropyLoss(reduction="sum", ignore_index=1)
     After = relax.training.AppendLoss(
         "forward", cross_entropy_loss(s, targets, weights), cross_entropy_loss.num_backbone_outputs
@@ -203,7 +204,7 @@ def test_cross_entropy_loss_append():
     ) -> R.Tensor((), "float32"):
         R.func_attr({"global_symbol": "forward_loss"})
         with R.dataflow():
-            lv: R.Tensor((2, 4), "float32") = R.matmul(x, w, out_dtype="")
+            lv: R.Tensor((2, 4), "float32") = R.matmul(x, w)
             out: R.Tensor((2, 4), "float32") = R.add(lv, b)
             lv1: R.Tensor((2, 4), "float32") = R.nn.log_softmax(out, axis=-1)
             gv: R.Tensor((), "float32") = R.nn.nll_loss(
@@ -218,9 +219,9 @@ def test_cross_entropy_loss_append():
 def test_categorical_cross_entropy_loss():
     N = 3
     C = 5
-    predictions = relax.TensorStructInfo((N, C), "float32")
-    targets = relax.TensorStructInfo((N, C), "int64")
-    weights = relax.TensorStructInfo((C,), "float32")
+    predictions = relax.TensorType((N, C), "float32")
+    targets = relax.TensorType((N, C), "int64")
+    weights = relax.TensorType((C,), "float32")
     categorical_cross_entropy_loss = relax.training.loss.CategoricalCrossEntropyLoss(
         reduction="sum"
     )
@@ -245,8 +246,8 @@ def test_categorical_cross_entropy_loss():
 def test_categorical_cross_entropy_loss_without_weights():
     N = 3
     C = 5
-    predictions = relax.TensorStructInfo((N, C), "float32")
-    targets = relax.TensorStructInfo((N, C), "int64")
+    predictions = relax.TensorType((N, C), "float32")
+    targets = relax.TensorType((N, C), "int64")
     categorical_cross_entropy_loss = relax.training.loss.CategoricalCrossEntropyLoss()
 
     @R.function
@@ -266,9 +267,9 @@ def test_categorical_cross_entropy_loss_without_weights():
 def test_categorical_cross_entropy_loss_with_ignore_index():
     N = 3
     C = 5
-    predictions = relax.TensorStructInfo((N, C), "float32")
-    targets = relax.TensorStructInfo((N, C), "int64")
-    weights = relax.TensorStructInfo((C,), "float32")
+    predictions = relax.TensorType((N, C), "float32")
+    targets = relax.TensorType((N, C), "int64")
+    weights = relax.TensorType((C,), "float32")
     categorical_cross_entropy_loss = relax.training.loss.CategoricalCrossEntropyLoss(
         reduction="sum", ignore_index=1
     )
@@ -283,7 +284,7 @@ def test_categorical_cross_entropy_loss_with_ignore_index():
         with R.dataflow():
             lv: R.Tensor((3, 5), "float32") = R.nn.log_softmax(predictions, axis=-1)
             targets = relax.op.reshape(
-                relax.op.argmax(targets, axis=1), shape=(targets.struct_info.shape[0],)
+                relax.op.argmax(targets, axis=1), shape=(targets.ty.shape[0],)
             )
             gv: R.Tensor((), "float32") = R.nn.nll_loss(
                 lv, targets, weights, reduction="sum", ignore_index=1

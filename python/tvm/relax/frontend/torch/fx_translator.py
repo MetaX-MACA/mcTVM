@@ -18,8 +18,9 @@
 # pylint: disable=invalid-name, inconsistent-return-statements, unidiomatic-typecheck
 # pylint: disable=import-outside-toplevel
 """PyTorch FX frontend of Relax."""
+
+from collections.abc import Callable
 from functools import partial, reduce
-from typing import Callable, Dict, List, Tuple, Union
 
 import tvm
 from tvm import relax
@@ -37,7 +38,7 @@ class TorchFXImporter(BaseFXGraphImporter):
         import torch  # type: ignore
 
         super().__init__()
-        self.named_modules: Dict[str, torch.Module] = None
+        self.named_modules: dict[str, torch.Module] = None
         self.default_image_layout = default_image_layout
 
     ########## Utilities ##########
@@ -65,7 +66,7 @@ class TorchFXImporter(BaseFXGraphImporter):
 
     def _reciprocal(self, node: fx.Node) -> relax.Var:
         x = self.env[node.args[0]]
-        return self.block_builder.emit(relax.op.divide(relax.const(1.0, x.struct_info.dtype), x))
+        return self.block_builder.emit(relax.op.divide(relax.const(1.0, x.ty.dtype), x))
 
     def _leakyrelu_module(self, node: fx.Node) -> relax.Var:
         x = self.env[node.args[0]]
@@ -83,23 +84,23 @@ class TorchFXImporter(BaseFXGraphImporter):
     def _log2(self, node: fx.Node) -> relax.Var:
         x = self.env[node.args[0]]
         return self.block_builder.emit(
-            relax.op.divide(relax.op.log(x), relax.const(0.6931471805599453, x.struct_info.dtype))
+            relax.op.divide(relax.op.log(x), relax.const(0.6931471805599453, x.ty.dtype))
         )
 
     def _log10(self, node: fx.Node) -> relax.Var:
         x = self.env[node.args[0]]
         return self.block_builder.emit(
-            relax.op.divide(relax.op.log(x), relax.const(2.302585092994046, x.struct_info.dtype))
+            relax.op.divide(relax.op.log(x), relax.const(2.302585092994046, x.ty.dtype))
         )
 
     def _log1p(self, node: fx.Node) -> relax.Var:
         x = self.env[node.args[0]]
-        one = relax.const(1, x.struct_info.dtype)
+        one = relax.const(1, x.ty.dtype)
         return self.block_builder.emit(relax.op.log(relax.op.add(x, one)))
 
     def _sqrt(self, node: fx.Node) -> relax.Var:
         x = self.env[node.args[0]]
-        dtype = x.struct_info.dtype
+        dtype = x.ty.dtype
 
         # Check if input is integer type and convert to float32 if needed
         if dtype in ["int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]:
@@ -109,7 +110,7 @@ class TorchFXImporter(BaseFXGraphImporter):
 
     def _rsqrt(self, node: fx.Node) -> relax.Var:
         x = self.env[node.args[0]]
-        dtype = x.struct_info.dtype
+        dtype = x.ty.dtype
 
         # Check if input is integer type and convert to float32 if needed
         if dtype in ["int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]:
@@ -129,7 +130,7 @@ class TorchFXImporter(BaseFXGraphImporter):
         module = self.named_modules[node.target]
         alpha_tensor = module.weight.numpy()
         alpha = relax.const(alpha_tensor, dtype="float32")
-        axis = 0 if len(x.struct_info.shape) == 1 else 1  # Extract Channel size
+        axis = 0 if len(x.ty.shape) == 1 else 1  # Extract Channel size
         return self.block_builder.emit(relax.op.nn.prelu(x, alpha, axis))
 
     def _softmax_module(self, node: fx.Node) -> relax.Var:
@@ -163,11 +164,11 @@ class TorchFXImporter(BaseFXGraphImporter):
                 if isinstance(lhs, relax.Expr) and isinstance(rhs, relax.Expr):
                     return lhs, rhs
                 elif isinstance(lhs, relax.Expr):
-                    assert isinstance(lhs.struct_info, relax.TensorStructInfo)
-                    return lhs, relax.const(rhs, lhs.struct_info.dtype)
+                    assert isinstance(lhs.ty, relax.TensorType)
+                    return lhs, relax.const(rhs, lhs.ty.dtype)
                 elif isinstance(rhs, relax.Expr):
-                    assert isinstance(rhs.struct_info, relax.TensorStructInfo)
-                    return relax.const(lhs, rhs.struct_info.dtype), rhs
+                    assert isinstance(rhs.ty, relax.TensorType)
+                    return relax.const(lhs, rhs.ty.dtype), rhs
                 else:
                     assert False
 
@@ -182,16 +183,12 @@ class TorchFXImporter(BaseFXGraphImporter):
                 return output
 
             elif isinstance(lhs, relax.expr.Constant):
-                output = call_binary_op(
-                    relax_op, lhs, relax.const(rhs, dtype=lhs.struct_info.dtype)
-                )
+                output = call_binary_op(relax_op, lhs, relax.const(rhs, dtype=lhs.ty.dtype))
                 self.env[node.args[0]] = output
                 return output
 
             elif isinstance(rhs, relax.expr.Constant):
-                output = call_binary_op(
-                    relax_op, relax.const(lhs, dtype=rhs.struct_info.dtype), rhs
-                )
+                output = call_binary_op(relax_op, relax.const(lhs, dtype=rhs.ty.dtype), rhs)
                 self.env[node.args[0]] = output
                 return output
 
@@ -208,7 +205,7 @@ class TorchFXImporter(BaseFXGraphImporter):
         x = self.env[node.args[0]]
         output_size = module.output_size
         # Expand to 3D by adding batch dim if input is 2D
-        x_ndim = x.struct_info.ndim
+        x_ndim = x.ty.ndim
         if x_ndim == 2:
             x = relax.op.expand_dims(x, axis=0)
         result = self.block_builder.emit(
@@ -224,7 +221,7 @@ class TorchFXImporter(BaseFXGraphImporter):
         x = self.env[node.args[0]]
         output_size = module.output_size
         # Expand to 4D by adding batch dim if input is 3D
-        x_ndim = x.struct_info.ndim
+        x_ndim = x.ty.ndim
         if x_ndim == 3:
             x = relax.op.expand_dims(x, axis=0)
         result = self.block_builder.emit(
@@ -240,7 +237,7 @@ class TorchFXImporter(BaseFXGraphImporter):
         x = self.env[node.args[0]]
         output_size = module.output_size
         # Expand to 5D by adding batch dim if input is 4D
-        x_ndim = x.struct_info.ndim
+        x_ndim = x.ty.ndim
         if x_ndim == 4:
             x = relax.op.expand_dims(x, axis=0)
         result = self.block_builder.emit(
@@ -311,7 +308,7 @@ class TorchFXImporter(BaseFXGraphImporter):
         else:
             import numpy as np
 
-            dtype = x.struct_info.dtype
+            dtype = x.ty.dtype
             channel = int(self.shape_of(x)[1])
             weight = relax.const(np.ones(channel), dtype=dtype)
             bias = relax.const(np.zeros(channel), dtype=dtype)
@@ -431,7 +428,7 @@ class TorchFXImporter(BaseFXGraphImporter):
             if weights in self.params:
                 weights = self.params[weights]
             else:
-                weights = relax.const(weights.numpy(), preds.struct_info.dtype)
+                weights = relax.const(weights.numpy(), preds.ty.dtype)
 
         reduction = module.reduction
         ignore_index = module.ignore_index
@@ -460,8 +457,8 @@ class TorchFXImporter(BaseFXGraphImporter):
             gamma = self.params[module.weight]
             beta = self.params[module.bias]
         else:
-            gamma = relax.const(torch.ones_like(module.num_channels), x.struct_info.dtype)
-            beta = relax.const(torch.zeros_like(module.num_channels), x.struct_info.dtype)
+            gamma = relax.const(torch.ones_like(module.num_channels), x.ty.dtype)
+            beta = relax.const(torch.zeros_like(module.num_channels), x.ty.dtype)
         eps = module.eps
 
         dim = len(self.shape_of(x))
@@ -526,7 +523,7 @@ class TorchFXImporter(BaseFXGraphImporter):
             # Determine spatial dimension indices based on layout
             # NCHW: spatial dims are [2, 3, ...] (skip batch and channel)
             # NHWC: spatial dims are [1, 2, ...] (skip batch, before channel)
-            if self.default_image_layout == "NHWC":
+            if self.default_image_layout in ("NHWC", "NDHWC"):
                 spatial_start = 1
                 spatial_end = len(shape) - 1
             else:  # NCHW or other layouts
@@ -546,25 +543,43 @@ class TorchFXImporter(BaseFXGraphImporter):
 
         if method.startswith("nearest"):
             method = "nearest_neighbor"
-        elif method[0:2] == "bi":
+        elif method.startswith("bi"):
             method = method[2:]
+        elif method.startswith("tri"):
+            method = method[3:]
 
         if method == "nearest_neighbor":
             coord_trans = "asymmetric"
-        elif align_corners:
+        elif align_corners is True:
             coord_trans = "align_corners"
         else:
             coord_trans = "half_pixel"
 
-        return self.block_builder.emit(
-            relax.op.image.resize2d(
-                data,
-                size,
-                layout=self.default_image_layout,
-                method=method,
-                coordinate_transformation_mode=coord_trans,
+        if data.ty.ndim == 5:
+            if self.default_image_layout == "NDHWC":
+                layout_3d = "NDHWC"
+            else:
+                layout_3d = "NCDHW"
+
+            return self.block_builder.emit(
+                relax.op.image.resize3d(
+                    data,
+                    size,
+                    layout=layout_3d,
+                    method=method,
+                    coordinate_transformation_mode=coord_trans,
+                )
             )
-        )
+        else:
+            return self.block_builder.emit(
+                relax.op.image.resize2d(
+                    data,
+                    size,
+                    layout=self.default_image_layout,
+                    method=method,
+                    coordinate_transformation_mode=coord_trans,
+                )
+            )
 
     def _linear_module(self, node: fx.Node) -> relax.Var:
         x = self.env[node.args[0]]
@@ -672,8 +687,8 @@ class TorchFXImporter(BaseFXGraphImporter):
         dest = self.env[node.args[0]]
         src = self.env[node.args[1]]
 
-        if src.struct_info.dtype != dest.struct_info.dtype:
-            src = self.block_builder.emit(relax.op.astype(src, dest.struct_info.dtype))
+        if src.ty.dtype != dest.ty.dtype:
+            src = self.block_builder.emit(relax.op.astype(src, dest.ty.dtype.dtype))
 
         dest_shape = self.shape_of(dest)
         src_shape = self.shape_of(src)
@@ -687,7 +702,7 @@ class TorchFXImporter(BaseFXGraphImporter):
         x = self.env[node.args[0]]
         mask = self.env[node.args[1]]
         source = self.env[node.args[2]]
-        ndim = len(mask.struct_info.shape)
+        ndim = len(mask.ty.shape)
         if ndim == 1:
             index = self.block_builder.emit(relax.op.cumsum(mask, 0, dtype="int32"))
             index = self.block_builder.emit(relax.op.subtract(index, relax.const(1, "int32")))
@@ -696,16 +711,12 @@ class TorchFXImporter(BaseFXGraphImporter):
             f_mask = self.block_builder.emit(relax.op.reshape(mask, [-1]))
             index = self.block_builder.emit(relax.op.cumsum(f_mask, 0, dtype="int32"))
             index = self.block_builder.emit(relax.op.subtract(index, relax.const(1, "int32")))
-            source_shape = [-1] + [
-                s for idx, s in enumerate(source.struct_info.shape) if idx >= ndim
-            ]
+            source_shape = [-1] + [s for idx, s in enumerate(source.ty.shape) if idx >= ndim]
             f_source = self.block_builder.emit(relax.op.reshape(source, source_shape))
             gathered_source = self.block_builder.emit(relax.op.take(f_source, index, axis=0))
-            gathered_source = self.block_builder.emit(
-                relax.op.reshape(gathered_source, x.struct_info.shape)
-            )
-        if ndim != len(x.struct_info.shape):
-            mask = self.block_builder.emit(relax.op.broadcast_to(mask, x.struct_info.shape))
+            gathered_source = self.block_builder.emit(relax.op.reshape(gathered_source, x.ty.shape))
+        if ndim != len(x.ty.shape):
+            mask = self.block_builder.emit(relax.op.broadcast_to(mask, x.ty.shape))
         return self.block_builder.emit(relax.op.where(mask, gathered_source, x))
 
     def _one_hot(self, node: fx.Node) -> relax.Var:
@@ -716,8 +727,8 @@ class TorchFXImporter(BaseFXGraphImporter):
         on_value = node.args[2] if len(node.args) > 2 else node.kwargs.get("on_value", 1)
         off_value = node.args[3] if len(node.args) > 3 else node.kwargs.get("off_value", 0)
         axis = node.args[4] if len(node.args) > 4 else node.kwargs.get("axis", -1)
-        on_value = relax.PrimValue(on_value)
-        off_value = relax.PrimValue(off_value)
+        on_value = relax.prim_value(on_value)
+        off_value = relax.prim_value(off_value)
         return self.block_builder.emit(relax.op.one_hot(x, on_value, off_value, num_classes, axis))
 
     def _tensor(self, node: fx.Node) -> relax.Var:
@@ -739,7 +750,7 @@ class TorchFXImporter(BaseFXGraphImporter):
     def _is_floating_point(self, node: fx.Node) -> relax.Var:
         x = self.env[node.args[0]]
         return relax.const(
-            x.struct_info.dtype in ["float16", "float32", "float64", "bfloat16"], "bool"
+            x.ty.dtype.dtype in ["float16", "float32", "float64", "bfloat16"], "bool"
         )
 
     def _type(self, node: fx.Node) -> relax.Var:
@@ -752,26 +763,25 @@ class TorchFXImporter(BaseFXGraphImporter):
     def _getattr(self, node: fx.Node) -> relax.Var:
         if isinstance(self.env[node.args[0]], relax.Expr):
             if node.args[1] == "dtype":
-                return self.env[node.args[0]].struct_info.dtype
+                return self.env[node.args[0]].ty.dtype.dtype
             elif node.args[1] == "shape":
                 return self.shape_of(self.env[node.args[0]])
         return getattr(self.env[node.args[0]], node.args[1])
 
-    def create_input_vars(self, input_info: List[Tuple[Tuple[int], str]]) -> List[relax.Var]:
+    def create_input_vars(self, input_info: list[tuple[tuple[int], str]]) -> list[relax.Var]:
         inputs = list()
         for idx, (shape, dtype) in enumerate(input_info):
             inputs.append(
-                relax.Var(
-                    f"inp_{idx}", relax.TensorStructInfo(shape, self._convert_data_type(dtype))
-                )
+                relax.Var(f"inp_{idx}", relax.TensorType(shape, self._convert_data_type(dtype)))
             )
         return inputs
 
     def create_convert_map(
         self,
-    ) -> Dict[Union[torch.nn.Module, str], Callable[[fx.Node], relax.Var]]:
+    ) -> dict[torch.nn.Module | str, Callable[[fx.Node], relax.Var]]:
         import operator
 
+        import torch  # type: ignore
         from torch import nn
 
         return {
@@ -856,7 +866,10 @@ class TorchFXImporter(BaseFXGraphImporter):
             "log2": self._log2,
             "log10": self._log10,
             "log1p": self._log1p,
-            "logical_not": self._unary_op(relax.op.logical_not),
+            "logical_and": self._logical_and,
+            "logical_not": self._logical_not,
+            "logical_or": self._logical_or,
+            "logical_xor": self._logical_xor,
             "log_softmax": self._log_softmax,
             "neg": self._unary_op(relax.op.negative),
             "pad": self._pad,
@@ -887,6 +900,7 @@ class TorchFXImporter(BaseFXGraphImporter):
             # binary
             "add": self._binary_op(relax.op.add, operator.add),
             "and_": self._binary_op(relax.op.bitwise_and, operator.and_),
+            "atan2": self._binary_op(relax.op.atan2, torch.atan2),
             "bitwise_or_": self._binary_op_inplace(relax.op.bitwise_or, operator.or_),
             "bitwise_or": self._binary_op(relax.op.bitwise_or, operator.or_),
             "div": self._div,
@@ -910,7 +924,7 @@ class TorchFXImporter(BaseFXGraphImporter):
             "outer": lambda node: self.block_builder.emit(
                 relax.op.outer(self.env[node.args[0]], self.env[node.args[1]])
             ),
-            "pow": self._binary_op(relax.op.power, operator.pow),
+            "pow": self._pow,
             "or_": self._binary_op(relax.op.bitwise_or, operator.or_),
             "rshift": self._binary_op(relax.op.right_shift, operator.rshift),
             "rsub": self._rsub,
@@ -1040,11 +1054,11 @@ class TorchFXImporter(BaseFXGraphImporter):
     def from_fx(
         self,
         model,
-        input_info: List[Tuple[Tuple[int], str]],
+        input_info: list[tuple[tuple[int], str]],
         keep_params_as_input: bool,
         unwrap_unit_return_tuple: bool,
         no_bind_return_tuple: bool,
-        custom_convert_map: dict = None,
+        custom_convert_map: dict | None = None,
     ) -> tvm.IRModule:
         """Convert a PyTorch FX GraphModule to a Relax program."""
         from torch import fx
@@ -1070,7 +1084,7 @@ class TorchFXImporter(BaseFXGraphImporter):
             for name, param in sorted(model.named_parameters(), key=lambda x: x[0]):
                 shape = param.data.shape
                 dtype = self._convert_data_type(str(param.data.dtype))
-                inputs.append(relax.Var(name, relax.TensorStructInfo(shape, dtype)))
+                inputs.append(relax.Var(name, relax.TensorType(shape, dtype)))
                 self.params[param] = inputs[-1]
                 params.append(tvm.runtime.tensor(param.data.cpu().numpy()))
         else:
@@ -1082,7 +1096,6 @@ class TorchFXImporter(BaseFXGraphImporter):
         with self.block_builder.function(name=func_name, params=inputs.copy(), attrs=func_attrs):
             output = None
             with self.block_builder.dataflow():
-
                 # Translate model parameters.
                 for _, param in model.named_parameters():
                     shape = param.data.shape
@@ -1091,7 +1104,7 @@ class TorchFXImporter(BaseFXGraphImporter):
                         if not keep_params_as_input:
                             self.params[param] = self._convert_torch_tensor_to_relax(param)
                     else:
-                        raise ValueError("Unsupported data type for model parameters: %s" % dtype)
+                        raise ValueError(f"Unsupported data type for model parameters: {dtype}")
                 # Translate the model.
                 for node in graph.nodes:
                     if node.op == "placeholder":
@@ -1106,7 +1119,7 @@ class TorchFXImporter(BaseFXGraphImporter):
                         assert len(args) == 1
 
                         # return tuple
-                        if isinstance(args[0], (tuple, list, relax.Tuple)):
+                        if isinstance(args[0], tuple | list | relax.Tuple):
                             # unit tuple
                             if unwrap_unit_return_tuple and len(args[0]) == 1:
                                 output = self.block_builder.emit_output(args[0][0])
@@ -1122,9 +1135,9 @@ class TorchFXImporter(BaseFXGraphImporter):
                         self.env[node] = self._fetch_attr(model, node.target)
                     elif node.op == "call_module":
                         module = self.named_modules[node.target]
-                        assert (
-                            type(module) in self.convert_map
-                        ), f"Unsupported module type {type(module)}"
+                        assert type(module) in self.convert_map, (
+                            f"Unsupported module type {type(module)}"
+                        )
                         self.env[node] = self.convert_map[type(module)](node)
                     elif node.op == "call_function":
                         func_name = node.target.__name__
@@ -1133,9 +1146,9 @@ class TorchFXImporter(BaseFXGraphImporter):
                         else:
                             self.env[node] = self.convert_map[func_name](node)
                     elif node.op == "call_method":
-                        assert (
-                            node.target in self.convert_map
-                        ), f"Unsupported function target {node.target}"
+                        assert node.target in self.convert_map, (
+                            f"Unsupported function target {node.target}"
+                        )
                         self.env[node] = self.convert_map[node.target](node)
                     else:
                         raise ValueError(f"Unsupported op {node.op}")
@@ -1150,12 +1163,12 @@ class TorchFXImporter(BaseFXGraphImporter):
 
 def from_fx(
     model,
-    input_info: List[Tuple[Tuple[int], str]],
+    input_info: list[tuple[tuple[int], str]],
     *,
     keep_params_as_input: bool = False,
     unwrap_unit_return_tuple: bool = False,
     no_bind_return_tuple: bool = False,
-    custom_convert_map: dict = None,
+    custom_convert_map: dict | None = None,
     default_image_layout: str = "NCHW",
 ) -> tvm.IRModule:
     """Convert a PyTorch FX GraphModule to a Relax program
@@ -1232,7 +1245,7 @@ def from_fx(
         # Use the dynamo.export() to export the PyTorch model to FX.
         try:
             graph_module = dynamo.export(torch_model, *input_tensors)
-        except:
+        except Exception:
             raise RuntimeError("Failed to export the PyTorch model to FX.")
 
         # Use the importer to import the PyTorch model to Relax.

@@ -16,10 +16,11 @@
 # under the License.
 # pylint: disable=invalid-name
 """affine_grid and grid_sample operator"""
-from tvm import te, tir
+
+from tvm import te, tirx
 
 
-def affine_grid(data, target_shape):
+def affine_grid(data, target_shape, align_corners=True):
     """affine_grid operator that generates 2D sampling grid.
 
     This operation is described in https://arxiv.org/pdf/1506.02025.pdf. It generates a uniform
@@ -34,6 +35,10 @@ def affine_grid(data, target_shape):
     target_shape: list/tuple of two int
         Specifies the output shape (H, W).
 
+    align_corners : bool
+        If True, normalized coordinates map to corner pixels; if False, to pixel centers
+        (the PyTorch / ONNX default).
+
     Returns
     -------
     Output : tvm.Tensor
@@ -41,18 +46,28 @@ def affine_grid(data, target_shape):
     """
     assert target_shape is not None
     assert len(target_shape) == 2
-    assert (
-        target_shape[0] > 1 and target_shape[1] > 1
-    ), "target height/width should be greater than 1"
+    if align_corners:
+        assert target_shape[0] > 1 and target_shape[1] > 1, (
+            "target height/width should be greater than 1 when align_corners is True"
+        )
 
     dtype = data.dtype
-    y_step = tir.const((2.0 - 1e-7) / (target_shape[0] - 1), dtype=dtype)
-    x_step = tir.const((2.0 - 1e-7) / (target_shape[1] - 1), dtype=dtype)
-    start = tir.const(-1.0, dtype=dtype)
+    height, width = target_shape[0], target_shape[1]
+    if align_corners:
+        y_step = tirx.const((2.0 - 1e-7) / (height - 1), dtype=dtype)
+        x_step = tirx.const((2.0 - 1e-7) / (width - 1), dtype=dtype)
+        y_start = tirx.const(-1.0, dtype=dtype)
+        x_start = tirx.const(-1.0, dtype=dtype)
+    else:
+        # Pixel centers: coordinate i maps to (2 * i + 1) / size - 1.
+        y_step = tirx.const(2.0 / height, dtype=dtype)
+        x_step = tirx.const(2.0 / width, dtype=dtype)
+        y_start = tirx.const(-1.0 + 1.0 / height, dtype=dtype)
+        x_start = tirx.const(-1.0 + 1.0 / width, dtype=dtype)
 
     def _compute(n, dim, i, j):
-        y = start + i * y_step
-        x = start + j * x_step
+        y = y_start + i * y_step
+        x = x_start + j * x_step
         return data[n, dim, 0] * x + data[n, dim, 1] * y + data[n, dim, 2]
 
     oshape = (data.shape[0], len(target_shape), *target_shape)
@@ -130,7 +145,7 @@ def _grid_sample_2d(
         return te.if_then_else(
             te.all(h >= 0, w >= 0, h < in_height, w < in_width),
             data[n, c, h, w],
-            tir.const(0.0, dtype=data.dtype),
+            tirx.const(0.0, dtype=data.dtype),
         )
 
     def _unnormalize(h, w):
@@ -166,14 +181,14 @@ def _grid_sample_2d(
             def __reflect(index, size, corner_start):
                 index_align_corner = te.abs(corner_start - index)
                 size_times = te.truncdiv(index_align_corner.astype("int32"), size).astype("int32")
-                t = tir.Mod(size_times, 2)
+                t = tirx.Mod(size_times, 2)
                 extra = index_align_corner - size_times * size
-                return tir.if_then_else(
-                    tir.EQ(t, 0), extra + corner_start, size - extra + corner_start
+                return tirx.if_then_else(
+                    tirx.EQ(t, 0), extra + corner_start, size - extra + corner_start
                 )
 
-            return tir.if_then_else(
-                tir.all(x >= corner_start, x <= size + corner_start),
+            return tirx.if_then_else(
+                tirx.all(x >= corner_start, x <= size + corner_start),
                 x,
                 __reflect(x, size, corner_start),
             )
@@ -188,8 +203,8 @@ def _grid_sample_2d(
         y, x = _compute_source_index(n, h, w)
         y0 = te.floor(y).astype("int32")
         x0 = te.floor(x).astype("int32")
-        y1 = y0 + tir.const(1, "int32")
-        x1 = x0 + tir.const(1, "int32")
+        y1 = y0 + tirx.const(1, "int32")
+        x1 = x0 + tirx.const(1, "int32")
 
         return (
             _get_pixel_value(n, c, y0, x0) * (1.0 - (y - y0)) * (1.0 - (x - x0))
@@ -360,7 +375,7 @@ def _grid_sample_3d(
         return te.if_then_else(
             te.all(d >= 0, h >= 0, w >= 0, d < in_depth, h < in_height, w < in_width),
             data[n, c, d, h, w],
-            tir.const(0.0, dtype=data.dtype),
+            tirx.const(0.0, dtype=data.dtype),
         )
 
     def _compute_source_index(n, d, h, w):
@@ -399,14 +414,14 @@ def _grid_sample_3d(
             def __reflect(index, size, corner_start):
                 index_align_corner = te.abs(corner_start - index)
                 size_times = te.truncdiv(index_align_corner.astype("int32"), size).astype("int32")
-                t = tir.Mod(size_times, 2)
+                t = tirx.Mod(size_times, 2)
                 extra = index_align_corner - size_times * size
-                return tir.if_then_else(
-                    tir.EQ(t, 0), extra + corner_start, size - extra + corner_start
+                return tirx.if_then_else(
+                    tirx.EQ(t, 0), extra + corner_start, size - extra + corner_start
                 )
 
-            return tir.if_then_else(
-                tir.all(x >= corner_start, x <= size + corner_start),
+            return tirx.if_then_else(
+                tirx.all(x >= corner_start, x <= size + corner_start),
                 x,
                 __reflect(x, size, corner_start),
             )
@@ -420,9 +435,9 @@ def _grid_sample_3d(
         z0 = te.floor(z).astype("int32")
         y0 = te.floor(y).astype("int32")
         x0 = te.floor(x).astype("int32")
-        z1 = z0 + tir.const(1, "int32")
-        y1 = y0 + tir.const(1, "int32")
-        x1 = x0 + tir.const(1, "int32")
+        z1 = z0 + tirx.const(1, "int32")
+        y1 = y0 + tirx.const(1, "int32")
+        x1 = x0 + tirx.const(1, "int32")
 
         return (
             _get_pixel_value(n, c, z0, y0, x0) * (1 - (x - x0)) * (1 - (y - y0)) * (1 - (z - z0))

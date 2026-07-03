@@ -14,38 +14,56 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# ruff: noqa: E741
+import numpy as np
+import pytest
+import tvm_ffi
+
 import tvm
 import tvm.testing
-import numpy as np
-from tvm.script import tir as T
-
-import pytest
-
-
-@T.prim_func
-def reduce(a: T.handle, b: T.handle, d1: T.int32, d2: T.int32, d3: T.int32) -> None:
-    A = T.match_buffer(a, [1, d1, d2, d3])
-    B = T.match_buffer(b, [1, d1, d2])
-
-    for i, j, k, l in T.grid(1, d1, d2, d3):
-        with T.block("reduce"):
-            vi, vj, vk, vl = T.axis.remap("SSSR", [i, j, k, l])
-            with T.init():
-                B[vi, vj, vk] = 0.0
-            B[vi, vj, vk] = B[vi, vj, vk] + A[vi, vj, vk, vl]
+from tvm.script import ir as I
+from tvm.script import tirx as T
+from tvm.testing import env
 
 
-@T.prim_func
-def reduce_max(a: T.handle, b: T.handle, d1: T.int32, d2: T.int32, d3: T.int32) -> None:
-    A = T.match_buffer(a, [1, d1, d2, d3])
-    B = T.match_buffer(b, [1, d1, d2])
+def _reduce_sum_module(d1, d2, d3):
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(A: T.Buffer((1, d1, d2, d3), "float32"), B: T.Buffer((1, d1, d2), "float32")):
+            for i in T.thread_binding(1, thread="blockIdx.x"):
+                for j in T.thread_binding(d1, thread="threadIdx.z"):
+                    for k in T.thread_binding(d2, thread="threadIdx.y"):
+                        for l in T.thread_binding(d3, thread="threadIdx.x"):
+                            with T.sblock("reduce"):
+                                vi, vj, vk, vl = T.axis.remap("SSSR", [i, j, k, l])
+                                T.reads(A[vi, vj, vk, vl])
+                                T.writes(B[vi, vj, vk])
+                                with T.init():
+                                    B[vi, vj, vk] = T.float32(0.0)
+                                B[vi, vj, vk] = B[vi, vj, vk] + A[vi, vj, vk, vl]
 
-    for i, j, k, l in T.grid(1, d1, d2, d3):
-        with T.block("reduce"):
-            vi, vj, vk, vl = T.axis.remap("SSSR", [i, j, k, l])
-            with T.init():
-                B[vi, vj, vk] = T.float32(-3.4028234663852886e38)
-            B[vi, vj, vk] = T.max(B[vi, vj, vk], A[vi, vj, vk, vl])
+    return Module
+
+
+def _reduce_max_module(d1, d2, d3):
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def main(A: T.Buffer((1, d1, d2, d3), "float32"), B: T.Buffer((1, d1, d2), "float32")):
+            for i in T.thread_binding(1, thread="blockIdx.x"):
+                for j in T.thread_binding(d1, thread="threadIdx.z"):
+                    for k in T.thread_binding(d2, thread="threadIdx.y"):
+                        for l in T.thread_binding(d3, thread="threadIdx.x"):
+                            with T.sblock("reduce"):
+                                vi, vj, vk, vl = T.axis.remap("SSSR", [i, j, k, l])
+                                T.reads(A[vi, vj, vk, vl])
+                                T.writes(B[vi, vj, vk])
+                                with T.init():
+                                    B[vi, vj, vk] = T.float32(-3.4028234663852886e38)
+                                B[vi, vj, vk] = T.max(B[vi, vj, vk], A[vi, vj, vk, vl])
+
+    return Module
 
 
 def generate_param_sets():
@@ -59,19 +77,21 @@ def generate_param_sets():
 dims = tvm.testing.parameter(*generate_param_sets())
 
 
-@tvm.testing.parametrize_targets("cuda", "metal", "maca")
-def test_allreduce_sum(dims, target, dev):
+@pytest.mark.parametrize(
+    "target",
+    [
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param("maca", marks=pytest.mark.gpu),
+        pytest.param("metal", marks=pytest.mark.gpu),
+    ],
+)
+def test_allreduce_sum(dims, target):
+    if not tvm.testing.device_enabled(target):
+        pytest.skip(f"{target} not enabled")
+    dev = tvm.device(target)
     d1, d2, d3 = dims
-    _, _, _d1, _d2, _d3 = reduce.params
-    mod = reduce.specialize({_d1: d1, _d2: d2, _d3: d3})
-    sch = tvm.tir.Schedule(mod)
-    blk = sch.get_block("reduce")
-    i, j, k, l = sch.get_loops(blk)
-    sch.bind(i, "blockIdx.x")
-    sch.bind(j, "threadIdx.z")
-    sch.bind(k, "threadIdx.y")
-    sch.bind(l, "threadIdx.x")
-    f = tvm.compile(sch.mod["main"], target=target)
+    mod = _reduce_sum_module(d1, d2, d3)
+    f = tvm.compile(mod, target=target)
 
     # prepare input and output array
     a_np = np.random.rand(1, d1, d2, d3).astype("float32")
@@ -96,7 +116,9 @@ def optional_metal_compile_callback(define_metal_compile_callback):
 
         @tvm.register_global_func(name, override=True)
         def compile_metal(src, target):
-            return tvm.contrib.xcode.compile_metal(src, sdk="macosx")
+            from tvm.support.xcode import compile_metal  # pylint: disable=import-outside-toplevel
+
+            return compile_metal(src, sdk="macosx")
 
     yield
 
@@ -107,38 +129,33 @@ def optional_metal_compile_callback(define_metal_compile_callback):
             tvm.register_global_func(name, cached, override=True)
 
 
-@tvm.testing.requires_metal(support_required="compile-only")
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_metal(), reason="need metal")
 def test_allreduce_sum_compile(optional_metal_compile_callback):
     # Disable the parametrization over dims, at least for now
     dims = (1, 1, 2)
     target = "metal"
 
     d1, d2, d3 = dims
-    _, _, _d1, _d2, _d3 = reduce.params
-    mod = reduce.specialize({_d1: d1, _d2: d2, _d3: d3})
-    sch = tvm.tir.Schedule(mod)
-    blk = sch.get_block("reduce")
-    i, j, k, l = sch.get_loops(blk)
-    sch.bind(i, "blockIdx.x")
-    sch.bind(j, "threadIdx.z")
-    sch.bind(k, "threadIdx.y")
-    sch.bind(l, "threadIdx.x")
-    tvm.compile(sch.mod["main"], target=target)
+    mod = _reduce_sum_module(d1, d2, d3)
+    tvm.compile(mod, target=target)
 
 
-@tvm.testing.parametrize_targets("cuda", "metal", "maca")
-def test_allreduce_max(dims, target, dev):
+@pytest.mark.parametrize(
+    "target",
+    [
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param("maca", marks=pytest.mark.gpu),
+        pytest.param("metal", marks=pytest.mark.gpu),
+    ],
+)
+def test_allreduce_max(dims, target):
+    if not tvm.testing.device_enabled(target):
+        pytest.skip(f"{target} not enabled")
+    dev = tvm.device(target)
     d1, d2, d3 = dims
-    _, _, _d1, _d2, _d3 = reduce_max.params
-    mod = reduce_max.specialize({_d1: d1, _d2: d2, _d3: d3})
-    sch = tvm.tir.Schedule(mod)
-    blk = sch.get_block("reduce")
-    i, j, k, l = sch.get_loops(blk)
-    sch.bind(i, "blockIdx.x")
-    sch.bind(j, "threadIdx.z")
-    sch.bind(k, "threadIdx.y")
-    sch.bind(l, "threadIdx.x")
-    f = tvm.compile(sch.mod["main"], target=target)
+    mod = _reduce_max_module(d1, d2, d3)
+    f = tvm.compile(mod, target=target)
 
     # prepare input and output array
     a_np = -np.random.rand(1, d1, d2, d3).astype("float32")

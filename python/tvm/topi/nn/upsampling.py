@@ -15,8 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 """TVM operator upsampling compute."""
-from tvm import topi
-from tvm import te
+
+from tvm import te, topi
+
 from ..utils import simplify
 
 
@@ -51,7 +52,7 @@ def upsampling(
     method : {"bilinear", "nearest_neighbor", "bicubic"}
         Method to be used for upsampling.
 
-    output_shape: tvm.tir.container.Array, optional
+    output_shape: tvm_ffi.Array, optional
         Shape to return. If left None will be inferred
         (If shape is determined dynamically, pass out_dtype.shape as output_shape)
 
@@ -67,26 +68,26 @@ def upsampling(
             scaled_h = data.shape[2] * scale_h
             scaled_w = data.shape[3] * scale_w
             reshape_size = (
-                simplify(topi.cast(te.round(scaled_h), data.shape[2].dtype)),
-                simplify(topi.cast(te.round(scaled_w), data.shape[3].dtype)),
+                simplify(topi.cast(te.round(scaled_h), data.shape[2].ty)),
+                simplify(topi.cast(te.round(scaled_w), data.shape[3].ty)),
             )
         else:  # dynamic case -- we don't need to scale; already done in shape func
             reshape_size = (
-                simplify(topi.cast(te.round(output_shape[2]), output_shape[2].dtype)),
-                simplify(topi.cast(te.round(output_shape[3]), output_shape[3].dtype)),
+                simplify(topi.cast(te.round(output_shape[2]), output_shape[2].ty)),
+                simplify(topi.cast(te.round(output_shape[3]), output_shape[3].ty)),
             )
     elif layout == "NHWC":
         if not output_shape:  # static case
             scaled_h = data.shape[1] * scale_h
             scaled_w = data.shape[2] * scale_w
             reshape_size = (
-                simplify(topi.cast(te.round(scaled_h), data.shape[1].dtype)),
-                simplify(topi.cast(te.round(scaled_w), data.shape[2].dtype)),
+                simplify(topi.cast(te.round(scaled_h), data.shape[1].ty)),
+                simplify(topi.cast(te.round(scaled_w), data.shape[2].ty)),
             )
         else:  # dynamic case
             reshape_size = (
-                simplify(topi.cast(te.round(output_shape[1]), output_shape[1].dtype)),
-                simplify(topi.cast(te.round(output_shape[2]), output_shape[2].dtype)),
+                simplify(topi.cast(te.round(output_shape[1]), output_shape[1].ty)),
+                simplify(topi.cast(te.round(output_shape[2]), output_shape[2].ty)),
             )
 
     else:
@@ -146,7 +147,7 @@ def upsampling3d(
         Refer to the ONNX Resize operator specification for details.
         Available options are "half_pixel", "align_corners" and "asymmetric".
 
-    output_shape: tvm.tir.container.Array, optional
+    output_shape: tvm_ffi.Array, optional
         Shape to return. If left None will be inferred
         (If shape is determined dynamically, pass out_dtype.shape as output_shape)
 
@@ -163,15 +164,15 @@ def upsampling3d(
             scaled_h = data.shape[3] * scale_h
             scaled_w = data.shape[4] * scale_w
             resize_shape = (
-                simplify(topi.cast(te.round(scaled_d), data.shape[2].dtype)),
-                simplify(topi.cast(te.round(scaled_h), data.shape[3].dtype)),
-                simplify(topi.cast(te.round(scaled_w), data.shape[4].dtype)),
+                simplify(topi.cast(te.round(scaled_d), data.shape[2].ty)),
+                simplify(topi.cast(te.round(scaled_h), data.shape[3].ty)),
+                simplify(topi.cast(te.round(scaled_w), data.shape[4].ty)),
             )
         else:  # dynamic case -- don't need to scale; already done in shape func
             resize_shape = (
-                simplify(topi.cast(te.round(output_shape[2]), data.shape[2].dtype)),
-                simplify(topi.cast(te.round(output_shape[3]), data.shape[3].dtype)),
-                simplify(topi.cast(te.round(output_shape[4]), data.shape[4].dtype)),
+                simplify(topi.cast(te.round(output_shape[2]), data.shape[2].ty)),
+                simplify(topi.cast(te.round(output_shape[3]), data.shape[3].ty)),
+                simplify(topi.cast(te.round(output_shape[4]), data.shape[4].ty)),
             )
     elif layout == "NDHWC":
         if not output_shape:  # static case
@@ -179,15 +180,15 @@ def upsampling3d(
             scaled_h = data.shape[2] * scale_h
             scaled_w = data.shape[3] * scale_w
             resize_shape = (
-                simplify(topi.cast(te.round(scaled_d), data.shape[1].dtype)),
-                simplify(topi.cast(te.round(scaled_h), data.shape[2].dtype)),
-                simplify(topi.cast(te.round(scaled_w), data.shape[3].dtype)),
+                simplify(topi.cast(te.round(scaled_d), data.shape[1].ty)),
+                simplify(topi.cast(te.round(scaled_h), data.shape[2].ty)),
+                simplify(topi.cast(te.round(scaled_w), data.shape[3].ty)),
             )
         else:  # dynamic case
             resize_shape = (
-                simplify(topi.cast(te.round(output_shape[1]), data.shape[1].dtype)),
-                simplify(topi.cast(te.round(output_shape[2]), data.shape[2].dtype)),
-                simplify(topi.cast(te.round(output_shape[3]), data.shape[3].dtype)),
+                simplify(topi.cast(te.round(output_shape[1]), data.shape[1].ty)),
+                simplify(topi.cast(te.round(output_shape[2]), data.shape[2].ty)),
+                simplify(topi.cast(te.round(output_shape[3]), data.shape[3].ty)),
             )
     else:
         raise ValueError(f"not support this layout {layout} yet")

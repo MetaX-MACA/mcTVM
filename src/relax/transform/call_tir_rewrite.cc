@@ -21,13 +21,13 @@
  * \brief Perform explicit tensor allocation for call_tir,
  *        call_tir_inplace, and call_dps_packed.
  */
+#include <tvm/ffi/cast.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/attrs/op.h>
 #include <tvm/relax/expr_functor.h>
-#include <tvm/relax/struct_info.h>
 #include <tvm/relax/transform.h>
 #include <tvm/relax/type.h>
-#include <tvm/tir/op.h>
+#include <tvm/tirx/op.h>
 
 #include "utils.h"
 
@@ -50,8 +50,8 @@ class CallTIRMutator : public ExprMutator {
   IRModule Run() {
     for (const auto& [gv, func] : mod_->functions) {
       if (func->IsInstance<FunctionNode>()) {
-        auto updated_func = Downcast<Function>(this->VisitExpr(func));
-        builder_->UpdateFunction(gv, Downcast<BaseFunc>(updated_func));
+        auto updated_func = this->VisitExpr(func).as_or_throw<Function>();
+        builder_->UpdateFunction(gv, updated_func);
       }
     }
     return builder_->GetContextIRModule();
@@ -75,70 +75,84 @@ class CallTIRMutator : public ExprMutator {
       bool is_inplace = (call->op == call_tir_inplace_op);
       const auto* inplace_attrs = call->attrs.as<CallTIRInplaceAttrs>();
       ffi::Array<Expr> outs;
-      if (const auto& _tensor_sinfo = MatchStructInfo<TensorStructInfo>(expr)) {
+      if (const auto& tensor_ty = MatchType<TensorType>(expr)) {
         // single output case
-        const TensorStructInfo& tensor_sinfo = _tensor_sinfo.value();
-        ICHECK(tensor_sinfo->shape.defined())
-            << "the TensorStructInfo shape of call_tir has not populated";
+        const TensorType& output_ty = tensor_ty.value();
+        TVM_FFI_ICHECK(output_ty->shape.defined())
+            << "the TensorType shape of call_tir has not populated";
         int dev_index = 0;
-        if (tensor_sinfo->vdevice.defined()) {
-          dev_index = GetDeviceIndex(mod_, tensor_sinfo->vdevice.value());
+        ffi::String scope = "global";
+        if (output_ty->vdevice.defined()) {
+          dev_index = GetDeviceIndex(mod_, output_ty->vdevice.value());
+          scope = output_ty->vdevice.value()->memory_scope;
+        } else {
+          dev_index = GetDeviceIndexByScope(mod_, scope);
         }
+
         if (!is_inplace) {
           outs.push_back(builder_->Emit(Call(alloc_tensor_op,
-                                             {Downcast<ShapeExpr>(tensor_sinfo->shape.value()),
-                                              DataTypeImm(tensor_sinfo->dtype),
-                                              PrimValue::Int64(dev_index), StringImm("global")},
-                                             Attrs()),
+                                             {output_ty->shape.value().as_or_throw<ShapeExpr>(),
+                                              DataTypeImm(output_ty->dtype.value()->dtype),
+                                              IntImm::Int64(dev_index), StringImm(scope)},
+                                             Attrs(), {output_ty}),
                                         "alloc"));
         } else {
           // if there is only one output, it must be an in-place argument, but check anyway
-          ICHECK(inplace_attrs->inplace_indices[0].IntValue() != -1)
+          TVM_FFI_ICHECK(inplace_attrs->inplace_indices[0] != -1)
               << "If calling call_tir_inplace and there is one output, its in-place index must not"
                  " be -1.";
           outs.push_back(
-              Downcast<Tuple>(call->args[1])->fields[inplace_attrs->inplace_indices[0].IntValue()]);
+              call->args[1].as_or_throw<Tuple>()->fields[inplace_attrs->inplace_indices[0]]);
         }
-      } else if (const auto& _tuple_sinfo = MatchStructInfo<TupleStructInfo>(expr)) {
+      } else if (const auto& tuple_ty = MatchType<TupleType>(expr)) {
         // multiple output case
-        const TupleStructInfo& tuple_sinfo = _tuple_sinfo.value();
-        for (size_t i = 0; i < tuple_sinfo->fields.size(); ++i) {
-          const auto& field = tuple_sinfo->fields[i];
+        const TupleType& output_ty = tuple_ty.value();
+        for (size_t i = 0; i < output_ty->fields.size(); ++i) {
+          const auto& field = output_ty->fields[i];
 
-          ICHECK(field->IsInstance<TensorStructInfoNode>())
-              << "call_tir expects Tuple of TensorStructInfo, but got " << field
-              << " as an element of TupleStructInfo";
-          const auto& field_tensor = Downcast<TensorStructInfo>(field);
-          ICHECK(field_tensor->shape.defined())
-              << "call_tir expects all TensorStructInfo has shape, but got " << field_tensor
-              << " as an element of TupleStructInfo";
-          if (!is_inplace || inplace_attrs->inplace_indices[i].IntValue() == -1) {
-            outs.push_back(builder_->Emit(
-                Call(alloc_tensor_op,
-                     {Downcast<ShapeExpr>(field_tensor->shape.value()),
-                      DataTypeImm(field_tensor->dtype), PrimValue::Int64(0), StringImm("global")},
-                     Attrs()),
-                "alloc"));
+          TVM_FFI_ICHECK(field->IsInstance<TensorTypeNode>())
+              << "call_tir expects Tuple of TensorType, but got " << field
+              << " as an element of TupleType";
+          const auto& field_tensor = field.as_or_throw<TensorType>();
+          TVM_FFI_ICHECK(field_tensor->shape.defined())
+              << "call_tir expects all TensorType has shape, but got " << field_tensor
+              << " as an element of TupleType";
+
+          int dev_index = 0;
+          ffi::String scope = "global";
+          if (field_tensor->vdevice.defined()) {
+            dev_index = GetDeviceIndex(mod_, field_tensor->vdevice.value());
+            scope = field_tensor->vdevice.value()->memory_scope;
+          }
+
+          if (!is_inplace || inplace_attrs->inplace_indices[i] == -1) {
+            outs.push_back(
+                builder_->Emit(Call(alloc_tensor_op,
+                                    {field_tensor->shape.value().as_or_throw<ShapeExpr>(),
+                                     DataTypeImm(field_tensor->dtype.value()->dtype),
+                                     IntImm::Int64(dev_index), StringImm(scope)},
+                                    Attrs(), {field_tensor}),
+                               "alloc"));
           } else {
-            outs.push_back(Downcast<Tuple>(call->args[1])
-                               ->fields[inplace_attrs->inplace_indices[i].IntValue()]);
+            outs.push_back(
+                call->args[1].as_or_throw<Tuple>()->fields[inplace_attrs->inplace_indices[i]]);
           }
         }
       } else {
-        LOG(FATAL) << "TypeError: The struct info of call_tir expects to be TensorStructInfo or "
-                      "TupleStructInfo, but got"
-                   << expr->struct_info_;
+        TVM_FFI_THROW(TypeError) << "The type of call_tir expects to be TensorType or "
+                                    "TupleType, but got"
+                                 << expr->ty;
       }
 
       ffi::Array<Expr> args;
       if (call->args[1].as<TupleNode>()) {
-        args = Downcast<Tuple>(call->args[1])->fields;
+        args = call->args[1].as_or_throw<Tuple>()->fields;
         // for call_tir_inplace, don't reinsert in-place args, only the newly allocated ones
         if (!is_inplace) {
           args.insert(args.end(), outs.begin(), outs.end());
         } else {
           for (size_t i = 0; i < outs.size(); i++) {
-            if (inplace_attrs->inplace_indices[i].IntValue() == -1) {
+            if (inplace_attrs->inplace_indices[i] == -1) {
               args.push_back(outs[i]);
             }
           }

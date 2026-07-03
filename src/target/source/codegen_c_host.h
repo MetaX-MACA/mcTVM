@@ -32,7 +32,7 @@
 
 #include "codegen_c.h"
 #include "tvm/target/codegen.h"
-#include "tvm/tir/expr.h"
+#include "tvm/tirx/expr.h"
 
 namespace tvm {
 namespace codegen {
@@ -57,8 +57,8 @@ class CodeGenCHost : public CodeGenC {
   void DefineModuleName();
 
   using CodeGenC::PrintType;
-  void PrintType(DataType t, std::ostream& os) final;  // NOLINT(*)
-  void PrintFuncPrefix(std::ostream& os) final;        // NOLINT(*)
+  void PrintType(const PrimType& t, std::ostream& os) final;  // NOLINT(*)
+  void PrintFuncPrefix(std::ostream& os) final;               // NOLINT(*)
 
   // overload visitor functions
   void VisitExpr_(const BroadcastNode* op, std::ostream& os) final;  // NOLINT(*)

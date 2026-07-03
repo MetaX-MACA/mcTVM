@@ -24,6 +24,7 @@
 #include <tvm/relax/transform.h>
 
 #include <utility>
+#include <vector>
 
 #include "../../support/ordered_set.h"
 #include "utils.h"
@@ -51,13 +52,13 @@ class FunctionInliner : public ExprMutator {
   }
 
   Expr VisitExpr_(const CallNode* op) override {
-    auto node = Downcast<Call>(ExprMutator::VisitExpr_(op));
+    auto node = ExprMutator::VisitExpr_(op).as_or_throw<Call>();
 
     if (auto opt = node->op.as<GlobalVar>()) {
       auto gvar = opt.value();
       if (auto opt = GetFunction(gvar)) {
         auto callee = opt.value();
-        CHECK_EQ(callee->params.size(), node->args.size())
+        TVM_FFI_ICHECK_EQ(callee->params.size(), node->args.size())
             << "Attempted to inline call to " << gvar << ", which accepts " << callee->params.size()
             << " parameters.  "
             << "However, it was called with " << node->args.size() << " arguments in expression "
@@ -65,7 +66,7 @@ class FunctionInliner : public ExprMutator {
 
         Expr inlined = InlinedCall(callee, node->args);
 
-        CHECK(!inline_stack_.count(gvar))
+        TVM_FFI_ICHECK(!inline_stack_.count(gvar))
             << "Relax function inlining does not support recursive functions.  "
             << "However, recursive function " << gvar << " was requested to be inlined.";
 
@@ -128,7 +129,7 @@ class FunctionInliner : public ExprMutator {
       //
       // This implementation uses Option 4.
 
-      Var param_var(func->params[i]->name_hint(), args[i]->struct_info_.as<StructInfo>());
+      Var param_var(func->params[i]->name_hint(), args[i]->ty.as<Type>());
       param_bindings.push_back(VarBinding(param_var, args[i]));
       param_map.Set(func->params[i], param_var);
     }
@@ -140,7 +141,7 @@ class FunctionInliner : public ExprMutator {
   }
 
   const ffi::Map<ffi::Variant<ffi::String, GlobalVar>, Function>& replacements_;
-  std::unordered_set<GlobalVar, ObjectPtrHash, ObjectPtrEqual> inline_stack_;
+  std::unordered_set<GlobalVar, ffi::ObjectPtrHash, ffi::ObjectPtrEqual> inline_stack_;
 };
 }  // namespace
 
@@ -154,8 +155,7 @@ Function FunctionInlineFunctions(
     Function func, const ffi::Map<ffi::Variant<ffi::String, GlobalVar>, Function>& replacements) {
   for (const auto& [key, func] : replacements) {
     if (auto ptr = key.as<GlobalVarNode>()) {
-      CHECK(!replacements.count(ptr->name_hint))
-          << "ValueError: "
+      TVM_FFI_CHECK(!replacements.count(ptr->name_hint), ValueError)
           << "Map of functions to inline must be unambiguous.  "
           << "However, the map provided contains both the GlobalVar " << key << " and the string \'"
           << ptr->name_hint << "'";
@@ -163,7 +163,7 @@ Function FunctionInlineFunctions(
   }
 
   FunctionInliner mutator(replacements);
-  return Downcast<Function>(mutator(std::move(func)));
+  return mutator(std::move(func)).as_or_throw<Function>();
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
@@ -214,9 +214,16 @@ Pass InlinePrivateFunctions() {
       }
     }
 
+    std::vector<GlobalVar> funcs_to_remove;
+    for (const auto& [gvar, base_func] : mod->functions) {
+      if (replacements.count(gvar)) {
+        funcs_to_remove.push_back(gvar);
+      }
+    }
+
     auto write_ptr = mod.CopyOnWrite();
-    for (const auto& [key, func] : replacements) {
-      write_ptr->Remove(Downcast<GlobalVar>(key));
+    for (const GlobalVar& gvar : funcs_to_remove) {
+      write_ptr->Remove(gvar);
     }
     write_ptr->Update(updates);
     return mod;

@@ -15,13 +15,15 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import pytest
+
 import tvm
 import tvm.testing
+from tvm.support import utils
+from tvm.testing import env
 
-from tvm.contrib import utils
 
-
-@tvm.testing.requires_llvm
+@pytest.mark.skipif(not env.has_llvm(), reason="need llvm")
 def test_import_static_library():
     from tvm import te
 
@@ -35,8 +37,8 @@ def test_import_static_library():
         te.create_prim_func([A, B]).with_attr("global_symbol", "myadd1")
     )
 
-    mod0 = tvm.tir.build(irmod0, target="llvm")
-    mod1 = tvm.tir.build(irmod1, target="llvm")
+    mod0 = tvm.tirx.build(irmod0, target="llvm")
+    mod1 = tvm.tirx.build(irmod1, target="llvm")
 
     assert mod0.implements_function("myadd0")
     assert mod1.implements_function("myadd1")

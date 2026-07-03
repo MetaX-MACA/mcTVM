@@ -23,37 +23,38 @@
  * with corresponding low-level TIR PrimFuncs.
  */
 
+#include <tvm/ffi/cast.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/relax/analysis.h>
 #include <tvm/relax/expr_functor.h>
 #include <tvm/relax/op_attr_types.h>
-#include <tvm/relax/struct_info.h>
 #include <tvm/relax/transform.h>
-#include <tvm/tir/transform.h>
+#include <tvm/relax/type.h>
+#include <tvm/runtime/logging.h>
+#include <tvm/tirx/transform.h>
 
 #include <set>
 
 namespace tvm {
 namespace relax {
 
-TVM_REGISTER_PASS_CONFIG_OPTION("relax.transform.apply_legalize_ops", Bool);
+TVM_REGISTER_PASS_CONFIG_OPTION("relax.transform.apply_legalize_ops", bool);
 
 /*!
- * \brief Check if a given Tensor/Shape/TupleStructInfo contains shapes whose
+ * \brief Check if a given Tensor/Shape/TupleType contains shapes whose
  * values are all known.
- * \param sinfo The StructInfo to be checked.
- * \return A boolean indicating the given struct info contains shape values that are all known.
+ * \param ty The Type to be checked.
+ * \return A boolean indicating the given type contains shape values that are all known.
  */
-bool KnowAllShapeValues(const StructInfo& sinfo) {
-  if (const auto* tensor_sinfo = sinfo.as<TensorStructInfoNode>()) {
-    return tensor_sinfo->shape.defined() &&
-           tensor_sinfo->shape.value()->IsInstance<ShapeExprNode>();
-  } else if (const auto* shape_sinfo = sinfo.as<ShapeStructInfoNode>()) {
-    return shape_sinfo->values.defined();
-  } else if (const auto* tuple_sinfo = sinfo.as<TupleStructInfoNode>()) {
-    return std::all_of(tuple_sinfo->fields.begin(), tuple_sinfo->fields.end(),
-                       [](StructInfo field_sinfo) { return KnowAllShapeValues(field_sinfo); });
-  } else if (sinfo.as<PrimStructInfoNode>()) {
+bool KnowAllShapeValues(const Type& ty) {
+  if (const auto* tensor_ty = ty.as<TensorTypeNode>()) {
+    return tensor_ty->shape.defined() && tensor_ty->shape.value()->IsInstance<ShapeExprNode>();
+  } else if (const auto* shape_ty = ty.as<ShapeTypeNode>()) {
+    return shape_ty->values.defined();
+  } else if (const auto* tuple_ty = ty.as<TupleTypeNode>()) {
+    return std::all_of(tuple_ty->fields.begin(), tuple_ty->fields.end(),
+                       [](Type field_ty) { return KnowAllShapeValues(field_ty); });
+  } else if (ty.as<PrimTypeNode>()) {
     return true;
   } else {
     return false;
@@ -81,8 +82,8 @@ class LegalizeMutator : public ExprMutator {
     for (const auto& gv : mod_->GetGlobalVars()) {
       const auto& func = mod_->Lookup(gv);
       if (func->IsInstance<FunctionNode>()) {
-        auto updated_func = Downcast<Function>(this->VisitExpr(func));
-        builder_->UpdateFunction(gv, Downcast<BaseFunc>(updated_func));
+        auto updated_func = this->VisitExpr(func).as_or_throw<Function>();
+        builder_->UpdateFunction(gv, updated_func.as_or_throw<BaseFunc>());
       }
     }
 
@@ -97,7 +98,7 @@ class LegalizeMutator : public ExprMutator {
       // Avoid accidental sharing of TIR variables in the legalized
       // PrimFuncs, when kernels for multiple devices are generated
       // from the same PrimFunc.
-      output = tir::transform::ConvertSSA()(output);
+      output = tirx::transform::ConvertSSA()(output);
     }
 
     return output;
@@ -107,7 +108,7 @@ class LegalizeMutator : public ExprMutator {
   using ExprMutator::VisitExpr_;
 
   bool WrapPureCondition(const Op& op, const Expr& legalized) {
-    static const auto& purity_map = Op::GetAttrMap<Bool>("FPurity");
+    static const auto& purity_map = Op::GetAttrMap<bool>("FPurity");
 
     const CallNode* call = legalized.as<CallNode>();
 
@@ -118,12 +119,12 @@ class LegalizeMutator : public ExprMutator {
       return false;
     }
 
-    bool pure_original_op = purity_map.get(op, Bool(false))->value;
+    bool pure_original_op = purity_map.get(op, false);
     bool pure_legalized_op = [&]() -> bool {
       if (auto legalized_op = call->op.as<Op>()) {
-        return purity_map.get(legalized_op.value(), Bool(false))->value;
-      } else if (auto func_sinfo = call->op->struct_info_.as<FuncStructInfoNode>()) {
-        return func_sinfo->purity;
+        return purity_map.get(legalized_op.value(), false);
+      } else if (auto func_ty = call->op->ty.as<FuncTypeNode>()) {
+        return func_ty->purity;
       } else {
         return false;
       }
@@ -143,20 +144,20 @@ class LegalizeMutator : public ExprMutator {
     for (auto arg : ret->args) {
       ret_args.push_back(arg);
     }
-    return Call(call_pure_packed_op, ret_args, ret->attrs, ret->sinfo_args);
+    return Call(call_pure_packed_op, ret_args, ret->attrs, ret->ty_args);
   }
 
-  ffi::Optional<Target> GetTarget(const ffi::Array<StructInfo>& sinfos) {
-    for (auto sinfo : sinfos) {
-      if (const auto* tinfo = sinfo.as<TensorStructInfoNode>()) {
+  ffi::Optional<Target> GetTarget(const ffi::Array<Type>& types) {
+    for (auto ty : types) {
+      if (const auto* tinfo = ty.as<TensorTypeNode>()) {
         if (tinfo->vdevice.defined()) {
           auto vdevice = tinfo->vdevice.value();
           if (vdevice->target.defined()) {
             return vdevice->target;
           }
         }
-      } else if (const auto* tup_sinfo = sinfo.as<TupleStructInfoNode>()) {
-        return GetTarget(tup_sinfo->fields);
+      } else if (const auto* tup_ty = ty.as<TupleTypeNode>()) {
+        return GetTarget(tup_ty->fields);
       }
     }
     return std::nullopt;
@@ -173,9 +174,9 @@ class LegalizeMutator : public ExprMutator {
       return expr;
     }
 
-    auto call = Downcast<Call>(expr);
+    auto call = expr.as_or_throw<Call>();
 
-    auto vdevice_target = GetTarget(call->sinfo_args);
+    auto vdevice_target = GetTarget(call->ty_args);
     if (!vdevice_target.defined()) {
       // No vdevice annotation is present, so we don't need to apply
       // any updates.
@@ -194,7 +195,7 @@ class LegalizeMutator : public ExprMutator {
     }
 
     auto base_func = builder_->GetContextIRModule()->Lookup(gvar.value());
-    auto opt_prim_func = base_func.as<tir::PrimFunc>();
+    auto opt_prim_func = base_func.as<tirx::PrimFunc>();
     if (!opt_prim_func) {
       // The call is to something other than a PrimFunc.  It may be
       // another Relax function, in which case the legalization of its
@@ -212,7 +213,7 @@ class LegalizeMutator : public ExprMutator {
 
     // The FLegalize function generated a PrimFunc, but that PrimFunc
     // doesn't have annotations compatible with the vdevice required
-    // by the Relax StructInfo.  Update the call to instead call a
+    // by the Relax Type.  Update the call to instead call a
     // `PrimFunc` with the appropriate target annotation.  In the
     // future, this may be treated as a bug in the FLegalize
     // implementation, rather than expected output from it.
@@ -232,10 +233,10 @@ class LegalizeMutator : public ExprMutator {
   }
 
   Expr VisitExpr_(const CallNode* call) final {
-    Call visited_call = Downcast<Call>(this->VisitExprPostOrder_(call));
+    Call visited_call = this->VisitExprPostOrder_(call).as_or_throw<Call>();
     static const auto& legalize_map = Op::GetAttrMap<FLegalize>("FLegalize");
     static const auto& call_packed_map = Op::GetAttrMap<FCallPacked>("FCallPacked");
-    static const auto& requires_arg_shapes_map = Op::GetAttrMap<Bool>("RequiresArgumentShapes");
+    static const auto& requires_arg_shapes_map = Op::GetAttrMap<bool>("RequiresArgumentShapes");
     static const Op& call_pure_packed_op = Op::Get("relax.call_pure_packed");
     static const Op& call_tir_op = Op::Get("relax.call_tir");
     static const Op& call_dps_packed_op = Op::Get("relax.call_dps_packed");
@@ -252,7 +253,7 @@ class LegalizeMutator : public ExprMutator {
     }
 
     bool shapes_are_known_if_required = [&]() -> bool {
-      bool requires_arg_shapes = requires_arg_shapes_map.get(op, Bool(true))->value;
+      bool requires_arg_shapes = requires_arg_shapes_map.get(op, true);
       if (!requires_arg_shapes) {
         // This operator does not require its arguments to have a
         // known shape/dtype.  For example, the "relax.tensor_ndim"
@@ -264,7 +265,7 @@ class LegalizeMutator : public ExprMutator {
 
       bool arg_shapes_defined =
           std::all_of(visited_call->args.begin(), visited_call->args.end(),
-                      [](Expr arg) { return KnowAllShapeValues(GetStructInfo(arg)); });
+                      [](Expr arg) { return KnowAllShapeValues(GetType(arg)); });
       if (!arg_shapes_defined) {
         // This operator cannot be legalized, because legalization
         // requires the argument shapes to be known.
@@ -281,15 +282,22 @@ class LegalizeMutator : public ExprMutator {
         //     This fallback would only be applicable for cases where
         //     both the dtype and the dimensionality are known.  While
         //     Relax can express a tensor with unknown dtype and
-        //     dimensionality as `TensorStructInfo(DataType::Void(),
+        //     dimensionality as `TensorType(DLDataType{kDLOpaqueHandle, 0, 0},
         //     kUnknownNDim)`, TIR cannot express unknown dtype or
         //     unknown dimensionality.
         return false;
       }
 
-      std::string op_name(op->name);
-      bool is_data_dependent_op = (op_name.find("dynamic") != std::string::npos);
-      bool ret_shape_defined = KnowAllShapeValues(GetStructInfo(visited_call));
+      bool is_data_dependent_op = [&]() -> bool {
+        if (Op::HasAttrMap("FDataDependent")) {
+          auto op_map = Op::GetAttrMap<bool>("FDataDependent");
+          if (op_map.count(op)) {
+            return op_map[op];
+          }
+        }
+        return false;
+      }();
+      bool ret_shape_defined = KnowAllShapeValues(GetType(visited_call));
       if (!is_data_dependent_op && !ret_shape_defined) {
         // This operator cannot be legalized, because legalization by
         // default requires the output shape.  The exception is
@@ -303,10 +311,6 @@ class LegalizeMutator : public ExprMutator {
         // data-dependent op, and match cast to define symbolic output
         // shapes.  These symbolic output shapes at compile time can
         // be by later operations to refer to the runtime shape.
-        //
-        // TODO(Lunderberg): Make a new operator attribute
-        // `.set_attr<Bool>("DataDependent")`, rather than relying on
-        // the name of the operator.
         return false;
       }
 
@@ -324,10 +328,10 @@ class LegalizeMutator : public ExprMutator {
       // Second choice, use a default legalization
       legalization_func = legalize_map[op];
     } else if (call_packed_map.count(op)) {
-      // Third choice, use an explicit FCallPacked replacement.  This does not require the shape
+      // Third choice, use an explicit ffi::String replacement.  This does not require the shape
       ffi::String packed_func_name = call_packed_map[op];
       legalization_func = [packed_func_name](const BlockBuilder& bb, const Call& call) -> Expr {
-        return Call(ExternFunc(packed_func_name), call->args, Attrs(), {GetStructInfo(call)});
+        return Call(ExternFunc(packed_func_name), call->args, Attrs(), {GetType(call)});
       };
     } else {
       // No legalization.
@@ -368,7 +372,7 @@ class LegalizeMutator : public ExprMutator {
     }
 
     if (WrapPureCondition(op, legalized)) {
-      legalized = WrapPureCall(Downcast<Call>(legalized));
+      legalized = WrapPureCall(legalized.as_or_throw<Call>());
     }
 
     // Legalization may have introduced additional operations that
@@ -411,7 +415,7 @@ Pass LegalizeOps(ffi::Optional<ffi::Map<ffi::String, ffi::Function>> cmap,
                  ffi::Optional<ffi::Array<ffi::String>> skip_ops, bool enable_warning) {
   auto pass_func = [=](IRModule mod, PassContext pc) {
     bool apply_legalize_ops =
-        pc->GetConfig<Bool>("relax.transform.apply_legalize_ops").value_or(Bool(true))->value;
+        pc->GetConfig<bool>("relax.transform.apply_legalize_ops").value_or(true);
     if (apply_legalize_ops) {
       mod = LegalizeMutator(mod, cmap, skip_ops, enable_warning).Transform();
     }

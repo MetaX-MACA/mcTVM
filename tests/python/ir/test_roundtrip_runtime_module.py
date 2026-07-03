@@ -14,13 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-""" Test roundtrip of runtime modules """
+# ruff: noqa: F401
+"""Test roundtrip of runtime modules"""
 # pylint: disable=missing-docstring
 
 import pytest
+
 import tvm
 import tvm.testing
-from tvm import TVMError
 
 
 def test_csource_module():

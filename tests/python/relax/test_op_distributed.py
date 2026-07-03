@@ -15,16 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 import pytest
+
 import tvm
-from tvm.base import TVMError
 import tvm.testing
 from tvm import relax
 from tvm.script.parser import relax as R
 
 
-def _check_inference(bb: relax.BlockBuilder, call: relax.Call, expected_sinfo: relax.StructInfo):
+def _check_inference(bb: relax.BlockBuilder, call: relax.Call, expected_ty: relax.Type):
     ret = bb.normalize(call)
-    tvm.ir.assert_structural_equal(ret.struct_info, expected_sinfo)
+    tvm.ir.assert_structural_equal(ret.ty, expected_ty)
 
 
 def test_redistribute_R_to_S():
@@ -39,7 +39,7 @@ def test_redistribute_R_to_S():
     )
 
     # wrong: indivisible
-    with pytest.raises(TVMError):
+    with pytest.raises(ValueError):
         bb.normalize(R.distributed.redistribute_replica_to_shard(x, num_workers=4, axis=0))
 
     y = relax.Var("y", R.Tensor((3, 4), "float32"))
@@ -50,7 +50,7 @@ def test_redistribute_R_to_S():
     )
 
     # wrong: indivisible
-    with pytest.raises(TVMError):
+    with pytest.raises(ValueError):
         bb.normalize(R.distributed.redistribute_replica_to_shard(y, num_workers=4, axis=0))
 
 
