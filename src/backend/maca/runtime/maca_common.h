@@ -35,13 +35,13 @@
 namespace tvm {
 namespace runtime {
 
-#define MACA_DRIVER_CALL(x)                                                             \
-  {                                                                                     \
-    mcError_t result = x;                                                               \
-    if (result != mcSuccess && result != mcErrorDeinitialized) {                        \
-      TVM_FFI_THROW(InternalError)                                                      \
-          << "MACA MACA Error: " #x " failed with error: " << mcGetErrorString(result); \
-    }                                                                                   \
+#define MACA_DRIVER_CALL(x)                                                        \
+  {                                                                                \
+    mcError_t result = x;                                                          \
+    if (result != mcSuccess && result != mcErrorDeinitialized) {                   \
+      TVM_FFI_THROW(InternalError)                                                 \
+          << "MACA Error: " #x " failed with error: " << mcGetErrorString(result); \
+    }                                                                              \
   }
 
 #define MACA_CALL(func)                                                     \
