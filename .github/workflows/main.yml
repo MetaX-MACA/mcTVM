@@ -128,7 +128,7 @@ jobs:
           PLATFORM: gpu
 
   Linux_CPU_Test:
-    if: ${{ false && github.repository == 'MetaX-MACA/mcTVM' }}
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
     runs-on: ubuntu-latest
     env:
       PLATFORM: cpu
