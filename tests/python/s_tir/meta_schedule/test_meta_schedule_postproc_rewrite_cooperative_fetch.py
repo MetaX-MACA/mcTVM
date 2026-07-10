@@ -28,7 +28,7 @@ from tvm.te import create_prim_func
 
 
 def _target() -> Target:
-    return Target("cuda", host="llvm")
+    return Target("maca", host="llvm")
 
 
 def _create_context(mod, target) -> ms.TuneContext:

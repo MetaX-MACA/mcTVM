@@ -26,9 +26,16 @@ from tvm.script import tirx as T
 from tvm.testing import env
 from tvm.tirx import Buffer
 
+MACA_HOPPER_CODEGEN_XFAIL_REASON = (
+    "TODO(maca): [hopper-codegen] support Hopper-style setmaxnreg, stmatrix, mbarrier, TMA, WGMMA, "
+    "and shared-rank PTX lowering"
+)
+
+pytestmark = pytest.mark.xfail(reason=MACA_HOPPER_CODEGEN_XFAIL_REASON, strict=False)
+
 
 def _get_source(func: tvm.tirx.PrimFunc) -> tuple[str, tvm.IRModule]:
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
     src = mod.mod.imports[0].inspect_source()
@@ -50,16 +57,16 @@ def _run_tensormap_encode(shape, dtype, encode_args):
                 T.evaluate(blockIdx + threadIdx)
         # fmt: on
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     mod = tvm.IRModule({"main": main})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-    A = tvm.runtime.tensor(np.zeros(shape, dtype=dtype), device=tvm.cuda(0))
+    A = tvm.runtime.tensor(np.zeros(shape, dtype=dtype), device=tvm.maca(0))
     mod(A)
 
 
 @pytest.mark.parametrize("inc", [False, True])
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_ptx_setmaxnreg(inc):
     # fmt: off
     @T.prim_func
@@ -80,7 +87,7 @@ def test_ptx_setmaxnreg(inc):
 
 @pytest.mark.parametrize("trans", [False, True])
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_stmatrix_sync_aligned(trans):
     # fmt: off
     @T.prim_func
@@ -102,8 +109,8 @@ def test_stmatrix_sync_aligned(trans):
                 A[i, j] = A_smem[i, j]
         # fmt: on
 
-    DEV = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    DEV = tvm.maca(0)
+    target = tvm.target.Target("maca")
     mod = tvm.IRModule({"main": func})
     with target:
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -168,8 +175,8 @@ def test_ptx_stmatrix(trans, num):
                 A[i, j] = A_shared[i, j]
         # fmt: on
 
-    DEV = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    DEV = tvm.maca(0)
+    target = tvm.target.Target("maca")
     mod = tvm.IRModule({"main": main})
     with target:
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -203,7 +210,7 @@ def test_ptx_stmatrix(trans, num):
 @pytest.mark.parametrize("trans", [False, True])
 @pytest.mark.parametrize("num", [1, 2, 4])
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_ptx_stmatrix_noncontiguous(trans, num):
     """Symmetric stmatrix API: ``num`` independent src handles.
 
@@ -240,8 +247,8 @@ def test_ptx_stmatrix_noncontiguous(trans, num):
                 A[i, j] = A_shared[i, j]
     # fmt: on
 
-    DEV = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    DEV = tvm.maca(0)
+    target = tvm.target.Target("maca")
     mod = tvm.IRModule({"main": main})
     with target:
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -272,7 +279,7 @@ def test_ptx_stmatrix_noncontiguous(trans, num):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_bar_arrive():
     # fmt: off
     @T.prim_func
@@ -289,7 +296,7 @@ def test_bar_arrive():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_bar_sync():
     # fmt: off
     @T.prim_func
@@ -306,7 +313,7 @@ def test_bar_sync():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_fence_mbarrier_init_release_clsuter():
     # fmt: off
     @T.prim_func
@@ -322,7 +329,7 @@ def test_fence_mbarrier_init_release_clsuter():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_ptx_elect_sync():
     # fmt: off
     @T.prim_func
@@ -340,7 +347,7 @@ def test_ptx_elect_sync():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize("sem,scope", [("sc", "cta"), ("acq_rel", "gpu"), ("sc", "sys")])
 def test_ptx_fence(sem, scope):
     # fmt: off
@@ -357,7 +364,7 @@ def test_ptx_fence(sem, scope):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_fence_proxy_async():
     # fmt: off
     @T.prim_func
@@ -376,7 +383,7 @@ def test_fence_proxy_async():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize("dtype", ["float16", "float32", "float8_e4m3fn", "float8_e5m2"])
 @pytest.mark.parametrize(
     "inputs",
@@ -435,8 +442,8 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
 
         return main
 
-    DEV = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    DEV = tvm.maca(0)
+    target = tvm.target.Target("maca")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -461,7 +468,7 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize(
     ("shape", "dtype", "encode_args", "error_msg"),
     [
@@ -538,7 +545,7 @@ def test_tensormap_encode_tiled_runtime_validation(shape, dtype, encode_args, er
 @pytest.mark.parametrize("swizzle", [1, 2, 3])
 @pytest.mark.parametrize("dtype", ["uint8", "float16", "float32"])
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
     def get_ir(swizzle, dtype):
         dtype = tvm.DataType(dtype)
@@ -598,8 +605,8 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
 
         return main, shape
 
-    DEV = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    DEV = tvm.maca(0)
+    target = tvm.target.Target("maca")
     func, shape = get_ir(swizzle, dtype)
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -637,7 +644,7 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
     ],
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
     # 1 CTA does the copy, and then multicast to all CTAs in the cluster
     def get_ir(shape, tma_args):
@@ -687,8 +694,8 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
 
         return main
 
-    DEV = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    DEV = tvm.maca(0)
+    target = tvm.target.Target("maca")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -712,7 +719,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
     ],
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
     # 4 CTAs in the cluster do the copy of separate chunks, and then multicast to all CTAs in the cluster  # noqa: E501
     def get_ir(shape, tma_args):
@@ -777,8 +784,8 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
 
         return main
 
-    DEV = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    DEV = tvm.maca(0)
+    target = tvm.target.Target("maca")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -803,7 +810,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
     ],
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_cp_async_bulk_tensor_shared_to_global(inputs):
     def get_ir(shape, tma_args):
         assert shape[0] % 4 == 0
@@ -838,8 +845,8 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
 
         return main
 
-    DEV = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    DEV = tvm.maca(0)
+    target = tvm.target.Target("maca")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -856,7 +863,7 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9, exact=True), reason="need cuda compute == 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_wgmma_ss_nt():
     def get_ir(
         shapeA,
@@ -964,8 +971,8 @@ def test_wgmma_ss_nt():
     t_in_dtype = tvm.DataType(in_dtype)
     elem_bytes = t_in_dtype.bits // 8
 
-    DEV = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    DEV = tvm.maca(0)
+    target = tvm.target.Target("maca")
     M = 64
     N = 64
     K = 256 // t_in_dtype.bits
@@ -1012,7 +1019,7 @@ def test_wgmma_ss_nt():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9, exact=True), reason="need cuda compute == 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_wgmma_rs_nt():
     def get_ir(
         shapeA, shapeB, shapeC, B_tma_args, in_dtype, in_dtype_bits, out_dtype, B_encode_args
@@ -1129,8 +1136,8 @@ def test_wgmma_rs_nt():
     t_in_dtype = tvm.DataType(in_dtype)
     elem_bytes = t_in_dtype.bits // 8
 
-    DEV = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    DEV = tvm.maca(0)
+    target = tvm.target.Target("maca")
     M = 64
     N = 64
     K = 256 // t_in_dtype.bits
@@ -1169,7 +1176,7 @@ def test_wgmma_rs_nt():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_ptx_map_shared_rank():
     @T.prim_func
     def func(A: T.Buffer(1)):

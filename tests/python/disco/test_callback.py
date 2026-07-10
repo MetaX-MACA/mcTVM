@@ -64,7 +64,7 @@ def test_callback():
         name="pipeline",
     )
 
-    with tvm.target.Target("cuda"):
+    with tvm.target.Target("maca"):
         mod = tvm.IRModule.from_expr(transform_params)
         mod = pipeline(mod)
         built = tvm.compile(mod, "cuda")
@@ -97,8 +97,8 @@ def test_callback():
         # `debug_get_from_remote(0)` returns the Tensor containing
         # the output.
         params_gpu0 = params.debug_get_from_remote(0)
-        assert params_gpu0[0].device == tvm.cuda(0)
-        assert params_gpu0[1].device == tvm.cuda(0)
+        assert params_gpu0[0].device == tvm.maca(0)
+        assert params_gpu0[1].device == tvm.maca(0)
         np.testing.assert_array_equal(
             params_gpu0[0].numpy(),
             [

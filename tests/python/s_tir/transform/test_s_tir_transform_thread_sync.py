@@ -27,7 +27,7 @@ from tvm.testing import env
 def run_passes(func: tvm.tirx.PrimFunc):
     mod = tvm.IRModule.from_expr(func)
 
-    cuda_target = tvm.target.Target("cuda", host="llvm")
+    cuda_target = tvm.target.Target("maca", host="llvm")
 
     mod = tvm.tirx.transform.Apply(
         lambda f: f.with_attr({"global_symbol": "test", "target": cuda_target})
@@ -38,7 +38,7 @@ def run_passes(func: tvm.tirx.PrimFunc):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_sync_read_thread_id_independent_location():
     @T.prim_func(check_well_formed=False, s_tir=True)
     def func(p0_arg: T.Buffer((1, 2, 1, 1), "float32"), p1: T.Buffer(2, "float32")) -> None:
@@ -103,7 +103,7 @@ def test_sync_shared_dyn():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_sync_bind():
     @T.prim_func(private=True, s_tir=True)
     def func(A: T.Buffer((16 * 512), "float32")):

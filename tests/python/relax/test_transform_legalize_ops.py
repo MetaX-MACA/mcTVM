@@ -430,7 +430,7 @@ def test_legalize_with_vdevice():
                     ax0, ax1 = T.axis.remap("SS", iters)
                     C[ax0, ax1] = A[ax0, ax1] + B[ax0, ax1]
 
-    with tvm.target.Target("cuda"):
+    with tvm.target.Target("maca"):
         After = tvm.relax.transform.LegalizeOps()(Before)
 
     tvm.ir.assert_structural_equal(Expected, After)

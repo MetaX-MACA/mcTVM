@@ -251,7 +251,7 @@ def test_gpu_fallback_ignores_non_gpu_functions():
                     vi, vj, vk = T.axis.remap("SSS", [i, j, k])
                     C[vi, vj, vk] = B[0, 0, vk % 4096 // 128, vk % 128]
 
-    with Target("cuda"):
+    with Target("maca"):
         mod = dl.ApplyDefaultSchedule(  # pylint: disable=not-callable
             dl.gpu.Fallback(),
         )(Before)

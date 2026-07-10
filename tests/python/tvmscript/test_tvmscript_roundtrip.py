@@ -2883,7 +2883,7 @@ def tvm_shfl_builtins():
 def make_packed_api_result():
     @T.prim_func(s_tir=True)
     def func(A: T.Buffer(64, "float32")):
-        T.func_attr({"global_symbol": "main", "target": T.target("cuda")})
+        T.func_attr({"global_symbol": "main", "target": T.target("maca")})
         bx = T.launch_thread("blockIdx.x", 64)
         T.evaluate(A[bx])
 

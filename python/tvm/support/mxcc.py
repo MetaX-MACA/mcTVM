@@ -167,19 +167,20 @@ def have_wmma(compute_version=None):
     return False
 
 
-def have_fp16(compute_version):
-    """Either fp16 support is provided in the compute capability or not
+def have_fp16(compute_version):  # pylint: disable=unused-argument
+    """Whether fp16 support is provided in the specified compute capability or not."""
+    return True
 
-    Parameters
-    ----------
-    compute_version: str
-        compute capability of a GPU (e.g. "6.0")
-    """
-    major, minor = parse_compute_version(compute_version)  # pylint: disable=unused-variable
-    if major >= 10:
-        return True
 
-    return False
+def have_int8(compute_version):  # pylint: disable=unused-argument
+    """Whether int8 support is provided in the specified compute capability or not."""
+    return True
+
+
+@tvm_ffi.register_global_func("tvm.support.mxcc.supports_bf16")
+def have_bf16(compute_version):  # pylint: disable=unused-argument
+    """Whether bf16 support is provided in the specified compute capability or not."""
+    return True
 
 
 @tvm_ffi.register_global_func("tvm_callback_maca_get_arch")

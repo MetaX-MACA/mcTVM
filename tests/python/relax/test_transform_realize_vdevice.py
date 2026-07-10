@@ -32,9 +32,9 @@ def verify(input, expected):
 
 vdevices = [
     VDevice("llvm"),
-    VDevice("cuda", 0),
+    VDevice("maca", 0),
     VDevice("metal", 0, "global"),
-    VDevice({"kind": "cuda", "arch": "sm_80"}, 0),
+    VDevice({"kind": "maca"}, 0),
 ]
 
 
@@ -46,9 +46,9 @@ def test_dataflow_binding():
             {
                 "vdevice": [
                     I.vdevice("llvm"),
-                    I.vdevice("cuda", 0),
+                    I.vdevice("maca", 0),
                     I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
+                    I.vdevice({"kind": "maca"}, 0),
                 ]
             }
         )
@@ -77,9 +77,9 @@ def test_dataflow_binding():
             {
                 "vdevice": [
                     I.vdevice("llvm"),
-                    I.vdevice("cuda", 0),
+                    I.vdevice("maca", 0),
                     I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
+                    I.vdevice({"kind": "maca"}, 0),
                 ]
             }
         )
@@ -167,7 +167,7 @@ def test_func_ret():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("cuda"),
+                    I.vdevice("maca"),
                 ]
             }
         )
@@ -177,7 +177,7 @@ def test_func_ret():
             x: R.Tensor((2, 3), "float32"),
             y: R.Tensor((2, 3), "float32"),
             z: R.Tensor((2, 3), "float32"),
-        ) -> R.Tensor((2, 3), "float32", "cuda"):
+        ) -> R.Tensor((2, 3), "float32", "maca"):
             with R.dataflow():
                 lv0 = R.add(x, y)
                 gv = R.multiply(lv0, z)
@@ -190,20 +190,20 @@ def test_func_ret():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("cuda"),
+                    I.vdevice("maca"),
                 ]
             }
         )
 
         @R.function
         def foo(
-            x: R.Tensor((2, 3), "float32", "cuda"),
-            y: R.Tensor((2, 3), "float32", "cuda"),
-            z: R.Tensor((2, 3), "float32", "cuda"),
-        ) -> R.Tensor((2, 3), "float32", "cuda"):
+            x: R.Tensor((2, 3), "float32", "maca"),
+            y: R.Tensor((2, 3), "float32", "maca"),
+            z: R.Tensor((2, 3), "float32", "maca"),
+        ) -> R.Tensor((2, 3), "float32", "maca"):
             with R.dataflow():
-                lv0: R.Tensor((2, 3), "float32", "cuda") = R.add(x, y)
-                gv: R.Tensor((2, 3), "float32", "cuda") = R.multiply(lv0, z)
+                lv0: R.Tensor((2, 3), "float32", "maca") = R.add(x, y)
+                gv: R.Tensor((2, 3), "float32", "maca") = R.multiply(lv0, z)
                 R.output(gv)
             return gv
 
@@ -217,7 +217,7 @@ def test_tuple_func_ret():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("cuda"),
+                    I.vdevice("maca"),
                 ]
             }
         )
@@ -227,7 +227,7 @@ def test_tuple_func_ret():
             x: R.Tensor((2, 3), "float32"),
             y: R.Tensor((2, 3), "float32"),
             z: R.Tensor((2, 3), "float32"),
-        ) -> R.Tuple([R.Tensor((2, 3), "float32", "cuda"), R.Tensor((2, 3), "float32", "cuda")]):
+        ) -> R.Tuple([R.Tensor((2, 3), "float32", "maca"), R.Tensor((2, 3), "float32", "maca")]):
             with R.dataflow():
                 lv0 = R.add(x, y)
                 gv = R.multiply(lv0, z)
@@ -240,20 +240,20 @@ def test_tuple_func_ret():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("cuda"),
+                    I.vdevice("maca"),
                 ]
             }
         )
 
         @R.function
         def foo(
-            x: R.Tensor((2, 3), "float32", "cuda"),
-            y: R.Tensor((2, 3), "float32", "cuda"),
-            z: R.Tensor((2, 3), "float32", "cuda"),
-        ) -> R.Tuple([R.Tensor((2, 3), "float32", "cuda"), R.Tensor((2, 3), "float32", "cuda")]):
+            x: R.Tensor((2, 3), "float32", "maca"),
+            y: R.Tensor((2, 3), "float32", "maca"),
+            z: R.Tensor((2, 3), "float32", "maca"),
+        ) -> R.Tuple([R.Tensor((2, 3), "float32", "maca"), R.Tensor((2, 3), "float32", "maca")]):
             with R.dataflow():
-                lv0: R.Tensor((2, 3), "float32", "cuda") = R.add(x, y)
-                gv: R.Tensor((2, 3), "float32", "cuda") = R.multiply(lv0, z)
+                lv0: R.Tensor((2, 3), "float32", "maca") = R.add(x, y)
+                gv: R.Tensor((2, 3), "float32", "maca") = R.multiply(lv0, z)
                 R.output(gv)
             return (gv, gv)
 
@@ -268,9 +268,9 @@ def test_multi_device():
             {
                 "vdevice": [
                     I.vdevice("llvm"),
-                    I.vdevice("cuda", 0),
+                    I.vdevice("maca", 0),
                     I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
+                    I.vdevice({"kind": "maca"}, 0),
                 ]
             }
         )
@@ -280,11 +280,11 @@ def test_multi_device():
             x: R.Tensor((2, 3), "float32"),
             y: R.Tensor((2, 3), "float32"),
             z: R.Tensor((2, 3), "float32"),
-        ) -> R.Tensor((2, 3), "float32", "cuda"):
+        ) -> R.Tensor((2, 3), "float32", "maca"):
             with R.dataflow():
                 lv0 = R.add(x, y)
                 lv0 = R.hint_on_device(lv0, tvm.cpu())
-                lv1 = R.to_vdevice(lv0, "cuda")
+                lv1 = R.to_vdevice(lv0, "maca")
                 lv2 = R.add(z, z)
                 gv = R.multiply(lv1, lv2)
                 R.output(gv)
@@ -297,9 +297,9 @@ def test_multi_device():
             {
                 "vdevice": [
                     I.vdevice("llvm"),
-                    I.vdevice("cuda", 0),
+                    I.vdevice("maca", 0),
                     I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
+                    I.vdevice({"kind": "maca"}, 0),
                 ]
             }
         )
@@ -308,14 +308,14 @@ def test_multi_device():
         def foo(
             x: R.Tensor((2, 3), "float32", "llvm"),
             y: R.Tensor((2, 3), "float32", "llvm"),
-            z: R.Tensor((2, 3), "float32", "cuda"),
-        ) -> R.Tensor((2, 3), "float32", "cuda"):
+            z: R.Tensor((2, 3), "float32", "maca"),
+        ) -> R.Tensor((2, 3), "float32", "maca"):
             with R.dataflow():
                 lv0: R.Tensor((2, 3), "float32", "llvm") = R.add(x, y)
                 lv0: R.Tensor((2, 3), "float32", "llvm") = lv0
-                lv1: R.Tensor((2, 3), "float32", "cuda") = R.to_vdevice(lv0, "cuda")
-                lv2: R.Tensor((2, 3), "float32", "cuda") = R.add(z, z)
-                gv: R.Tensor((2, 3), "float32", "cuda") = R.multiply(lv1, lv2)
+                lv1: R.Tensor((2, 3), "float32", "maca") = R.to_vdevice(lv0, "maca")
+                lv2: R.Tensor((2, 3), "float32", "maca") = R.add(z, z)
+                gv: R.Tensor((2, 3), "float32", "maca") = R.multiply(lv1, lv2)
                 R.output(gv)
             return gv
 
@@ -330,9 +330,9 @@ def test_insert_to_vdevice():
             {
                 "vdevice": [
                     I.vdevice("llvm"),
-                    I.vdevice("cuda", 0),
+                    I.vdevice("maca", 0),
                     I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
+                    I.vdevice({"kind": "maca"}, 0),
                 ]
             }
         )
@@ -346,9 +346,9 @@ def test_insert_to_vdevice():
             with R.dataflow():
                 lv0 = R.hint_on_device(y, tvm.cpu())
                 lv1 = R.add(x, lv0)
-                lv2 = R.hint_on_device(lv1, tvm.cuda())
+                lv2 = R.hint_on_device(lv1, tvm.maca())
                 lv3 = R.add(lv2, lv2)
-                lv4 = R.hint_on_device(z, tvm.cuda())
+                lv4 = R.hint_on_device(z, tvm.maca())
                 gv = R.multiply(lv3, lv4)
                 R.output(gv)
             return gv
@@ -360,9 +360,9 @@ def test_insert_to_vdevice():
             {
                 "vdevice": [
                     I.vdevice("llvm"),
-                    I.vdevice("cuda", 0),
+                    I.vdevice("maca", 0),
                     I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
+                    I.vdevice({"kind": "maca"}, 0),
                 ]
             }
         )
@@ -371,15 +371,15 @@ def test_insert_to_vdevice():
         def foo(
             x: R.Tensor((2, 3), "float32", "llvm"),
             y: R.Tensor((2, 3), "float32", "llvm"),
-            z: R.Tensor((2, 3), "float32", "cuda"),
-        ) -> R.Tensor((2, 3), "float32", "cuda"):
+            z: R.Tensor((2, 3), "float32", "maca"),
+        ) -> R.Tensor((2, 3), "float32", "maca"):
             with R.dataflow():
                 lv0: R.Tensor((2, 3), "float32", "llvm") = y
                 lv1: R.Tensor((2, 3), "float32", "llvm") = R.add(x, lv0)
-                lv2: R.Tensor((2, 3), "float32", "cuda") = R.to_vdevice(lv1, "cuda")
-                lv3: R.Tensor((2, 3), "float32", "cuda") = R.add(lv2, lv2)
-                lv4: R.Tensor((2, 3), "float32", "cuda") = z
-                gv: R.Tensor((2, 3), "float32", "cuda") = R.multiply(lv3, lv4)
+                lv2: R.Tensor((2, 3), "float32", "maca") = R.to_vdevice(lv1, "maca")
+                lv3: R.Tensor((2, 3), "float32", "maca") = R.add(lv2, lv2)
+                lv4: R.Tensor((2, 3), "float32", "maca") = z
+                gv: R.Tensor((2, 3), "float32", "maca") = R.multiply(lv3, lv4)
                 R.output(gv)
             return gv
 

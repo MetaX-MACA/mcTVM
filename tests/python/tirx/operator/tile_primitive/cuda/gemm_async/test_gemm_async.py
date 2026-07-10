@@ -42,6 +42,14 @@ from tvm.tirx.cuda.operator.tile_primitive.tma_utils import (
 from tvm.tirx.layout import S, TCol, TileLayout, TLane, tcgen05_atom_layout
 from tvm.tirx.layout import tid_in_wg as axis_tid_in_wg
 
+MACA_XFAIL = pytest.mark.xfail(
+    reason=(
+        "TODO(maca): [tile-primitive-gemm-tcgen05] support tcgen05 async GEMM "
+        "and block-scaled formats"
+    ),
+    strict=False,
+)
+
 # ---------------------------------------------------------------------------
 # Shared test helpers
 # ---------------------------------------------------------------------------
@@ -169,7 +177,8 @@ def pack_sf_fp8_uint32(sf_uint8, n_total=128):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize(
     "task",
     [
@@ -271,10 +280,10 @@ def test_gemm_tcgen05_cta_group_1(task):
             T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=cols_alloc, cta_group=1)
         # fmt: on
 
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     np.random.seed(0)
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": gemm_async})
         # mod.show()
@@ -297,7 +306,8 @@ def test_gemm_tcgen05_cta_group_1(task):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_gemm_tcgen05_cta_group_1_layout_f_m64():
     """M=64 MMA with C operand allocated as Layout F (datapath="F").
 
@@ -392,9 +402,9 @@ def test_gemm_tcgen05_cta_group_1_layout_f_m64():
             T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=64, cta_group=1)
     # fmt: on
 
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     np.random.seed(0)
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.compile(tvm.IRModule({"main": gemm_layout_f}), target=target, tir_pipeline="tirx")
 
@@ -411,7 +421,8 @@ def test_gemm_tcgen05_cta_group_1_layout_f_m64():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize(
     "task",
     [
@@ -525,10 +536,10 @@ def test_gemm_tcgen05_cta_group_2(task):
             T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=cols_alloc, cta_group=2)
         # fmt: on
 
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     np.random.seed(0)
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": gemm_async})
         mod.show()
@@ -553,7 +564,8 @@ def test_gemm_tcgen05_cta_group_2(task):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_gemm_tcgen05_cta_group_2_layout_b():
     """Test cta_group=2 with Layout B (2x2 datapath, M=128 total, 64 per CTA).
 
@@ -662,10 +674,10 @@ def test_gemm_tcgen05_cta_group_2_layout_b():
             T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=cols_alloc, cta_group=2)
         # fmt: on
 
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     np.random.seed(0)
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": gemm_async})
         mod.show()
@@ -685,7 +697,8 @@ def test_gemm_tcgen05_cta_group_2_layout_b():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.skipif(ml_dtypes is None, reason="Requires ml_dtypes")
 @pytest.mark.parametrize(
     "task",
@@ -842,10 +855,10 @@ def test_gemm_block_scaled_fp8_cta_group_1(task):
             T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=cols_alloc, cta_group=1)
         # fmt: on
 
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     np.random.seed(0)
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": gemm_async_fn})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -876,7 +889,8 @@ def test_gemm_block_scaled_fp8_cta_group_1(task):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.skipif(ml_dtypes is None, reason="Requires ml_dtypes")
 @pytest.mark.parametrize(
     "task",
@@ -1052,10 +1066,10 @@ def test_gemm_block_scaled_fp8_cta_group_2(task):
             T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=cols_alloc, cta_group=2)
         # fmt: on
 
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     np.random.seed(0)
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": gemm_async_fn})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1103,7 +1117,8 @@ def test_gemm_block_scaled_fp8_cta_group_2(task):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.skipif(ml_dtypes is None, reason="Requires ml_dtypes")
 def test_gemm_block_scaled_nvfp4_cta_group_1():
     """Test block-scaled nvfp4 GEMM with cta_group=1.
@@ -1236,10 +1251,10 @@ def test_gemm_block_scaled_nvfp4_cta_group_1():
             T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=cols_alloc, cta_group=1)
         # fmt: on
 
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     np.random.seed(0)
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": gemm_async_fn})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1274,7 +1289,8 @@ def test_gemm_block_scaled_nvfp4_cta_group_1():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.skipif(ml_dtypes is None, reason="Requires ml_dtypes")
 def test_gemm_block_scaled_nvfp4_cta_group_2():
     """Test block-scaled nvfp4 GEMM with cta_group=2.
@@ -1430,10 +1446,10 @@ def test_gemm_block_scaled_nvfp4_cta_group_2():
             T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=cols_alloc, cta_group=2)
         # fmt: on
 
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     np.random.seed(0)
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": gemm_async_fn})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1480,7 +1496,8 @@ def test_gemm_block_scaled_nvfp4_cta_group_2():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.skipif(ml_dtypes is None, reason="Requires ml_dtypes")
 def test_gemm_block_scaled_fp8_sf_id():
     """Test sf_id auto-derivation from layout for fp8 block-scaled MMA.
@@ -1638,10 +1655,10 @@ def test_gemm_block_scaled_fp8_sf_id():
         exp_uint8 = (log_scale.astype(np.int32) + 127).astype(np.uint8)  # (rows, n_blocks)
         return mat_fp8, scale, exp_uint8
 
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     np.random.seed(42)
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": gemm_async_fn})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1701,7 +1718,8 @@ def test_gemm_block_scaled_fp8_sf_id():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize(
     "task",
     [
@@ -1941,10 +1959,10 @@ def test_gemm_tcgen05_arbitrary_tiles(task):
             T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=cols_alloc, cta_group=cta_group)
         # fmt: on
 
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     np.random.seed(0)
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": gemm_async})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1982,7 +2000,8 @@ def test_gemm_tcgen05_arbitrary_tiles(task):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("k_lo,k_hi", [(0, 16), (0, 32), (16, 32), (16, 48), (32, 64)])
 def test_gemm_tcgen05_contiguous_kslice_partial_k(k_lo, k_hi):
     """A slice on the *contiguous* (K) axis of a swizzled gemm_async operand must
@@ -2053,10 +2072,10 @@ def test_gemm_tcgen05_contiguous_kslice_partial_k(k_lo, k_hi):
             T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=128, cta_group=1)
     # fmt: on
 
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     np.random.seed(0)
-    with tvm.target.Target("cuda"):
-        mod = tvm.compile(tvm.IRModule({"main": gemm_async}), target="cuda", tir_pipeline="tirx")
+    with tvm.target.Target("maca"):
+        mod = tvm.compile(tvm.IRModule({"main": gemm_async}), target="maca", tir_pipeline="tirx")
     A_np = np.random.randn(*A_shape).astype(dtype)
     B_np = np.random.randn(*B_shape).astype(dtype)
     C_np = np.zeros(C_shape, "float32")

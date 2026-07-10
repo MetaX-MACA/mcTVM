@@ -34,7 +34,7 @@ def test_cuda_multi_lib():
 
     # test combining two system lib together
     # each contains a fatbin component in cuda
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     for device in ["llvm", "cuda"]:
         if not tvm.testing.device_enabled(device):
             print(f"skip because {device} is not enabled...")
@@ -63,7 +63,7 @@ def test_cuda_multi_lib():
                     x[tx] = x[tx] + 2
 
     temp = utils.tempdir()
-    target = tvm.target.Target("cuda", host="llvm")
+    target = tvm.target.Target("maca", host="llvm")
     libA = tvm.compile(ModA, target=target)
     libB = tvm.compile(ModB, target=target)
 
@@ -82,7 +82,7 @@ def test_cuda_multi_lib():
         # Load dll, will trigger system library registration
         ctypes.CDLL(path_dso)
         # Load the system wide library
-        dev = tvm.cuda()
+        dev = tvm.maca()
         a_np = np.random.uniform(size=12).astype("float32")
         a_nd = tvm.runtime.tensor(a_np, dev)
         b_nd = tvm.runtime.tensor(a_np, dev)

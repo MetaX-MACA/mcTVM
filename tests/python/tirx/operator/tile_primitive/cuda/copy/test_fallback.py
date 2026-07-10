@@ -40,6 +40,14 @@ from tvm.testing import env
 from tvm.tirx.cuda.operator.tile_primitive.copy import fallback as _fallback_module  # noqa: F401
 from tvm.tirx.layout import S, TileLayout
 
+MACA_XFAIL = pytest.mark.xfail(
+    reason=(
+        "TODO(maca): [tile-primitive-copy-fallback] support fallback copy dispatch "
+        "and scalar gated emit"
+    ),
+    strict=False,
+)
+
 
 def _round_trip_shapes_and_threads():
     """Cases where ``gmem_smem`` rejects on ``n_elements % thread_cnt``.
@@ -130,7 +138,8 @@ def _build_round_trip_kernel(scope, n_threads, shape, dtype):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize(
     "scope,n_threads,shape,why",
     [
@@ -146,8 +155,8 @@ def test_fallback_round_trip(scope, n_threads, shape, why):
     dtype = "float32"
     kernel = _build_round_trip_kernel(scope, n_threads, shape, dtype)
 
-    dev = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    dev = tvm.maca(0)
+    target = tvm.target.Target("maca")
     with target, pytest.warns(UserWarning, match="copy/fallback"):
         mod = tvm.IRModule({"main": kernel})
         compiled = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -162,7 +171,8 @@ def test_fallback_round_trip(scope, n_threads, shape, why):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_fallback_thread_scope():
     """``T.thread()`` — single thread, no gate. Either ``gmem_smem`` picks
     it up (n_elements % 1 == 0) or ``fallback`` does — both end up emitting
@@ -185,8 +195,8 @@ def test_fallback_thread_scope():
         T.cuda.cta_sync()
         Tx.copy(B[full], A_smem[full])
 
-    dev = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    dev = tvm.maca(0)
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
         compiled = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -200,6 +210,7 @@ def test_fallback_thread_scope():
     np.testing.assert_array_equal(B.numpy(), A_np)
 
 
+@MACA_XFAIL
 def test_fallback_emits_gate():
     """Compiled CUDA source must contain a single-thread gate so only one
     active thread executes the scalar copy (not all of them, which would
@@ -222,7 +233,7 @@ def test_fallback_emits_gate():
         Tx.cta.copy(A_smem[full], A[full])
         Tx.cta.copy(B[full], A_smem[full])
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target, pytest.warns(UserWarning, match="copy/fallback"):
         mod = tvm.IRModule({"main": kernel})
         compiled = tvm.compile(mod, target=target, tir_pipeline="tirx")

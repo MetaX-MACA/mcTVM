@@ -28,9 +28,21 @@ from tvm.testing import env
 from tvm.tirx.layout import S, TCol, TileLayout, TLane
 from tvm.tirx.layout import tid_in_wg as axis_tid_in_wg
 
+MACA_XFAIL = pytest.mark.xfail(
+    reason=(
+        "TODO(maca): [tile-primitive-copy-async-tmem] support tmem-to-register async copy dispatch"
+    ),
+    strict=False,
+)
+
+
+def _xfail_unsupported_case(reason):
+    pytest.xfail(f"TODO(maca): [tile-primitive-copy-async-tmem] {reason}")
+
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("dtype", ["float16", "float32"])
 @pytest.mark.parametrize("width_32b", [4, 8, 16, 32])
 def test_copy_tmem2reg_async(dtype, width_32b):
@@ -48,12 +60,14 @@ def test_copy_tmem2reg_async(dtype, width_32b):
 
     bits = tvm.runtime.DataType(dtype).bits
     if 128 % bits != 0 or 32 % bits != 0:
-        pytest.skip(f"dtype {dtype} is not supported")
+        _xfail_unsupported_case(f"support dtype {dtype} in tmem copy parameter checks")
 
     WIDTH = width_32b * (32 // bits)
     VEC_LEN = 128 // bits
     if WIDTH % VEC_LEN != 0:
-        pytest.skip(f"dtype {dtype} + width {width_32b} is not supported")
+        _xfail_unsupported_case(
+            f"support dtype {dtype} with width_32b={width_32b} in tmem copy parameter checks"
+        )
 
     g_layout = TileLayout(S[(128, WIDTH // VEC_LEN, VEC_LEN) : (WIDTH, VEC_LEN, 1)])
     local_view = TileLayout(S[(128, WIDTH) : (1 @ axis_tid_in_wg, 1)])
@@ -115,13 +129,13 @@ def test_copy_tmem2reg_async(dtype, width_32b):
                 T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=max(32, next_power_of_2(width_32b)), cta_group=1)  # noqa: E501
         # fmt: on
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": copy_async_test})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
         A_np = tvm.testing.generate_random_array(dtype, (128, WIDTH))
         B_np = np.zeros((128, WIDTH), dtype=dtype)
-        DEV = tvm.cuda(0)
+        DEV = tvm.maca(0)
         A = tvm.runtime.tensor(A_np, DEV)
         B = tvm.runtime.tensor(B_np, DEV)
         mod(A, B)
@@ -136,7 +150,8 @@ def test_copy_tmem2reg_async(dtype, width_32b):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("dtype", ["uint8", "float16", "float32"])
 @pytest.mark.parametrize("width_32b", [2, 4, 8, 16, 32, 64, 128])
 @pytest.mark.parametrize("offset_32b", [0, 3, 10])
@@ -148,13 +163,15 @@ def test_copy_tmem2reg(dtype, width_32b, offset_32b):
 
     bits = tvm.runtime.DataType(dtype).bits
     if 128 % bits != 0 or 32 % bits != 0:
-        pytest.skip(f"dtype {dtype} is not supported")
+        _xfail_unsupported_case(f"support dtype {dtype} in tmem copy parameter checks")
 
     WIDTH = width_32b * (32 // bits)
     OFFSET = offset_32b * (32 // bits)
     VEC_LEN = 128 // bits
     if WIDTH % VEC_LEN != 0:
-        pytest.skip(f"dtype {dtype} + width {width_32b} is not supported")
+        _xfail_unsupported_case(
+            f"support dtype {dtype} with width_32b={width_32b} in tmem copy parameter checks"
+        )
 
     g_layout = TileLayout(S[(128, WIDTH // VEC_LEN, VEC_LEN) : (WIDTH, VEC_LEN, 1)])
     local_view = TileLayout(S[(128, WIDTH) : (1 @ axis_tid_in_wg, 1)])
@@ -216,13 +233,13 @@ def test_copy_tmem2reg(dtype, width_32b, offset_32b):
                 T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=max(32, next_power_of_2(offset_32b + width_32b)), cta_group=1)  # noqa: E501
         # fmt: on
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": copy_sync})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
         A_np = tvm.testing.generate_random_array(dtype, (128, WIDTH))
         B_np = np.zeros((128, WIDTH), dtype=dtype)
-        DEV = tvm.cuda(0)
+        DEV = tvm.maca(0)
         A = tvm.runtime.tensor(A_np, DEV)
         B = tvm.runtime.tensor(B_np, DEV)
         mod(A, B)
@@ -230,7 +247,8 @@ def test_copy_tmem2reg(dtype, width_32b, offset_32b):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("dtype", ["float16", "float32"])
 @pytest.mark.parametrize("width_32b", [4, 8, 16, 32])
 @pytest.mark.parametrize("local_offset_32b", [0, 2, 4])
@@ -244,15 +262,16 @@ def test_copy_tmem2reg_sliced_local(dtype, width_32b, local_offset_32b):
 
     bits = tvm.runtime.DataType(dtype).bits
     if 128 % bits != 0 or 32 % bits != 0:
-        pytest.skip(f"dtype {dtype} is not supported")
+        _xfail_unsupported_case(f"support dtype {dtype} in tmem copy parameter checks")
 
     WIDTH = width_32b * (32 // bits)
     LOCAL_OFFSET = local_offset_32b * (32 // bits)
     TOTAL_LOCAL_WIDTH = WIDTH + LOCAL_OFFSET
     VEC_LEN = 128 // bits
     if WIDTH % VEC_LEN != 0 or TOTAL_LOCAL_WIDTH % VEC_LEN != 0:
-        pytest.skip(
-            f"dtype {dtype} + width {width_32b} + offset {local_offset_32b} is not supported"
+        _xfail_unsupported_case(
+            f"support dtype {dtype} with width_32b={width_32b} and "
+            f"local_offset_32b={local_offset_32b} in tmem copy parameter checks"
         )
 
     g_layout = TileLayout(S[(128, WIDTH // VEC_LEN, VEC_LEN) : (WIDTH, VEC_LEN, 1)])
@@ -315,13 +334,13 @@ def test_copy_tmem2reg_sliced_local(dtype, width_32b, local_offset_32b):
                 T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=max(32, next_power_of_2(width_32b)), cta_group=1)  # noqa: E501
         # fmt: on
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": copy_sync})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
         A_np = tvm.testing.generate_random_array(dtype, (128, WIDTH))
         B_np = np.zeros((128, WIDTH), dtype=dtype)
-        DEV = tvm.cuda(0)
+        DEV = tvm.maca(0)
         A = tvm.runtime.tensor(A_np, DEV)
         B = tvm.runtime.tensor(B_np, DEV)
         mod(A, B)

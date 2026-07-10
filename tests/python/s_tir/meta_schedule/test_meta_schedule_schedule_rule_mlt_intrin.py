@@ -280,7 +280,7 @@ def _check_dp4a_dense(m, n, k, in_dtype, out_dtype, expected_mods, expected_deci
     actual = generate_design_space(
         kind="cuda",
         mod=mod,
-        target=Target({"kind": "cuda", "arch": "sm_70"}),
+        target=Target({"kind": "maca", "arch": "sm_70"}),
         types=None,
         sch_rules=[
             ms.schedule_rule.MultiLevelTilingWithIntrin(

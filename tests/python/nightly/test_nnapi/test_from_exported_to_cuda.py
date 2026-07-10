@@ -46,7 +46,7 @@ def assert_torch_output_vs_tvm_from_exported_to_cuda(raw_data, torch_module, tar
 
     tvm_mod, tvm_params = relax.frontend.detach_params(mod_from_torch)
 
-    relax_pipeline = relax.get_default_pipeline(tvm.target.Target.from_device(tvm.cuda()))
+    relax_pipeline = relax.get_default_pipeline(tvm.target.Target.from_device(tvm.maca()))
     ex = relax.build(tvm_mod, target=target, relax_pipeline=relax_pipeline)
     vm = relax.VirtualMachine(ex, dev)
 
@@ -68,9 +68,9 @@ def assert_torch_output_vs_tvm_from_exported_to_cuda(raw_data, torch_module, tar
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_index_tensor():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class IndexModel0(nn.Module):
@@ -174,9 +174,9 @@ def test_index_tensor():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_full():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class FullModel(nn.Module):
@@ -192,9 +192,9 @@ def test_full():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_full_like():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class FullLike(nn.Module):
@@ -211,9 +211,9 @@ def test_full_like():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_ones():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class FullModel(nn.Module):
@@ -229,9 +229,9 @@ def test_ones():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_sort():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     raw_data = np.array([[4, 1, 13], [-30, 1, 3], [4, 0, 10]]).astype("float32")
@@ -258,9 +258,9 @@ def test_sort():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_tensor_clamp():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class ClampBothTensor(torch.nn.Module):
@@ -343,9 +343,9 @@ def test_tensor_clamp():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_tensor_expand_as():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class ExpandAs0(torch.nn.Module):
@@ -394,9 +394,9 @@ def test_tensor_expand_as():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_copy_():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class CopyTester(nn.Module):
@@ -416,13 +416,13 @@ def test_copy_():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_upsample_with_size():
     """
     The Upsample module can be used with the size arugment or the scale
     factor argument but not both. This tests the former.
     """
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     batch_size = 1
@@ -437,9 +437,9 @@ def test_upsample_with_size():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_detach_no_change():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     # In TVM, detach() is just identity
@@ -454,13 +454,13 @@ def test_detach_no_change():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_upsample_with_scale_factor():
     """
     The Upsample module can be used with the size arugment or the scale
     factor argument but not both. This tests the latter.
     """
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     batch_size = 2
@@ -476,9 +476,9 @@ def test_upsample_with_scale_factor():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_linalg_vector_norm():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class VectorNorm0(torch.nn.Module):
@@ -511,9 +511,9 @@ def test_linalg_vector_norm():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_batch_norm_prog():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     # Default args, in a pytorch program (to ensure output is in proper type and format)
@@ -534,9 +534,9 @@ def test_batch_norm_prog():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_split_size():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     # Test split using the split_size argument such that it is not a divisor
@@ -562,9 +562,9 @@ def test_split_size():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_split_sections_list():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     # Test split using a list of section sizes
@@ -590,9 +590,9 @@ def test_split_sections_list():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_batch_norm0():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     # Eval, no momentum, no affine, no running stats
@@ -604,9 +604,9 @@ def test_batch_norm0():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_batch_norm1():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     # Eval, with momentum, no affine, with running stats
@@ -618,9 +618,9 @@ def test_batch_norm1():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_batch_norm2():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     # Eval, with momentum, affine, no running stats
@@ -632,9 +632,9 @@ def test_batch_norm2():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_batch_norm3():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     # Eval, no momentum, affine, with running stats
@@ -646,9 +646,9 @@ def test_batch_norm3():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_chunk_even():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     # Chunks is a divisor of the dimension size
@@ -674,9 +674,9 @@ def test_chunk_even():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_chunk_uneven():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     # Chunks is not a divisor of the dimension size
@@ -702,9 +702,9 @@ def test_chunk_uneven():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_chunk_too_many():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     # If user asks for more chunks than the size of the dim, pytorch simply splits in sections of size 1
@@ -730,9 +730,9 @@ def test_chunk_too_many():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_arange():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     # arange.default
@@ -767,9 +767,9 @@ def test_arange():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_index_select():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class IndexSelectModel(nn.Module):
@@ -783,9 +783,9 @@ def test_index_select():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_stack():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class StackModel(nn.Module):
@@ -802,9 +802,9 @@ def test_stack():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_sum():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class SumModel(nn.Module):
@@ -818,9 +818,9 @@ def test_sum():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_mul():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class MulModule(nn.Module):
@@ -837,9 +837,9 @@ def test_mul():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_concat():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class ConcatFour(nn.Module):
@@ -859,9 +859,9 @@ def test_concat():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_leakyrelu_module():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class LeakyReLUModule(nn.Module):
@@ -878,9 +878,9 @@ def test_leakyrelu_module():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_log_softmax_module():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class LogSoftmaxModule(nn.Module):
@@ -897,9 +897,9 @@ def test_log_softmax_module():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_softmax_module():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class SoftmaxModule(nn.Module):
@@ -916,9 +916,9 @@ def test_softmax_module():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_adaptive_avg_pool2d_module():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class AdaptiveAvgPool2dModule(nn.Module):
@@ -935,9 +935,9 @@ def test_adaptive_avg_pool2d_module():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_avg_pool2d_module():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class AvgPool2dModule(nn.Module):
@@ -954,9 +954,9 @@ def test_avg_pool2d_module():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_conv1d_module():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class Conv1dModule(nn.Module):
@@ -973,9 +973,9 @@ def test_conv1d_module():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_conv2d_module():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class Conv2dModule(nn.Module):
@@ -992,9 +992,9 @@ def test_conv2d_module():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_conv3d_module():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class Conv3dModule(nn.Module):
@@ -1011,9 +1011,9 @@ def test_conv3d_module():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_group_norm_module():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class GroupNormModule(nn.Module):
@@ -1030,9 +1030,9 @@ def test_group_norm_module():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_layer_norm_module():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class LayerNormModule(nn.Module):
@@ -1049,9 +1049,9 @@ def test_layer_norm_module():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_linear_module():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class LinearModule(nn.Module):
@@ -1068,9 +1068,9 @@ def test_linear_module():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_max_pool2d_module():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class MaxPool2dModule(nn.Module):
@@ -1087,9 +1087,9 @@ def test_max_pool2d_module():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_embedding_module():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class EmbeddingModule(nn.Module):
@@ -1106,9 +1106,9 @@ def test_embedding_module():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_flatten_module():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class FlattenModule(nn.Module):
@@ -1125,9 +1125,9 @@ def test_flatten_module():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_numel():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class NumelModule(nn.Module):
@@ -1140,9 +1140,9 @@ def test_numel():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_size():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class SizeModule(nn.Module):
@@ -1155,9 +1155,9 @@ def test_size():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_tensor():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class TensorModule(nn.Module):
@@ -1170,9 +1170,9 @@ def test_tensor():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_type():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class TypeModule(nn.Module):
@@ -1185,9 +1185,9 @@ def test_type():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_float():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class FloatModule(nn.Module):
@@ -1200,9 +1200,9 @@ def test_float():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_half():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class HalfModule(nn.Module):
@@ -1215,9 +1215,9 @@ def test_half():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_getattr():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class GetAttrModule(nn.Module):
@@ -1231,9 +1231,9 @@ def test_getattr():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_sym_size_int():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class SymSizeIntModule(nn.Module):
@@ -1246,9 +1246,9 @@ def test_sym_size_int():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_interpolate():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class InterpolateModule(nn.Module):
@@ -1262,9 +1262,9 @@ def test_interpolate():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_cross_entropy_module():
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     class CrossEntropyModule(nn.Module):

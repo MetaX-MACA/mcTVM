@@ -193,7 +193,7 @@ def test_dispatch_multinomial_from_uniform_gpu():
             return gv
     # fmt: on
 
-    with tvm.target.Target("cuda"):
+    with tvm.target.Target("maca"):
         mod = DispatchSampling()(MultiFromUniformModule)
 
     assert_structural_equal(mod, Expected)

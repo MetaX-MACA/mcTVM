@@ -76,7 +76,7 @@ rope_theta = 1e4
 rope_scaling = {}
 dtype = None
 dtype_torch = None
-device = tvm.cuda(rank)
+device = tvm.maca(rank)
 device_torch = torch.device(f"cuda:{rank}")
 
 fclear = None
@@ -630,7 +630,11 @@ def apply_attention(
         verify_cached_kv(kv_cache, seq_ids, cached_k, cached_v)
 
 
-@pytest.mark.skip(reason="Require NVSHMEM")
+@pytest.mark.xfail(
+    reason="TODO(maca): [nvshmem] support NVSHMEM KV cache transfer runtime on MACA",
+    run=False,
+    strict=False,
+)
 def test_paged_attention_kv_cache_prefill_and_decode(kv_cache_and_config):
     kv_cache, rope_mode, support_sliding_window = kv_cache_and_config
     if support_sliding_window and rope_mode == RopeMode.NORMAL:
@@ -654,7 +658,11 @@ def test_paged_attention_kv_cache_prefill_and_decode(kv_cache_and_config):
         apply_attention(kv_cache, rope_mode, batch, cached_k, cached_v)
 
 
-@pytest.mark.skip(reason="Require NVSHMEM")
+@pytest.mark.xfail(
+    reason="TODO(maca): [nvshmem] support NVSHMEM KV cache transfer runtime on MACA",
+    run=False,
+    strict=False,
+)
 def test_paged_attention_kv_cache_transfer(kv_cache_and_config):
     kv_cache, rope_mode, support_sliding_window = kv_cache_and_config
     if support_sliding_window:

@@ -55,7 +55,7 @@ def test_multinomial_from_uniform():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not tvm.testing.device_enabled("cuda"), reason="cuda not enabled")
+@pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_alloc_tensor_raises_out_of_memory():
     """Out-of-memory exceptions may be raised from VM
 
@@ -64,7 +64,7 @@ def test_alloc_tensor_raises_out_of_memory():
     "vm.builtin.alloc_storage" was unable to allocate the requested
     buffer.
     """
-    target = "cuda"
+    target = "maca"
     dev = tvm.device(target)
 
     @I.ir_module
@@ -80,7 +80,7 @@ def test_alloc_tensor_raises_out_of_memory():
     built = tvm.compile(Module, target=target)
     vm = relax.VirtualMachine(built, dev)
 
-    with pytest.raises(Exception, match="CUDA.*out of memory"):
+    with pytest.raises(Exception, match="MACA.*out of memory"):
         vm["main"]()
 
 

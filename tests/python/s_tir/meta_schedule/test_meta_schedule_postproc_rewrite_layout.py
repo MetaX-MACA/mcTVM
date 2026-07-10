@@ -27,7 +27,7 @@ from tvm.target import Target
 
 
 def _target() -> Target:
-    return Target("cuda", host="llvm")
+    return Target("maca", host="llvm")
 
 
 def _create_context(mod, target) -> ms.TuneContext:
@@ -48,7 +48,7 @@ def _create_context(mod, target) -> ms.TuneContext:
 
 def _apply_rewrite_layout(mod):
     """Apply the RewriteLayout postproc transformation."""
-    target = Target("cuda", host="llvm")
+    target = Target("maca", host="llvm")
     ctx = ms.TuneContext(
         mod=mod,
         target=target,

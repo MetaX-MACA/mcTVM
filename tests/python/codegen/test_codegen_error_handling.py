@@ -278,7 +278,7 @@ def test_strides_mismatch_transposed(codegen_target):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_device_mismatch_error():
     """Passing GPU tensor to CPU function raises ValueError."""
 
@@ -292,7 +292,7 @@ def test_device_mismatch_error():
     b_ok = tvm.runtime.tensor(np.zeros(128, dtype="float32"))
     lib(a_ok, b_ok)  # correct input should pass
 
-    a_gpu = tvm.runtime.tensor(np.zeros(128, dtype="float32"), device=tvm.cuda(0))
+    a_gpu = tvm.runtime.tensor(np.zeros(128, dtype="float32"), device=tvm.maca(0))
     b = tvm.runtime.tensor(np.zeros(128, dtype="float32"))
 
     with pytest.raises(

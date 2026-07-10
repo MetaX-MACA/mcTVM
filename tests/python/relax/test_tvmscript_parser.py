@@ -315,8 +315,8 @@ def test_module_with_attr_and_global_info():
 def test_global_info_vdevice():
     vdevices = [
         VDevice("llvm"),
-        VDevice("cuda", 0),
-        VDevice({"kind": "cuda", "arch": "sm_80"}, 0),
+        VDevice("maca", 0),
+        VDevice({"kind": "maca"}, 0),
         VDevice("metal", 0, "global"),
     ]
 
@@ -327,8 +327,8 @@ def test_global_info_vdevice():
             {
                 "vdevice": [
                     I.vdevice("llvm"),
-                    I.vdevice("cuda", 0),
-                    I.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
+                    I.vdevice("maca", 0),
+                    I.vdevice({"kind": "maca"}, 0),
                     I.vdevice("metal", 0, "global"),
                 ]
             }
@@ -774,9 +774,9 @@ def test_tensor_type_without_args():
 def test_tensor_with_vdevice():
     vdevices = [
         VDevice("llvm"),
-        VDevice("cuda", 0),
+        VDevice("maca", 0),
         VDevice("metal", 0, "global"),
-        VDevice({"kind": "cuda", "arch": "sm_80"}, 0),
+        VDevice({"kind": "maca"}, 0),
     ]
 
     @I.ir_module(s_tir=True)
@@ -786,19 +786,19 @@ def test_tensor_with_vdevice():
             {
                 "vdevice": [
                     I.vdevice("llvm"),
-                    I.vdevice("cuda", 0),
+                    I.vdevice("maca", 0),
                     I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
+                    I.vdevice({"kind": "maca"}, 0),
                 ]
             }
         )
 
         @R.function
         def foo(
-            a: R.Tensor((128, 128), "float32", "cuda:1"),
+            a: R.Tensor((128, 128), "float32", "maca:1"),
             b: R.Tensor((128, 128), "float32", "llvm"),
             c: R.Tensor((128, 128), "float32", "vdevice:3"),
-        ) -> R.Tensor((128, 128), "float32", "cuda:1"):
+        ) -> R.Tensor((128, 128), "float32", "maca:1"):
             s = R.add(a, c)
             return s
 

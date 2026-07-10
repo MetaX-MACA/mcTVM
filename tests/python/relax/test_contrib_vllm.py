@@ -36,7 +36,7 @@ vllm_enabled = pytest.mark.skipif(
 pytestmark = [
     vllm_enabled,
     pytest.mark.gpu,
-    pytest.mark.skipif(not env.has_cuda(), reason="need cuda"),
+    pytest.mark.skipif(not env.has_maca(), reason="need maca"),
 ]
 
 
@@ -44,7 +44,7 @@ def build_and_run(mod, inputs_np, target, legalize=True):
     if legalize:
         mod = relax.transform.LegalizeOps()(mod)
 
-        with tvm.target.Target("cuda"):
+        with tvm.target.Target("maca"):
             mod = tvm.s_tir.transform.DefaultGPUSchedule()(mod)
 
     with tvm.transform.PassContext():
@@ -755,7 +755,7 @@ def test_reconstruct_from_cache():
     num_tokens = 8
     num_blocks = 1
 
-    dev = tvm.device("cuda", 0)
+    dev = tvm.device("maca", 0)
 
     key = tvm.runtime.tensor(
         np.random.randn(num_tokens, num_heads, head_dim).astype("float16"), dev

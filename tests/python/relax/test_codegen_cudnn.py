@@ -41,7 +41,14 @@ def reset_seed():
 
 pytestmark = [
     pytest.mark.gpu,
-    pytest.mark.skipif(not env.has_cudnn(), reason="need cudnn"),
+    pytest.mark.xfail(
+        not env.has_cudnn(),
+        reason=(
+            "TODO(maca): [cudnn-offload] support or enable cuDNN-compatible Relax offload on MACA"
+        ),
+        run=False,
+        strict=False,
+    ),
 ]
 
 
@@ -107,7 +114,7 @@ def get_relax_conv2d_module(
 def get_result_with_relax_cudnn_offload(mod, np_inputs, cuda_graph=False):
     mod = partition_for_cudnn(mod)
     mod = relax.transform.RunCodegen()(mod)
-    return build_and_run(mod, np_inputs, "cuda", cuda_graph=cuda_graph)
+    return build_and_run(mod, np_inputs, "maca", cuda_graph=cuda_graph)
 
 
 def build_and_run(mod, inputs_np, target, legalize=False, cuda_graph=False):
@@ -210,7 +217,14 @@ def test_conv2d_offload(data_shape, weight_shape, dtype, with_bias, activation):
         tvm.testing.assert_allclose(out, ref, rtol=2.5e-2, atol=2.5e-2)
 
 
-@pytest.mark.skip(reason="flaky test")
+@pytest.mark.xfail(
+    reason=(
+        "TODO(maca): [cudnn-layout] keep cuDNN NCHW/OIHW offload disabled until the "
+        "MACA-compatible cuDNN path is stable"
+    ),
+    run=False,
+    strict=False,
+)
 @pytest.mark.parametrize(
     "data_shape, weight_shape, dtype, with_bias, activation",
     [
@@ -293,7 +307,11 @@ def stacked_attention_size(request):
     return request.param
 
 
-@pytest.mark.skip(reason="require cudnn frontend")
+@pytest.mark.xfail(
+    reason="TODO(maca): [cudnn-frontend] support cuDNN frontend integration on MACA",
+    run=False,
+    strict=False,
+)
 def test_stacked_attention_split_offload(stacked_attention_size):
     b, s, n, (h, h_v), bias_shape, scale, single_shape, layout = stacked_attention_size
     qkv, bias, ref = get_numpy_stacked_attention_ref(

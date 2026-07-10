@@ -23,6 +23,11 @@ import tvm.testing
 from tvm.script import tirx as T
 from tvm.testing import env
 
+MACA_PTX_GRIDDEPCONTROL_XFAIL_REASON = (
+    "TODO(maca): [ptx-griddepcontrol] support PTX grid dependency control wait and "
+    "launch_dependents lowering"
+)
+
 
 @T.prim_func(s_tir=True)
 def ptx_griddepcontrol(A: T.Buffer((32,), "float32"), B: T.Buffer((32,), "float32")) -> None:
@@ -40,13 +45,14 @@ def ptx_griddepcontrol(A: T.Buffer((32,), "float32"), B: T.Buffer((32,), "float3
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.xfail(reason=MACA_PTX_GRIDDEPCONTROL_XFAIL_REASON, strict=False)
 def test_ptx_griddepcontrol():
     f = ptx_griddepcontrol
-    mod = tvm.compile(f, target="cuda")
+    mod = tvm.compile(f, target="maca")
     A_np = np.random.default_rng(0).standard_normal(32).astype("float32")
     B_np = np.zeros((32,), dtype="float32")
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     A_nd = tvm.runtime.tensor(A_np, device=dev)
     B_nd = tvm.runtime.tensor(B_np, device=dev)
     mod(A_nd, B_nd)

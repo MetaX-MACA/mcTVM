@@ -62,18 +62,17 @@ class TestBasePyModule:
 
         ir_mod = tvm.IRModule({"simple_func": simple_func})
 
-        if tvm.cuda().exist:
-            device = tvm.cuda(0)
+        if tvm.maca().exist:
+            device = tvm.maca(0)
             py_mod = BasePyModule(ir_mod, device)
 
             assert isinstance(py_mod, BasePyModule)
             assert hasattr(py_mod, "call_tir")
             assert hasattr(py_mod, "call_dps_packed")
             assert hasattr(py_mod, "compiled_tir_funcs")
-            # Check if target contains "cuda" instead of exact match
-            assert "cuda" in str(py_mod.target)
+            assert "maca" in str(py_mod.target)
         else:
-            pytest.skip("CUDA not available")
+            pytest.skip("MACA not available")
 
     def test_tir_function_compilation(self):
         @T.prim_func(s_tir=True)
@@ -111,24 +110,24 @@ class TestBasePyModule:
         assert torch.allclose(result, expected, atol=1e-5)
 
     def test_call_tir_with_pytorch_tensors_gpu(self):
-        if tvm.cuda().exist:
+        if tvm.maca().exist:
             # Create a simple IRModule without TIR functions for GPU testing
             ir_mod = tvm.IRModule({})
-            device = tvm.cuda(0)
+            device = tvm.maca(0)
             py_mod = BasePyModule(ir_mod, device)
 
             # Test basic GPU functionality without TIR compilation issues
             assert isinstance(py_mod, BasePyModule)
             assert hasattr(py_mod, "call_tir")
             assert hasattr(py_mod, "call_dps_packed")
-            assert "cuda" in str(py_mod.target)
+            assert "maca" in str(py_mod.target)
 
             # Test that we can create GPU tensors and they work
             input_tensor = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32, device="cuda")
             assert input_tensor.device.type == "cuda"
             assert input_tensor.shape == (4,)
         else:
-            pytest.skip("CUDA not available")
+            pytest.skip("MACA not available")
 
     def test_dlpack_conversion_pytorch_to_tvm(self):
         @T.prim_func(s_tir=True)

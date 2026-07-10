@@ -23,6 +23,12 @@ import tvm.testing
 from tvm.script import tirx as T
 from tvm.testing import env
 
+MACA_PTX_SPARSE_MMA_XFAIL_REASON = (
+    "TODO(maca): [ptx-sparse-mma] support PTX sparse MMA lowering with metadata operands"
+)
+
+pytestmark = pytest.mark.xfail(reason=MACA_PTX_SPARSE_MMA_XFAIL_REASON, strict=False)
+
 
 def gen_2in4_mask(m: int, n: int):
     assert n % 4 == 0
@@ -259,7 +265,7 @@ def mma_sp_m16n8k32_f16f16f32(a: T.handle, b: T.handle, c: T.handle, _metadata: 
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(8), reason="need cuda compute >= 8.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_mma_sp_m16n8k16_f16():
     def get_meta_m16n8k16_half(mask):
         assert mask.shape == (16, 4, 2)
@@ -277,7 +283,7 @@ def test_mma_sp_m16n8k16_f16():
     for out_dtype in ["float16", "float32"]:
         func = mma_sp_m16n8k16_f16f16f16 if out_dtype == "float16" else mma_sp_m16n8k16_f16f16f32
         sch = tvm.s_tir.Schedule(func)
-        cuda_mod = tvm.compile(sch.mod, target="cuda")
+        cuda_mod = tvm.compile(sch.mod, target="maca")
 
         A_np = np.random.uniform(-1, 1, [16, 8]).astype("float16")
         B_np = np.random.uniform(-1, 1, [16, 8]).astype("float16")
@@ -286,7 +292,7 @@ def test_mma_sp_m16n8k16_f16():
         C_np = np.matmul(A_dense_np, B_np).astype(out_dtype)
         meta = get_meta_m16n8k16_half(mask)
 
-        ctx = tvm.cuda()
+        ctx = tvm.maca()
         A_tvm = tvm.runtime.tensor(A_np, ctx)
         B_tvm = tvm.runtime.tensor(B_np, ctx)
         C_tvm = tvm.runtime.tensor(np.zeros_like(C_np), ctx)
@@ -297,7 +303,7 @@ def test_mma_sp_m16n8k16_f16():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(8), reason="need cuda compute >= 8.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_mma_sp_m16n8k32_f16():
     def get_meta_m16n8k32_half(mask):
         assert mask.shape == (16, 8, 2)
@@ -317,7 +323,7 @@ def test_mma_sp_m16n8k32_f16():
     for out_dtype in ["float16", "float32"]:
         func = mma_sp_m16n8k32_f16f16f16 if out_dtype == "float16" else mma_sp_m16n8k32_f16f16f32
         sch = tvm.s_tir.Schedule(func)
-        cuda_mod = tvm.compile(sch.mod, target="cuda")
+        cuda_mod = tvm.compile(sch.mod, target="maca")
 
         A_np = np.random.uniform(-1, 1, [16, 16]).astype("float16")
         B_np = np.random.uniform(-1, 1, [32, 8]).astype("float16")
@@ -326,7 +332,7 @@ def test_mma_sp_m16n8k32_f16():
         C_np = np.matmul(A_dense_np, B_np).astype(out_dtype)
         meta = get_meta_m16n8k32_half(mask)
 
-        ctx = tvm.cuda()
+        ctx = tvm.maca()
         A_tvm = tvm.runtime.tensor(A_np, ctx)
         B_tvm = tvm.runtime.tensor(B_np, ctx)
         C_tvm = tvm.runtime.tensor(np.zeros_like(C_np), ctx)

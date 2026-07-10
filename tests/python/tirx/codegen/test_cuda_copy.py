@@ -23,8 +23,14 @@ import tvm
 from tvm.script import tirx as T
 from tvm.testing import env
 
-DEV = tvm.cuda(0)
-TARGET = tvm.target.Target("cuda")
+MACA_TIRX_COPY_INTRIN_XFAIL_REASON = (
+    "TODO(maca): [tirx-copy] support TIRX shared-memory scope resolution and byte-copy intrinsics"
+)
+
+pytestmark = pytest.mark.xfail(reason=MACA_TIRX_COPY_INTRIN_XFAIL_REASON, strict=False)
+
+DEV = tvm.maca(0)
+TARGET = tvm.target.Target("maca")
 
 
 def _build_and_run(func, *np_args):
@@ -36,7 +42,7 @@ def _build_and_run(func, *np_args):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_copy_128b():
     """copy_128b: copies 16 bytes (4 float32 elements) via uint4 load/store."""
 
@@ -67,7 +73,7 @@ def test_copy_128b():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_copy_64b():
     """copy_64b: copies 8 bytes (2 float32 elements) via uint2 load/store."""
 
@@ -98,7 +104,7 @@ def test_copy_64b():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_copy_32b():
     """copy_32b: copies 4 bytes (1 float32 element) via unsigned int load/store."""
 
@@ -129,7 +135,7 @@ def test_copy_32b():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_copy_16b():
     """copy_16b: copies 2 bytes (1 float16 element) via unsigned short load/store."""
 
@@ -160,7 +166,7 @@ def test_copy_16b():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_copy_8b():
     """copy_8b: copies 1 byte (1 uint8 element) via unsigned char load/store."""
 

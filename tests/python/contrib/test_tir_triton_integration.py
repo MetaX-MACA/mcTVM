@@ -41,7 +41,7 @@ else:
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_tir_triton_integration():
     @triton.jit
     def add_kernel(
@@ -120,12 +120,12 @@ def test_tir_triton_integration():
     tvm.ir.assert_structural_equal(Module["add"], Parsed["add"])
     assert len(Module.get_attr("external_mods")) == 1
 
-    device = tvm.cuda(0)
+    device = tvm.maca(0)
     x_nd = tvm.runtime.tensor(np.random.rand(256).astype(np.float32), device)
     y_nd = tvm.runtime.tensor(np.random.rand(256).astype(np.float32), device)
     output_np = x_nd.numpy() + y_nd.numpy()
 
-    with tvm.target.Target("cuda"):
+    with tvm.target.Target("maca"):
         lib = tvm.compile(Module)
         output_nd = tvm.runtime.vm.VirtualMachine(lib, device)["main"](x_nd, y_nd)
         tvm.testing.assert_allclose(output_nd.numpy(), output_np, rtol=1e-5)

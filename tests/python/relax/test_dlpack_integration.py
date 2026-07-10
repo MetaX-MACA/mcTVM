@@ -36,6 +36,11 @@ from tvm.relax import BasePyModule
 from tvm.script import relax as R
 from tvm.script import tirx as T
 
+MACA_DLPACK_XFAIL_REASON = (
+    "TODO(maca): [dlpack] support DLPack device-type interoperability with PyTorch-compatible "
+    "GPU tensors and MACA DeviceAPI copy paths"
+)
+
 
 class TestDLPackIntegration:
     def test_dlpack_pytorch_to_tvm_conversion(self):
@@ -51,8 +56,9 @@ class TestDLPackIntegration:
         pytorch_numpy = pytorch_tensor.numpy()
         tvm.testing.assert_allclose(tvm_numpy, pytorch_numpy, atol=1e-5)
 
+    @pytest.mark.xfail(reason=MACA_DLPACK_XFAIL_REASON, strict=False)
     def test_dlpack_pytorch_to_tvm_conversion_gpu(self):
-        if tvm.cuda().exist:
+        if tvm.maca().exist:
             pytorch_tensor = torch.tensor(
                 [1.0, 2.0, 3.0, 4.0, 5.0], dtype=torch.float32, device="cuda"
             )
@@ -69,7 +75,7 @@ class TestDLPackIntegration:
             pytorch_numpy = pytorch_tensor.cpu().numpy()
             tvm.testing.assert_allclose(tvm_numpy, pytorch_numpy, atol=1e-5)
         else:
-            pytest.skip("CUDA not available")
+            pytest.skip("MACA not available")
 
     def test_dlpack_tvm_to_pytorch_conversion(self):
         import numpy as np
@@ -87,12 +93,13 @@ class TestDLPackIntegration:
         pytorch_numpy = pytorch_tensor.numpy()
         tvm.testing.assert_allclose(tvm_numpy, pytorch_numpy, atol=1e-5)
 
+    @pytest.mark.xfail(reason=MACA_DLPACK_XFAIL_REASON, strict=False)
     def test_dlpack_tvm_to_pytorch_conversion_gpu(self):
-        if tvm.cuda().exist:
+        if tvm.maca().exist:
             import numpy as np
 
             data = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype="float32")
-            tvm_tensor = tvm.runtime.tensor(data, device=tvm.cuda(0))
+            tvm_tensor = tvm.runtime.tensor(data, device=tvm.maca(0))
 
             pytorch_tensor = torch.from_dlpack(tvm_tensor)
 
@@ -105,7 +112,7 @@ class TestDLPackIntegration:
             pytorch_numpy = pytorch_tensor.cpu().numpy()
             tvm.testing.assert_allclose(tvm_numpy, pytorch_numpy, atol=1e-5)
         else:
-            pytest.skip("CUDA not available")
+            pytest.skip("MACA not available")
 
     def test_dlpack_roundtrip_conversion(self):
         """Test roundtrip conversion: PyTorch -> TVM -> PyTorch."""

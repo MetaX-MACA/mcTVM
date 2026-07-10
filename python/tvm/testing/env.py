@@ -41,7 +41,7 @@ Three kinds of probe live here:
   usable device of a given kind is present;
 * **build-support** probes (``has_cudnn`` …, ``build_flag_enabled`` …) ask whether
   an optional library was compiled into the runtime;
-* **version / capability** probes (``has_cuda_compute``,
+* **version / capability** probes (``has_cuda_compute``, ``has_maca_compute``,
   ``has_nvcc_version`` …) ask about a finer capability of a present device
   or toolchain.
 """
@@ -72,6 +72,7 @@ __all__ = [
     "has_llvm",
     "has_llvm_min_version",
     "has_maca",
+    "has_maca_compute",
     "has_matrixcore",
     "has_metal",
     "has_multi_gpu",
@@ -290,6 +291,34 @@ def has_cuda_compute(major: int, minor: int = 0, exact: bool = False) -> bool:
     if not has_cuda():
         return False
     compute = _cuda_compute_version()
+    want = (major, minor)
+    if exact:
+        return compute == want
+    return compute >= want
+
+
+@functools.cache
+def _maca_compute_version() -> tuple:
+    """Return the (major, minor) MACA compute version, or (0, 0) if unknown."""
+    try:
+        from tvm.support import mxcc  # pylint: disable=import-outside-toplevel
+
+        arch = mxcc.get_target_compute_version()
+        return mxcc.parse_compute_version(arch)
+    except Exception:  # pylint: disable=broad-except
+        return (0, 0)
+
+
+def has_maca_compute(major: int, minor: int = 0, exact: bool = False) -> bool:
+    """True if the MACA compute capability satisfies ``(major, minor)``.
+
+    When ``exact`` is False (default) the check is ``compute >= (major,
+    minor)``; when True it requires an exact match.  Returns False when no
+    MACA device is present, so it implies :func:`has_maca`.
+    """
+    if not has_maca():
+        return False
+    compute = _maca_compute_version()
     want = (major, minor)
     if exact:
         return compute == want

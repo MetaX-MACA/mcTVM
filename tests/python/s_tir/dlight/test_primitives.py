@@ -54,7 +54,7 @@ def main(p0: T.Buffer((), "int32"), T_stack: T.Buffer((T.int64(3),), "int32")):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_normalize_primfunc_with_scalar():
     sch = tvm.s_tir.Schedule(main)
     f_normalize_prim_func = tvm.get_global_func("s_tir.schedule.NormalizePrimFunc")
