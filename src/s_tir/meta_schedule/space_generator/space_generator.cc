@@ -19,12 +19,58 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/runtime/logging.h>
 
+#include <cctype>
+#include <stdexcept>
+#include <string>
+
 #include "../../../target/canonicalizer/llvm/arm_aprofile.h"
 #include "../utils.h"
 
 namespace tvm {
 namespace s_tir {
 namespace meta_schedule {
+
+namespace {
+
+bool MACATargetSupportsWMMA(const Target& target) {
+  ffi::Optional<ffi::String> opt_mcpu = target->GetAttr<ffi::String>("mcpu");
+  if (!opt_mcpu) {
+    return false;
+  }
+
+  std::string arch = opt_mcpu.value();
+  for (char& ch : arch) {
+    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  }
+  if (support::StartsWith(arch, "xcore")) {
+    arch = arch.substr(5);
+  }
+
+  size_t digit_count = 0;
+  while (digit_count < arch.size() && std::isdigit(static_cast<unsigned char>(arch[digit_count]))) {
+    ++digit_count;
+  }
+  if (digit_count == 0) {
+    LOG(WARNING) << "ValueError: Unable to parse MACA target mcpu: " << opt_mcpu.value();
+    return false;
+  }
+
+  std::string version = arch.substr(0, digit_count);
+  try {
+    int arch_version = std::stoi(version);
+    // Keep this as an explicit allowlist until MACA exposes a queryable WMMA capability.
+    return arch_version == 1000;
+  } catch (const std::invalid_argument& e) {
+    LOG(WARNING) << "ValueError: Unable to parse MACA target mcpu: " << opt_mcpu.value()
+                 << ". Details: " << e.what();
+  } catch (const std::out_of_range& e) {
+    LOG(WARNING) << "ValueError: MACA target mcpu is out of range: " << opt_mcpu.value()
+                 << ". Details: " << e.what();
+  }
+  return false;
+}
+
+}  // namespace
 
 ffi::String GetRuleKindFromTarget(const Target& target) {
   if (target->kind->name == "llvm") {
@@ -78,7 +124,10 @@ ffi::String GetRuleKindFromTarget(const Target& target) {
     return "cuda";
   }
   if (target->kind->name == "maca") {
-    return "maca-wmma";
+    if (MACATargetSupportsWMMA(target)) {
+      return "maca-wmma";
+    }
+    return "maca";
   }
 
   if (IsGPUTarget(target->kind->name)) {
@@ -227,6 +276,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_method("s_tir.meta_schedule.SpaceGeneratorGenerateDesignSpace",
                   &SpaceGeneratorNode::GenerateDesignSpace)
       .def("s_tir.meta_schedule.SpaceGeneratorPySpaceGenerator", SpaceGenerator::PySpaceGenerator)
+      .def("s_tir.meta_schedule.GetRuleKindFromTarget", GetRuleKindFromTarget)
       .def_method("s_tir.meta_schedule.SpaceGeneratorClone", &SpaceGeneratorNode::Clone);
 }
 
