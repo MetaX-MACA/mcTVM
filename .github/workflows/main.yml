@@ -122,7 +122,6 @@ jobs:
         run: >-
           ./tests/scripts/task_python_unittest.sh
         env:
-          PYTEST_ADDOPTS: "-m gpu"
           TVM_TEST_TARGETS: maca
           TVM_UNITTEST_TESTSUITE_NAME: python-unittest-gpu
           PLATFORM: gpu
