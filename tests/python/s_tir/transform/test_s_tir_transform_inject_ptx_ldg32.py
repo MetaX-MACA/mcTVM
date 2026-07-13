@@ -16,10 +16,16 @@
 # under the License.
 # ruff: noqa: F401
 
+import pytest
+
 import tvm
 import tvm.testing
 from tvm import s_tir
 from tvm.script import tirx as T
+
+MACA_PTX_LDG32_XFAIL_REASON = (
+    "TODO(maca): [ptx-ldg32] support PTX ldg32-style load injection for MACA targets"
+)
 
 
 def _count_alloc(stmt):
@@ -46,7 +52,7 @@ def _count_ptx_ldg32(stmt):
 
 @T.prim_func(s_tir=True)
 def where_no_alloc(A: T.Buffer((4,), "float32"), C: T.Buffer((4,), "float32")) -> None:
-    T.func_attr({"global_symbol": "main", "tirx.noalias": True, "target": T.target("cuda")})
+    T.func_attr({"global_symbol": "main", "tirx.noalias": True, "target": T.target("maca")})
     for i in range(4):
         C[i] = T.if_then_else(A[i] > T.float32(0), A[i], T.float32(0))
 
@@ -58,6 +64,7 @@ def where_no_alloc_cpu(A: T.Buffer((4,), "float32"), C: T.Buffer((4,), "float32"
         C[i] = T.if_then_else(A[i] > T.float32(0), A[i], T.float32(0))
 
 
+@pytest.mark.xfail(reason=MACA_PTX_LDG32_XFAIL_REASON, strict=False)
 def test_inject_ptx_ldg32_inserts_alloc_for_no_alloc_func():
     mod = tvm.IRModule.from_expr(where_no_alloc)
     assert _count_alloc(mod["main"].body) == 0

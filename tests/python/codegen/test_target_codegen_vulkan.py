@@ -91,6 +91,7 @@ def test_vector_comparison(dtype):
     [
         "llvm",
         pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param("maca", marks=pytest.mark.gpu),
         pytest.param("rocm", marks=pytest.mark.gpu),
         pytest.param("vulkan", marks=pytest.mark.gpu),
         pytest.param("metal", marks=pytest.mark.gpu),

@@ -40,11 +40,15 @@ def get_comm_rank():
     return comm, rank
 
 
-@pytest.mark.skip(reason="Require NVSHMEM")
+@pytest.mark.xfail(
+    reason="TODO(maca): [nvshmem] support NVSHMEM KV transfer kernels on MACA",
+    run=False,
+    strict=False,
+)
 def test_kv_transfer_without_disco():
     comm, rank = get_comm_rank()
     layer_id = 1
-    dev = tvm.cuda(rank)
+    dev = tvm.maca(rank)
     if rank == 0:
         f_init_nvshmem_uid = tvm.get_global_func("runtime.disco.nvshmem.init_nvshmem_uid")
         uid = f_init_nvshmem_uid()
@@ -94,11 +98,15 @@ def test_kv_transfer_without_disco():
     comm.Barrier()
 
 
-@pytest.mark.skip(reason="Require NVSHMEM")
+@pytest.mark.xfail(
+    reason="TODO(maca): [nvshmem] support NVSHMEM page-to-page KV transfer kernels on MACA",
+    run=False,
+    strict=False,
+)
 def test_kv_transfer_page_to_page_without_disco():
     comm, rank = get_comm_rank()
     layer_id = 1
-    dev = tvm.cuda(rank)
+    dev = tvm.maca(rank)
     if rank == 0:
         f_init_nvshmem_uid = tvm.get_global_func("runtime.disco.nvshmem.init_nvshmem_uid")
         uid = f_init_nvshmem_uid()
@@ -160,7 +168,11 @@ def test_kv_transfer_page_to_page_without_disco():
     comm.Barrier()
 
 
-@pytest.mark.skip(reason="Require NVSHMEM")
+@pytest.mark.xfail(
+    reason="TODO(maca): [nvshmem] support NVSHMEM KV transfer kernels with Disco on MACA",
+    run=False,
+    strict=False,
+)
 def test_kv_transfer_with_disco():
     comm, rank = get_comm_rank()
     layer_id = 1
@@ -213,7 +225,7 @@ def test_kv_transfer_with_disco():
         for i in range(2):
             sess._sync_worker(i)
         for i in range(2):
-            tvm.cuda(i).sync()
+            tvm.maca(i).sync()
         comm.Barrier()
     else:
         comm.Barrier()

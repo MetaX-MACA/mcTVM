@@ -59,7 +59,7 @@ def verify_group_gemm(
         return mapping.get(dtype, dtype)
 
     a_np, b_np, indptr_np, c_np = get_ref_data()
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     a_nd = tvm.runtime.tensor(a_np.astype(to_numpy_dtype(x_dtype)), device=dev)
     b_nd = tvm.runtime.tensor(b_np.astype(to_numpy_dtype(weight_dtype)), device=dev)
     c_nd = tvm.runtime.empty(c_np.shape, dtype=out_dtype, device=dev)
@@ -75,7 +75,7 @@ def verify_group_gemm(
 
 @pytest.mark.skipif(not env.build_flag_enabled("USE_CUTLASS"), reason="need cutlass")
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_group_gemm_sm90():
     verify_group_gemm(
         "cutlass.group_gemm",
@@ -120,7 +120,7 @@ def test_group_gemm_sm90():
 
 @pytest.mark.skipif(not env.build_flag_enabled("USE_CUTLASS"), reason="need cutlass")
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_group_gemm_sm100():
     verify_group_gemm(
         "cutlass.group_gemm",
@@ -304,7 +304,7 @@ def blockwise_bmm(
 
 @pytest.mark.skipif(not env.build_flag_enabled("USE_CUTLASS"), reason="need cutlass")
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_fp8_e4m3_groupwise_scaled_gemm():
     M = 16
     N = 4608
@@ -318,7 +318,7 @@ def test_fp8_e4m3_groupwise_scaled_gemm():
         print(f"Skipped as {func_name} is not available")
         return
 
-    device = tvm.cuda(0)
+    device = tvm.maca(0)
     dtype = "bfloat16"
     x_np, x_scale_np = rowwise_quant_fp8_e4m3((M, K), block_size, dtype)
     w_np, w_scale_np = blockwise_quant_fp8_e4m3((N, K), block_size, dtype)
@@ -338,7 +338,7 @@ def test_fp8_e4m3_groupwise_scaled_gemm():
 
 @pytest.mark.skipif(not env.build_flag_enabled("USE_CUTLASS"), reason="need cutlass")
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_fp8_e4m3_groupwise_scaled_bmm():
     B = 16
     M = 40
@@ -353,7 +353,7 @@ def test_fp8_e4m3_groupwise_scaled_bmm():
         print(f"Skipped as {func_name} is not available")
         return
 
-    device = tvm.cuda(0)
+    device = tvm.maca(0)
     dtype = "bfloat16"
     x_np, x_scale_np = rowwise_quant_fp8_e4m3((B, M, K), block_size, dtype)
     w_np, w_scale_np = blockwise_quant_fp8_e4m3((B, N, K), block_size, dtype)

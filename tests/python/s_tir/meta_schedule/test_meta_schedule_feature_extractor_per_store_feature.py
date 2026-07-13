@@ -789,7 +789,7 @@ def test_gpu():
 
     extractor = ms.feature_extractor.PerStoreFeature()
     (feature,) = extractor.extract_from(
-        _make_context(tvm.target.Target("cuda")),
+        _make_context(tvm.target.Target("maca")),
         candidates=[_make_candidate(_create_schedule)],
     )
     feature = feature.numpy()

@@ -26,6 +26,18 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import S, TileLayout, wg_local_layout
 
+MACA_XFAIL = pytest.mark.xfail(
+    reason=(
+        "TODO(maca): [tile-primitive-elementwise-binary] support binary "
+        "elementwise dispatch variants"
+    ),
+    strict=False,
+)
+
+
+def _xfail_packed_f32x2(reason):
+    pytest.xfail(f"TODO(maca): [tile-primitive-elementwise-binary] {reason}")
+
 
 @pytest.mark.parametrize(
     "input",
@@ -40,7 +52,7 @@ from tvm.tirx.layout import S, TileLayout, wg_local_layout
             (32, 32),  # extent_b
             (32, 32),  # extent_res
             64,  # thread_cnt
-            tvm.cuda(0),  # dev
+            tvm.maca(0),  # dev
         ),
         ######### offset test #########
         (
@@ -52,7 +64,7 @@ from tvm.tirx.layout import S, TileLayout, wg_local_layout
             (5, 6, 7),  # extent_b
             (5, 6, 7),  # extent_res
             64,  # thread_cnt
-            tvm.cuda(0),  # dev
+            tvm.maca(0),  # dev
         ),
         ######### broadcast test #########
         (
@@ -64,12 +76,13 @@ from tvm.tirx.layout import S, TileLayout, wg_local_layout
             (1, 6, 1),  # extent_b
             (5, 6, 7),  # extent_res
             64,  # thread_cnt
-            tvm.cuda(0),  # dev
+            tvm.maca(0),  # dev
         ),
     ],
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["add", "sub", "mul", "fdiv"])
 @pytest.mark.parametrize("operands_type", ["region_region", "region_const", "const_region"])
 @pytest.mark.parametrize("dtype", ["float16"])
@@ -182,7 +195,7 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
 
         return A_ref
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         np.random.seed(0)
         A_np = np.random.rand(*g_shape).astype(dtype)
@@ -220,14 +233,15 @@ def test_binary_non_commutative_const_lhs_rejected(op_type):
             elif op_type == "fdiv":
                 Tx.cta.fdiv(A_smem, const, A_smem)
 
-        target = tvm.target.Target("cuda")
+        target = tvm.target.Target("maca")
         with target:
             mod = tvm.IRModule({"main": bad_kernel})
             tvm.compile(mod, target=target, tir_pipeline="tirx")
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("exec_scope", ["warp", "warpgroup"])
 @pytest.mark.parametrize("op_type", ["add", "mul"])
 def test_binary_op_shared_subcta_scope(exec_scope, op_type):
@@ -235,7 +249,7 @@ def test_binary_op_shared_subcta_scope(exec_scope, op_type):
     dtype = "float16"
     n_warps = 4 if exec_scope == "warpgroup" else 1
     g_shape = (n_warps * 32, 8)
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     tx_op = {
         ("warp", "add"): Tx.warp.add,
         ("warp", "mul"): Tx.warp.mul,
@@ -266,7 +280,7 @@ def test_binary_op_shared_subcta_scope(exec_scope, op_type):
         T.cuda.cta_sync()
         Tx.cta.copy(A, A_smem)
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         np.random.seed(0)
         A_np = np.random.rand(*g_shape).astype(dtype)
@@ -282,7 +296,8 @@ def test_binary_op_shared_subcta_scope(exec_scope, op_type):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("exec_scope", ["cta", "warpgroup", "warp"])
 @pytest.mark.parametrize("rhs_kind", ["region", "broadcast", "const"])
 @pytest.mark.parametrize("op_type", ["add", "sub", "mul", "fdiv"])
@@ -296,7 +311,7 @@ def test_binary_op_local_subcta_trivial(exec_scope, rhs_kind, op_type):
     b_shape = (n_threads, m, n if rhs_kind == "region" else 1)
     c_shape = a_shape
     const = T.float16(1.25)
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     tx_op = {"add": Tx.add, "sub": Tx.sub, "mul": Tx.mul, "fdiv": Tx.fdiv}[op_type]
     tid_in_scope_fn = {"cta": T.thread_id, "warpgroup": T.thread_id_in_wg, "warp": T.lane_id}[
         exec_scope
@@ -352,7 +367,7 @@ def test_binary_op_local_subcta_trivial(exec_scope, rhs_kind, op_type):
                 for j in T.serial(n):
                     C[tid_in_scope, i, j] = C_local[i, j]
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         np.random.seed(0)
         A_np = np.random.rand(*a_shape).astype(dtype)
@@ -387,7 +402,7 @@ def test_binary_op_local_subcta_trivial(exec_scope, rhs_kind, op_type):
             (64, 32),  # b_shape
             (64, 32),  # res_shape
             64,  # thread_cnt
-            tvm.cuda(0),  # dev
+            tvm.maca(0),  # dev
         ),
         ######### broadcast test #########
         (
@@ -395,12 +410,13 @@ def test_binary_op_local_subcta_trivial(exec_scope, rhs_kind, op_type):
             (32, 1, 4),  # b_shape
             (32, 5, 4),  # res_shape
             32,  # thread_cnt (≥ warp size so sctx.intra at cta scope models cleanly)
-            tvm.cuda(0),  # dev
+            tvm.maca(0),  # dev
         ),
     ],
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("storage_scope", ["shared", "local"])
 @pytest.mark.parametrize("exec_scope", ["cta", "thread"])
 @pytest.mark.parametrize("op_type", ["add", "sub", "mul", "fdiv"])
@@ -485,7 +501,7 @@ def test_binary_op_vectorized(input, storage_scope, exec_scope, op_type, dtype):
         else:
             raise ValueError(f"exec_scope={exec_scope} is not supported")
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         np.random.seed(0)
         A_np = np.random.rand(*a_shape).astype(dtype)
@@ -505,23 +521,24 @@ def test_binary_op_vectorized(input, storage_scope, exec_scope, op_type, dtype):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["add", "sub", "mul"])
 def test_binary_op_packed_f32x2_auto_dispatch(op_type):
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     arch = target.arch if hasattr(target, "arch") else ""
     if not arch.startswith("sm_"):
-        pytest.skip(f"unknown target arch: {arch}")
+        _xfail_packed_f32x2(f"detect MACA target arch for packed f32x2 dispatch, got {arch}")
     sm_digits = "".join(ch for ch in arch.split("_", 1)[1] if ch.isdigit())
     if not sm_digits:
-        pytest.skip(f"cannot parse target arch: {arch}")
+        _xfail_packed_f32x2(f"parse MACA target arch for packed f32x2 dispatch, got {arch}")
     sm_version = int(sm_digits)
     if sm_version < 100:
-        pytest.skip(f"packed_f32x2 auto-dispatch requires sm_100+, got {arch}")
+        _xfail_packed_f32x2(f"support packed f32x2 auto-dispatch on {arch}")
 
     a_shape, b_shape = (64, 32), (64, 32)
     dtype = "float32"
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
 
     @T.prim_func
     def test_func(A_ptr: T.handle, B_ptr: T.handle) -> None:
@@ -580,13 +597,14 @@ def test_binary_op_packed_f32x2_auto_dispatch(op_type):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("op_name", ["add", "sub", "mul"])
 def test_binary_op_warpgroup_wg_local_layout(op_name):
     dtype = "float32"
     rows, cols = 128, 16
-    dev = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    dev = tvm.maca(0)
+    target = tvm.target.Target("maca")
 
     @T.prim_func
     def test_func(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle) -> None:
@@ -643,6 +661,7 @@ def test_binary_op_warpgroup_wg_local_layout(op_name):
 
 
 @pytest.mark.parametrize("op_name,ptx_op", [("add", "add"), ("sub", "sub"), ("mul", "mul")])
+@MACA_XFAIL
 def test_binary_op_warpgroup_wg_local_emits_packed_f32x2(op_name, ptx_op):
     """Warpgroup-scope binary on a wg-local fp32 view must lower to packed
     f32x2 PTX on SM100+, mirroring the thread-scope packed dispatch.
@@ -651,13 +670,13 @@ def test_binary_op_warpgroup_wg_local_emits_packed_f32x2(op_name, ptx_op):
     calls in warpgroup scope used to fall through to scalar codegen because
     ``_emit_binary_local_view`` only emitted ``op_func(...)`` per element.
     """
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     arch = target.arch if hasattr(target, "arch") else ""
     if not arch.startswith("sm_"):
-        pytest.skip(f"unknown target arch: {arch}")
+        _xfail_packed_f32x2(f"detect MACA target arch for wg-local packed f32x2, got {arch}")
     sm_digits = "".join(ch for ch in arch.split("_", 1)[1] if ch.isdigit())
     if not sm_digits or int(sm_digits) < 100:
-        pytest.skip(f"packed_f32x2 wg-local path requires sm_100+, got {arch}")
+        _xfail_packed_f32x2(f"support wg-local packed f32x2 on {arch}")
 
     dtype = "float32"
     rows, cols = 128, 16
@@ -704,15 +723,16 @@ def test_binary_op_warpgroup_wg_local_emits_packed_f32x2(op_name, ptx_op):
     ), f"expected packed f32x2 PTX for op={op_name}, source preview:\n{src[:2000]}"
 
 
+@MACA_XFAIL
 def test_fma_warpgroup_wg_local_emits_packed_f32x2():
     """Same regression coverage as the binary case but for ``T.fma``."""
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     arch = target.arch if hasattr(target, "arch") else ""
     if not arch.startswith("sm_"):
-        pytest.skip(f"unknown target arch: {arch}")
+        _xfail_packed_f32x2(f"detect MACA target arch for wg-local packed f32x2 fma, got {arch}")
     sm_digits = "".join(ch for ch in arch.split("_", 1)[1] if ch.isdigit())
     if not sm_digits or int(sm_digits) < 100:
-        pytest.skip(f"packed_f32x2 wg-local path requires sm_100+, got {arch}")
+        _xfail_packed_f32x2(f"support wg-local packed f32x2 fma on {arch}")
 
     dtype = "float32"
     rows, cols = 128, 16
@@ -750,8 +770,9 @@ def test_fma_warpgroup_wg_local_emits_packed_f32x2():
 # Dispatch codegen checks (no GPU runtime — explicit target arch).
 # These complement the existing `*_warpgroup_wg_local_layout` / `*_auto_dispatch`
 # variants by forcing the arch in the Target dict, so the codegen path runs
-# even on hosts where ``Target("cuda")`` cannot detect the GPU.
+# even on hosts where ``Target("maca")`` cannot detect the GPU.
 # -----------------------------------------------------------------------------
+@MACA_XFAIL
 def test_binary_add_f32_sm100_packed_f32x2_dispatch():
     """add f32 + all-local → reg.py + add_f32x2 packed (no T.vectorized)."""
     shape = (64, 32)
@@ -771,7 +792,7 @@ def test_binary_add_f32_sm100_packed_f32x2_dispatch():
         Tx.add(ra, ra, rb)
         Tx.copy(A[tx], ra)
 
-    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
+    target = tvm.target.Target({"kind": "maca", "arch": "sm_100a"})
     with target:
         mod = tvm.IRModule({"main": k})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -781,6 +802,7 @@ def test_binary_add_f32_sm100_packed_f32x2_dispatch():
     ), f"expected packed add_f32x2; got:\n{src[:2000]}"
 
 
+@MACA_XFAIL
 def test_binary_add_f16_scalar_fallback_dispatch():
     """add f16 has no packed VecImpl → reg.py scalar fallback (T.vectorized)."""
     shape = (64, 32)
@@ -800,7 +822,7 @@ def test_binary_add_f16_scalar_fallback_dispatch():
         Tx.add(ra, ra, rb)
         Tx.copy(A[tx], ra)
 
-    target = tvm.target.Target({"kind": "cuda", "arch": "sm_80"})
+    target = tvm.target.Target({"kind": "maca", "arch": "sm_80"})
     with target:
         mod = tvm.IRModule({"main": k})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")

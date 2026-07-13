@@ -40,7 +40,7 @@ _ccl = [_compiled_ccl()]
 
 def create_device_target(ccl):
     if ccl == "nccl":
-        dev = tvm.cuda(0)
+        dev = tvm.maca(0)
     else:
         dev = tvm.rocm(0)
     target = tvm.target.Target.from_device(dev)

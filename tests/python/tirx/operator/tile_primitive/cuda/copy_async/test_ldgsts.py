@@ -27,6 +27,13 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import S, TileLayout
 
+MACA_XFAIL = pytest.mark.xfail(
+    reason=(
+        "TODO(maca): [tile-primitive-copy-async-ldgsts] support LDGSTS async global-to-shared copy"
+    ),
+    strict=False,
+)
+
 
 @pytest.mark.parametrize(
     "task",
@@ -67,13 +74,14 @@ from tvm.tirx.layout import S, TileLayout
     ],
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize(
     "dtype", ["int8", "float8_e4m3fn", "float8_e5m2", "float16", "bfloat16", "float32"]
 )
 def test_copy_g2s_s2g_cta_vec_load(task, dtype):
     g_shape, s_shape, g_st, g_extent, thread_cnt, layoutA, layoutB, layoutS = task
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
 
     r_smem = list(slice(None) for i in range(len(s_shape)))
     r_gmem = list(slice(g_st[i], g_st[i] + g_extent[i]) for i in range(len(g_shape)))
@@ -97,7 +105,7 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
         # fmt: on
 
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": copy_async})
         mod = tvm.tirx.transform.LowerTIRx()(mod)

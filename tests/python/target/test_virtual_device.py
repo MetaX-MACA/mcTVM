@@ -22,27 +22,29 @@ import tvm.testing
 
 
 def test_make_virtual_device_for_device():
-    virtual_device = tvm.target.VirtualDevice(tvm.device("cuda"))
-    assert virtual_device.dlpack_device_type() == 2
-    # ie kDLCUDA
+    device = tvm.device("maca")
+    virtual_device = tvm.target.VirtualDevice(device)
+    assert virtual_device.dlpack_device_type() == device.dlpack_device_type()
     assert virtual_device.virtual_device_id == 0
     assert virtual_device.target is None
     assert virtual_device.memory_scope == ""
 
 
 def test_make_virtual_device_for_device_and_target():
-    target = tvm.target.Target("cuda")
-    virtual_device = tvm.target.VirtualDevice(tvm.device("cuda"), target)
-    assert virtual_device.dlpack_device_type() == 2  # ie kDLCUDA
+    device = tvm.device("maca")
+    target = tvm.target.Target("maca")
+    virtual_device = tvm.target.VirtualDevice(device, target)
+    assert virtual_device.dlpack_device_type() == device.dlpack_device_type()
     assert virtual_device.target == target
     assert virtual_device.memory_scope == ""
 
 
 def test_make_virtual_device_for_device_target_and_memory_scope():
-    target = tvm.target.Target("cuda")
+    device = tvm.device("maca")
+    target = tvm.target.Target("maca")
     scope = "local"
-    virtual_device = tvm.target.VirtualDevice(tvm.device("cuda"), target, scope)
-    assert virtual_device.dlpack_device_type() == 2  # ie kDLCUDA
+    virtual_device = tvm.target.VirtualDevice(device, target, scope)
+    assert virtual_device.dlpack_device_type() == device.dlpack_device_type()
     assert virtual_device.target == target
     assert virtual_device.memory_scope == scope
 

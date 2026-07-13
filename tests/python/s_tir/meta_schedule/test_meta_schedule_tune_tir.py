@@ -88,7 +88,7 @@ def test_tune_matmul_cpu():
 
 @pytest.mark.skip("Integration test")
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_tune_matmul_cuda():
     with tempfile.TemporaryDirectory() as work_dir:
         target = Target("nvidia/geforce-rtx-3070")

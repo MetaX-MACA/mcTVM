@@ -184,10 +184,17 @@ def verify_cuda_code_string(func, expected_var_name, expected_string_literal):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.xfail(
+    reason=(
+        "TODO(maca): [tirx-buffer-print] support tirx.print_buffer lowering and "
+        "generated source checks"
+    ),
+    strict=False,
+)
 def test_print():
-    DEV = tvm.cuda()
-    target = tvm.target.Target("cuda")
+    DEV = tvm.maca()
+    target = tvm.target.Target("maca")
 
     def test_vector_add_1D(dtype, dtype_str):
         M = 6

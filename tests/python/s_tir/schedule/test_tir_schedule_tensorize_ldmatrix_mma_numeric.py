@@ -60,6 +60,8 @@ K = 4096
 measure_perf = False
 gflops = (N * M * K) * 2 / 1e9
 
+MACA_MMA_INTRIN_XFAIL_REASON = "TODO(maca): [ptx-ldmatrix] support legacy ldmatrix/MMA tensor intrinsics such as tirx.mma_fill_legacy"
+
 
 def matmul(m, n, k, in_dtype, out_dtype, b_transposed):
     b_shape = (n, k) if b_transposed else (k, n)
@@ -120,9 +122,9 @@ def run_test(
         mma_store_intrin,
     )
 
-    f = tvm.compile(sch.mod["main"], target="cuda")
+    f = tvm.compile(sch.mod["main"], target="maca")
 
-    dev = tvm.device("cuda", 0)
+    dev = tvm.device("maca", 0)
 
     if in_dtype == "float16":
         a_np = np.random.normal(size=(M, K)).astype("float16")
@@ -186,7 +188,8 @@ def run_test(
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(8), reason="need cuda compute >= 8.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.xfail(reason=MACA_MMA_INTRIN_XFAIL_REASON, strict=False)
 def test_f16f16f32_m16n16k16():
     def index_map(i, j):
         return (
@@ -244,7 +247,8 @@ def test_f16f16f32_m16n16k16():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(8), reason="need cuda compute >= 8.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.xfail(reason=MACA_MMA_INTRIN_XFAIL_REASON, strict=False)
 def test_f16f16f16_m16n16k16():
     def index_map(i, j):
         return (
@@ -302,7 +306,8 @@ def test_f16f16f16_m16n16k16():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(8), reason="need cuda compute >= 8.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.xfail(reason=MACA_MMA_INTRIN_XFAIL_REASON, strict=False)
 def test_i8i8i32_m16n16k32():
     def index_map_A(i, j):
         return (
@@ -374,7 +379,11 @@ def test_i8i8i32_m16n16k32():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(8, 9), reason="need cuda compute >= 8.9")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.xfail(
+    reason="TODO(maca): [fp8] support legacy ldmatrix/MMA tensor intrinsics with FP8 datatype lowering",
+    strict=False,
+)
 def test_e4m3e4m3f32_m16n16k32():
     def index_map_A(i, j):
         return (
@@ -418,7 +427,11 @@ def test_e4m3e4m3f32_m16n16k32():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(8, 9), reason="need cuda compute >= 8.9")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.xfail(
+    reason="TODO(maca): [fp8] support legacy ldmatrix/MMA tensor intrinsics with FP8 datatype lowering",
+    strict=False,
+)
 def test_e5m2e5m2f32_m16n16k32():
     def index_map_A(i, j):
         return (

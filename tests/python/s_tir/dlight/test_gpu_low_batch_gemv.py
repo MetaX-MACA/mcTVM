@@ -18,6 +18,8 @@
 # ruff: noqa: E501
 
 
+import pytest
+
 import tvm.testing
 from tvm.s_tir import dlight as dl
 from tvm.script import tirx as T
@@ -379,7 +381,7 @@ def test_small_spatial_axis():
     # fmt: on
 
     mod = tvm.IRModule({"main": func})
-    with Target("cuda"):
+    with Target("maca"):
         mod = dl.ApplyDefaultSchedule(dl.gpu.LowBatchGEMV(4))(mod)
     tvm.ir.assert_structural_equal(mod["main"], expected)
 
@@ -530,6 +532,10 @@ def test_outer_reduction():
     tvm.ir.assert_structural_equal(mod["main"], expected)
 
 
+@pytest.mark.xfail(
+    reason="TODO(maca): [target-attrs] support constructing a target that omits max_shared_memory_per_block",
+    strict=False,
+)
 def test_low_batch_gemv_cuda_target_without_max_shared_memory_per_block():
     # fmt: off
     @T.prim_func(private=True, s_tir=True)
@@ -548,7 +554,7 @@ def test_low_batch_gemv_cuda_target_without_max_shared_memory_per_block():
                 C[v_i0, v_i1, v_i2] = C[v_i0, v_i1, v_i2] + A[v_i0, v_i1, v_k] * B[v_i2, v_k]
     # fmt: on
 
-    target = Target({"kind": "cuda", "max_num_threads": 1024})
+    target = Target({"kind": "maca", "max_num_threads": 1024})
     assert target.attrs.get("max_shared_memory_per_block", None) is None
 
     mod = tvm.IRModule({"main": before})

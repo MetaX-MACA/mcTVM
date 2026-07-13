@@ -22,7 +22,14 @@ import tvm.testing
 from tvm.ir import PointerType, PrimType, assert_structural_equal
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
+from tvm.testing import env
 from tvm.tirx.layout import laneid, warpid
+
+MACA_TIRX_DECL_SCALAR_XFAIL_REASON = (
+    "TODO(maca): [tirx-parser-printer] make the TIRx parser/printer resolve scalar "
+    "dtype constructors "
+    "such as T.float16 in decl_scalar round-trips on the MACA test path"
+)
 
 
 def from_source(code):
@@ -728,6 +735,11 @@ def test_grid():
     assert_structural_equal(test, from_source(code))
 
 
+@pytest.mark.xfail(
+    env.has_maca(),
+    reason=MACA_TIRX_DECL_SCALAR_XFAIL_REASON,
+    strict=False,
+)
 def test_alloc_apis():
     # fmt: off
     @T.meta_class

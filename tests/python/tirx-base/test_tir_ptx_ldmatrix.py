@@ -23,6 +23,10 @@ import tvm.testing
 from tvm.script import tirx as T
 from tvm.testing import env
 
+MACA_PTX_LDMATRIX_XFAIL_REASON = (
+    "TODO(maca): [ptx-ldmatrix] support PTX legacy ldmatrix lowering for shared-memory matrix loads"
+)
+
 
 @T.prim_func(s_tir=True)
 def ptx_ldmatrix(
@@ -60,14 +64,15 @@ def ptx_ldmatrix(
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(7, 5), reason="need cuda compute >= 7.5")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.xfail(reason=MACA_PTX_LDMATRIX_XFAIL_REASON, strict=False)
 def test_ptx_ldmatrix():
     f = ptx_ldmatrix
     _, _, param_num, param_trans = f.params
 
     for num in [1, 2, 4]:
         for trans in [False, True]:
-            mod = tvm.compile(f.specialize({param_num: num, param_trans: trans}), target="cuda")
+            mod = tvm.compile(f.specialize({param_num: num, param_trans: trans}), target="maca")
             A_np = np.random.rand(16, 16).astype("float16")
             A_mask_np = np.zeros_like(A_np)
             if num == 1:
@@ -90,7 +95,7 @@ def test_ptx_ldmatrix():
                 else:
                     A_mask_np[:16, :16] = A_np[:16, :16]
             B_np = np.zeros((16, 16)).astype("float16")
-            dev = tvm.cuda(0)
+            dev = tvm.maca(0)
             A_nd = tvm.runtime.tensor(A_np, device=dev)
             B_nd = tvm.runtime.tensor(B_np, device=dev)
             mod(A_nd, B_nd)

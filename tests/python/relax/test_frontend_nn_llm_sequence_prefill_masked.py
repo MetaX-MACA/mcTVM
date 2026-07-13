@@ -50,6 +50,11 @@ import tvm.testing
 from tvm.relax.frontend.nn.llm.kv_cache import _attention_sequence_prefill_with_mask
 from tvm.testing import env
 
+MACA_MASKED_PREFILL_XFAIL_REASON = (
+    "TODO(maca): [masked-prefill] support aligned shared-memory declarations emitted by "
+    "masked prefill codegen in the MACA compiler path"
+)
+
 
 def _reference_masked_attention(q, k, v, valid_lens, sm_scale):
     """Right-pad bidirectional reference. Only the first ``valid_lens[b]`` rows are written."""
@@ -188,7 +193,17 @@ def _run_case(
 @pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
 @pytest.mark.parametrize(
     "target",
-    [pytest.param("cuda", marks=pytest.mark.gpu), pytest.param("metal", marks=pytest.mark.gpu)],
+    [
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param(
+            "maca",
+            marks=[
+                pytest.mark.gpu,
+                pytest.mark.xfail(reason=MACA_MASKED_PREFILL_XFAIL_REASON, strict=False),
+            ],
+        ),
+        pytest.param("metal", marks=pytest.mark.gpu),
+    ],
 )
 def test_valid_len_zero(target):
     """All samples are fully padded: kernel must not crash and must stay bounded."""
@@ -211,7 +226,17 @@ def test_valid_len_zero(target):
 @pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
 @pytest.mark.parametrize(
     "target",
-    [pytest.param("cuda", marks=pytest.mark.gpu), pytest.param("metal", marks=pytest.mark.gpu)],
+    [
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param(
+            "maca",
+            marks=[
+                pytest.mark.gpu,
+                pytest.mark.xfail(reason=MACA_MASKED_PREFILL_XFAIL_REASON, strict=False),
+            ],
+        ),
+        pytest.param("metal", marks=pytest.mark.gpu),
+    ],
 )
 def test_valid_len_full(target):
     """All samples are fully valid: must match a plain unmasked attention."""
@@ -234,7 +259,17 @@ def test_valid_len_full(target):
 @pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
 @pytest.mark.parametrize(
     "target",
-    [pytest.param("cuda", marks=pytest.mark.gpu), pytest.param("metal", marks=pytest.mark.gpu)],
+    [
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param(
+            "maca",
+            marks=[
+                pytest.mark.gpu,
+                pytest.mark.xfail(reason=MACA_MASKED_PREFILL_XFAIL_REASON, strict=False),
+            ],
+        ),
+        pytest.param("metal", marks=pytest.mark.gpu),
+    ],
 )
 def test_valid_len_mixed(target):
     """Typical encoder batch with different valid lengths per sample."""
@@ -257,7 +292,17 @@ def test_valid_len_mixed(target):
 @pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
 @pytest.mark.parametrize(
     "target",
-    [pytest.param("cuda", marks=pytest.mark.gpu), pytest.param("metal", marks=pytest.mark.gpu)],
+    [
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param(
+            "maca",
+            marks=[
+                pytest.mark.gpu,
+                pytest.mark.xfail(reason=MACA_MASKED_PREFILL_XFAIL_REASON, strict=False),
+            ],
+        ),
+        pytest.param("metal", marks=pytest.mark.gpu),
+    ],
 )
 def test_valid_len_mixed_gqa(target):
     """Grouped-query attention: ``group_size = h_q / h_kv > 1``."""
@@ -280,7 +325,17 @@ def test_valid_len_mixed_gqa(target):
 @pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
 @pytest.mark.parametrize(
     "target",
-    [pytest.param("cuda", marks=pytest.mark.gpu), pytest.param("metal", marks=pytest.mark.gpu)],
+    [
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param(
+            "maca",
+            marks=[
+                pytest.mark.gpu,
+                pytest.mark.xfail(reason=MACA_MASKED_PREFILL_XFAIL_REASON, strict=False),
+            ],
+        ),
+        pytest.param("metal", marks=pytest.mark.gpu),
+    ],
 )
 def test_causal_padded_left_valid_len_zero(target):
     """Causal left-pad: all samples are fully padded."""
@@ -304,7 +359,17 @@ def test_causal_padded_left_valid_len_zero(target):
 @pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
 @pytest.mark.parametrize(
     "target",
-    [pytest.param("cuda", marks=pytest.mark.gpu), pytest.param("metal", marks=pytest.mark.gpu)],
+    [
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param(
+            "maca",
+            marks=[
+                pytest.mark.gpu,
+                pytest.mark.xfail(reason=MACA_MASKED_PREFILL_XFAIL_REASON, strict=False),
+            ],
+        ),
+        pytest.param("metal", marks=pytest.mark.gpu),
+    ],
 )
 def test_causal_padded_left_valid_len_full(target):
     """Causal left-pad: all samples are fully valid — degenerates to plain causal attention."""
@@ -328,7 +393,17 @@ def test_causal_padded_left_valid_len_full(target):
 @pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
 @pytest.mark.parametrize(
     "target",
-    [pytest.param("cuda", marks=pytest.mark.gpu), pytest.param("metal", marks=pytest.mark.gpu)],
+    [
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param(
+            "maca",
+            marks=[
+                pytest.mark.gpu,
+                pytest.mark.xfail(reason=MACA_MASKED_PREFILL_XFAIL_REASON, strict=False),
+            ],
+        ),
+        pytest.param("metal", marks=pytest.mark.gpu),
+    ],
 )
 def test_causal_padded_left_valid_len_mixed(target):
     """Causal left-pad: typical decoder-embedding batch with mixed lengths."""
@@ -352,7 +427,17 @@ def test_causal_padded_left_valid_len_mixed(target):
 @pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
 @pytest.mark.parametrize(
     "target",
-    [pytest.param("cuda", marks=pytest.mark.gpu), pytest.param("metal", marks=pytest.mark.gpu)],
+    [
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param(
+            "maca",
+            marks=[
+                pytest.mark.gpu,
+                pytest.mark.xfail(reason=MACA_MASKED_PREFILL_XFAIL_REASON, strict=False),
+            ],
+        ),
+        pytest.param("metal", marks=pytest.mark.gpu),
+    ],
 )
 def test_causal_padded_left_valid_len_mixed_gqa(target):
     """Causal left-pad: grouped-query attention with mixed lengths."""
@@ -376,7 +461,17 @@ def test_causal_padded_left_valid_len_mixed_gqa(target):
 @pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
 @pytest.mark.parametrize(
     "target",
-    [pytest.param("cuda", marks=pytest.mark.gpu), pytest.param("metal", marks=pytest.mark.gpu)],
+    [
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param(
+            "maca",
+            marks=[
+                pytest.mark.gpu,
+                pytest.mark.xfail(reason=MACA_MASKED_PREFILL_XFAIL_REASON, strict=False),
+            ],
+        ),
+        pytest.param("metal", marks=pytest.mark.gpu),
+    ],
 )
 def test_causal_padded_left_qo_len_differs_from_kv_len(target):
     """Causal left-pad: Q and K/V may have different padded lengths."""

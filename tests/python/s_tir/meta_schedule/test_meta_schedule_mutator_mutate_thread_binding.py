@@ -75,7 +75,7 @@ def _make_mutator(target: Target) -> ms.Mutator:
 
 
 def test_mutate_thread_binding():
-    mutator = _make_mutator(target=Target("cuda"))
+    mutator = _make_mutator(target=Target("maca"))
     sch = _sch()
     results = set()
     for _ in range(100):

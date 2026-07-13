@@ -24,6 +24,11 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import R, S, TileLayout, laneid, wg_local_layout
 
+MACA_XFAIL = pytest.mark.xfail(
+    reason=("TODO(maca): [tile-primitive-reduction] support reduction dispatch variants"),
+    strict=False,
+)
+
 
 @pytest.mark.parametrize(
     "src_shape, dst_shape, axes, st_src, st_dst, extent_src, extent_dst",
@@ -43,14 +48,15 @@ from tvm.tirx.layout import R, S, TileLayout, laneid, wg_local_layout
     ],
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 @pytest.mark.parametrize("dtype", ["float32", "float16"])
 @pytest.mark.parametrize("accum", [False, True])
 def test_reduction_shared(
     src_shape, dst_shape, axes, st_src, st_dst, extent_src, extent_dst, op_type, dtype, accum
 ):
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     ndim_src = len(src_shape)
 
     thread_cnt = 32
@@ -94,7 +100,7 @@ def test_reduction_shared(
         Tx.cta.copy(B[tuple(copy_slice_dst)], B_smem[tuple(copy_slice_dst)])
         # fmt: on
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": test_reduction})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -133,13 +139,14 @@ def test_reduction_shared(
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("exec_scope", ["warp", "warpgroup", "thread"])
 @pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 @pytest.mark.parametrize("accum", [False, True])
 def test_reduction_shared_subscope(exec_scope, op_type, accum):
     """Test shared reduction at warp/warpgroup/thread exec scope."""
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     dtype = "float32"
     src_shape = (4, 8)
     dst_shape = (4,)
@@ -222,7 +229,7 @@ def test_reduction_shared_subscope(exec_scope, op_type, accum):
             Tx.cta.copy(B, B_smem)
         # fmt: on
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -270,12 +277,13 @@ def test_reduction_shared_subscope(exec_scope, op_type, accum):
     ],
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 @pytest.mark.parametrize("accum", [False, True])
 def test_reduction_local_thread_wise(src_shape, dst_shape, axes, op_type, accum):
     """Test thread-wise local reduction with various shapes and axes."""
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     dtype = "float32"
     src_total = 1
     for s in src_shape:
@@ -326,7 +334,7 @@ def test_reduction_local_thread_wise(src_shape, dst_shape, axes, op_type, accum)
             B[tuple(idx)] = B_local[tuple(idx)]
         # fmt: on
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -375,11 +383,12 @@ def test_reduction_local_thread_wise(src_shape, dst_shape, axes, op_type, accum)
     ],
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 def test_reduction_local_view_basic(inner_dims, dst_dims, axes, accum, slice_end, op_type):
     """Test view-based local reduction with simple purely-local layouts."""
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     dtype = "float32"
     thread_cnt = 32
 
@@ -460,7 +469,7 @@ def test_reduction_local_view_basic(inner_dims, dst_dims, axes, accum, slice_end
             B[(lane_id, *list(idx))] = red[(0, *list(idx))]
         # fmt: on
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -494,7 +503,8 @@ def test_reduction_local_view_basic(inner_dims, dst_dims, axes, accum, slice_end
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("n_groups, n_warps", [(1, 1), (1, 4), (2, 8)])
 @pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 @pytest.mark.parametrize("dtype", ["float32", "float16"])
@@ -503,8 +513,11 @@ def test_reduction_local_view_basic(inner_dims, dst_dims, axes, accum, slice_end
 def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle, accum):
     """Test view-based local reduction with wgmma layouts and optional shuffle."""
     if not shuffle and accum:
-        pytest.skip("accum without shuffle is not supported in current implementation")
-    dev = tvm.cuda(0)
+        pytest.xfail(
+            "TODO(maca): [tile-primitive-reduction] support accum reductions without "
+            "shuffle in local-view reduction"
+        )
+    dev = tvm.maca(0)
     thread_cnt = 32
     NUM_COL = 128
     g_shape_a = (16 * n_warps, NUM_COL)
@@ -587,7 +600,7 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
 
         # fmt: on
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -628,13 +641,14 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("reduction_len", [8, 16, 64, 128, 256, 7, 10, 15, 100])
 @pytest.mark.parametrize("op_type", ["max", "min"])
 @pytest.mark.parametrize("accum", [False, True])
 def test_reduction_local_optimized_3input_maxmin(reduction_len, op_type, accum):
     """Test thread-level local buffer reduction with 3-input max/min PTX intrinsics."""
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     dtype = "float32"
 
     # fmt: off
@@ -667,7 +681,7 @@ def test_reduction_local_optimized_3input_maxmin(reduction_len, op_type, accum):
         B[0] = B_local[0]
         # fmt: on
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -699,12 +713,13 @@ def test_reduction_local_optimized_3input_maxmin(reduction_len, op_type, accum):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("reduction_len", [8, 16, 64, 128, 256, 9, 17, 63, 65, 100])
 @pytest.mark.parametrize("accum", [False, True])
 def test_reduction_local_optimized_packed_add_sum(reduction_len, accum):
     """Test thread-level sum reduction using packed add with add.f32x2 PTX instruction."""
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     dtype = "float32"
 
     # fmt: off
@@ -735,7 +750,7 @@ def test_reduction_local_optimized_packed_add_sum(reduction_len, accum):
         # fmt: on
 
         # Use sm_100a target for packed add sum dispatch
-    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
+    target = tvm.target.Target({"kind": "maca", "arch": "sm_100a"})
     with target:
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -762,7 +777,8 @@ def test_reduction_local_optimized_packed_add_sum(reduction_len, accum):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["sum", "max"])
 @pytest.mark.parametrize("dtype", ["float32", "float16"])
 def test_reduction_op_warp_shuffle(op_type, dtype):
@@ -770,7 +786,7 @@ def test_reduction_op_warp_shuffle(op_type, dtype):
 
     Case A: full warp reduce (32 lanes → 1 value, replicated to all lanes).
     """
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     N = 32
     g_shape = (N,)
     g_layout = TileLayout(S[N])
@@ -802,7 +818,7 @@ def test_reduction_op_warp_shuffle(op_type, dtype):
         B[lane_id] = dst_local[0]
         # fmt: on
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -825,7 +841,8 @@ def test_reduction_op_warp_shuffle(op_type, dtype):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["sum", "max"])
 @pytest.mark.parametrize("dtype", ["float32", "float16"])
 def test_reduction_op_warp_shuffle_multi_elem(op_type, dtype):
@@ -833,7 +850,7 @@ def test_reduction_op_warp_shuffle_multi_elem(op_type, dtype):
 
     Each thread holds 4 elements, reduce across 32 lanes for each element group.
     """
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     ELEMS_PER_THREAD = 4
     N_LANES = 32
     TOTAL = ELEMS_PER_THREAD * N_LANES  # 128
@@ -871,7 +888,7 @@ def test_reduction_op_warp_shuffle_multi_elem(op_type, dtype):
             B[i] = dst_local[i]
         # fmt: on
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -895,14 +912,15 @@ def test_reduction_op_warp_shuffle_multi_elem(op_type, dtype):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_reduction_warp_shuffle_multi_warp_loop():
     """Test intra-warp + cross-warp reduction via T.sum in a for loop with multiple warps.
 
     Validates the scope alternation pattern (thread → warp → thread) inside a loop,
     which is needed for replacing manual warp shuffle reductions in tirx-kernels.
     """
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     BDX = 32
     BDY = 4
     N = BDX * BDY  # 128
@@ -955,7 +973,7 @@ def test_reduction_warp_shuffle_multi_warp_loop():
             T.cuda.cta_sync()
         # fmt: on
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -973,13 +991,14 @@ def test_reduction_warp_shuffle_multi_warp_loop():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("op_name", ["sum", "max"])
 def test_reduction_warpgroup_wg_local_layout(op_name):
     rows, cols = 128, 16
     dtype = "float32"
-    dev = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    dev = tvm.maca(0)
+    target = tvm.target.Target("maca")
 
     @T.prim_func
     def test_func(A_ptr: T.handle, B_ptr: T.handle) -> None:

@@ -32,9 +32,9 @@ def verify(input, new_vdevice, vdevice_index, expected):
 def test_update():
     vdevices = [
         VDevice("llvm"),
-        VDevice("cuda", 0),
+        VDevice("maca", 0),
         VDevice("metal", 0, "global"),
-        VDevice({"kind": "cuda", "arch": "sm_80"}, 0),
+        VDevice({"kind": "maca"}, 0),
         VDevice("metal", 1, "global"),
         VDevice("llvm", 1),
     ]
@@ -46,16 +46,16 @@ def test_update():
             {
                 "vdevice": [
                     I.vdevice("llvm"),
-                    I.vdevice("cuda", 0),
+                    I.vdevice("maca", 0),
                     I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
+                    I.vdevice({"kind": "maca"}, 0),
                 ]
             }
         )
 
         @R.function
         def main(
-            a: R.Tensor((128, 128), "float32", "cuda:1"),
+            a: R.Tensor((128, 128), "float32", "maca:1"),
             c: R.Tensor((128, 128), "float32", "vdevice:3"),
         ) -> R.Tensor((128, 128), "float32"):
             s = R.add(a, c)
@@ -68,7 +68,7 @@ def test_update():
             {
                 "vdevice": [
                     I.vdevice("llvm"),
-                    I.vdevice("cuda", 0),
+                    I.vdevice("maca", 0),
                     I.vdevice("metal", 0, "global"),
                     I.vdevice("metal", 1, "global"),
                 ]
@@ -90,15 +90,15 @@ def test_update():
             {
                 "vdevice": [
                     I.vdevice("llvm"),
-                    I.vdevice("cuda", 0),
+                    I.vdevice("maca", 0),
                 ]
             }
         )
 
         @R.function
         def main(
-            a: R.Tensor((128, 128), "float32", "cuda:0"),
-            c: R.Tensor((128, 128), "float32", "cuda:0"),
+            a: R.Tensor((128, 128), "float32", "maca:0"),
+            c: R.Tensor((128, 128), "float32", "maca:0"),
         ) -> R.Tensor((128, 128), "float32"):
             s = R.add(a, c)
             return s

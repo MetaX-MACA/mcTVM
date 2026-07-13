@@ -201,8 +201,8 @@ class TestTVMScriptPyFunc:
     def test_pyfunc_module_creation_and_execution_gpu(self):
         module = TestPyFuncModule
 
-        if tvm.cuda().exist:
-            device = tvm.cuda(0)
+        if tvm.maca().exist:
+            device = tvm.maca(0)
             instance = module(device)
 
             assert isinstance(instance, BasePyModule), "Instance should be BasePyModule"
@@ -216,7 +216,7 @@ class TestTVMScriptPyFunc:
             expected = torch.nn.functional.relu(x) * 2.0
             assert torch.allclose(result, expected, atol=1e-5)
         else:
-            pytest.skip("CUDA not available")
+            pytest.skip("MACA not available")
 
     def test_pyfunc_with_tir_integration(self):
         """Test that Python functions can work with TIR functions."""

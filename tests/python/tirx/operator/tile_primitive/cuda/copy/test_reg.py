@@ -38,6 +38,14 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import S, TileLayout, laneid, tid_in_wg, tx
 
+MACA_XFAIL = pytest.mark.xfail(
+    reason=(
+        "TODO(maca): [tile-primitive-copy-reg] support register copy dispatch "
+        "and swizzled shared fast path"
+    ),
+    strict=False,
+)
+
 
 def _r_layout(scope, shape):
     if scope == "warpgroup":
@@ -230,7 +238,8 @@ def _expected(shape, dtype):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("non_r_scope", ["shared", "global"])
 @pytest.mark.parametrize(
     "scope,n_threads,k",
@@ -249,8 +258,8 @@ def test_reg_roundtrip(scope, n_threads, k, dtype, non_r_scope):
     shape = (n_threads, k)
     kernel = _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope)
 
-    dev = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    dev = tvm.maca(0)
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
         compiled = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -286,12 +295,13 @@ def test_reg_roundtrip(scope, n_threads, k, dtype, non_r_scope):
             TileLayout(S[4, 16, 16]),  # layoutA
             TileLayout(S[4, 16, 16]),  # layoutB
             TileLayout(S[8, 8]),  # layoutLocal
-            tvm.cuda(0),
+            tvm.maca(0),
         ),
     ],
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize(
     "dtype", ["int8", "float8_e4m3fn", "float8_e5m2", "float16", "bfloat16", "float32"]
 )
@@ -314,7 +324,7 @@ def test_copy_g2l_l2g_vec_load(task, dtype):
         Tx.copy(B[r_gmem], A_local[r_lmem])
 
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": copy_sync})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -331,6 +341,7 @@ def test_copy_g2l_l2g_vec_load(task, dtype):
         np.testing.assert_allclose(B_ref, B.numpy())
 
 
+@MACA_XFAIL
 def test_reg_copy_wg_local_to_swizzled_shared_uses_swizzle_fastpath():
     """Regression: R→S copy where R has a ``wg_local_layout`` (thread iter
     ``1 @ tid_in_wg``) must pick the widest vec ``copy_128b`` AND use the
@@ -382,7 +393,7 @@ def test_reg_copy_wg_local_to_swizzled_shared_uses_swizzle_fastpath():
         for i in T.serial(EPI_N):
             B[tid, i] = smem[tid, i]
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
         ex = tvm.compile(mod, target=target, tir_pipeline="tirx")

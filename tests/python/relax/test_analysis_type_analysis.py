@@ -219,9 +219,9 @@ def test_base_check():
 
     vdevice0 = ir.VDevice()
     vdevice1 = ir.VDevice("llvm")
-    vdevice2 = ir.VDevice("cuda", 0)
-    vdevice3 = ir.VDevice("cuda", 2)
-    vdevice4 = ir.VDevice("cuda", 0, "")
+    vdevice2 = ir.VDevice("maca", 0)
+    vdevice3 = ir.VDevice("maca", 2)
+    vdevice4 = ir.VDevice("maca", 0, "")
 
     tensor0 = rx.TensorType(ndim=-1, dtype="int32")
     tensor1 = rx.TensorType(ndim=-1, dtype="float32")
@@ -521,7 +521,7 @@ def test_type_lca():
     prim1 = tvm.ir.PrimType("float32")
 
     vdevice0 = ir.VDevice("llvm")
-    vdevice1 = ir.VDevice("cuda", 0)
+    vdevice1 = ir.VDevice("maca", 0)
 
     shape0 = rx.ShapeType(ndim=-1)
     shape1 = rx.ShapeType(ndim=2)

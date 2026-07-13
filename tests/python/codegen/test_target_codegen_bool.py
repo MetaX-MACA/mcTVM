@@ -26,7 +26,7 @@ from tvm.script import tirx as T
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("target", ["llvm", "cuda", "rocm", "vulkan", "metal", "opencl"])
+@pytest.mark.parametrize("target", ["llvm", "cuda", "rocm", "vulkan", "metal", "opencl", "maca"])
 def test_cmp_load_store(target):
     if not tvm.testing.device_enabled(target):
         pytest.skip(f"{target} not enabled")

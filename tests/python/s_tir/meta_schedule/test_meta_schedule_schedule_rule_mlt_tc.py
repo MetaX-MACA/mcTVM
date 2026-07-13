@@ -215,7 +215,7 @@ def test_matmul_relu(shared_scope):
     actual = generate_design_space(
         kind="cuda",
         mod=mod,
-        target=tvm.target.Target({"kind": "cuda", "arch": "sm_70"}),
+        target=tvm.target.Target({"kind": "maca", "arch": "sm_70"}),
         types=None,
         sch_rules=[
             multi_level_tiling_tensor_core(
@@ -366,7 +366,7 @@ def test_matmul_relu_with_fallback():
     actual = generate_design_space(
         kind="cuda",
         mod=mod,
-        target=tvm.target.Target({"kind": "cuda", "arch": "sm_70"}),
+        target=tvm.target.Target({"kind": "maca", "arch": "sm_70"}),
         types=None,
         sch_rules=[
             multi_level_tiling_tensor_core(),
@@ -530,7 +530,7 @@ def test_conv2d(shared_scope):
     actual = generate_design_space(
         kind="cuda",
         mod=mod,
-        target=tvm.target.Target({"kind": "cuda", "arch": "sm_70"}),
+        target=tvm.target.Target({"kind": "maca", "arch": "sm_70"}),
         types=None,
         sch_rules=[
             multi_level_tiling_tensor_core(
@@ -550,7 +550,7 @@ def test_conv2d(shared_scope):
     actual = generate_design_space(
         kind="cuda",
         mod=mod,
-        target=tvm.target.Target({"kind": "cuda", "arch": "sm_70"}),
+        target=tvm.target.Target({"kind": "maca", "arch": "sm_70"}),
         types=None,
         sch_rules=[
             multi_level_tiling_tensor_core(
@@ -715,7 +715,7 @@ def test_matmul_relu_pipeline(shared_scope):
     actual = generate_design_space(
         kind="cuda",
         mod=mod,
-        target=tvm.target.Target({"kind": "cuda", "arch": "sm_70"}),
+        target=tvm.target.Target({"kind": "maca", "arch": "sm_70"}),
         types=None,
         sch_rules=[
             multi_level_tiling_tensor_core(
@@ -745,7 +745,7 @@ def test_matmul_relu_non_tensorizable():
     (sch,) = generate_design_space(
         kind="cuda",
         mod=mod,
-        target=tvm.target.Target({"kind": "cuda", "arch": "sm_70"}),
+        target=tvm.target.Target({"kind": "maca", "arch": "sm_70"}),
         types=None,
         sch_rules=[multi_level_tiling_tensor_core(write_reuse_scope="shared")]
         + get_rules("cuda", ms.schedule_rule.AutoInline),
@@ -888,7 +888,7 @@ def test_padded_matmul_relu():
     actual = generate_design_space(
         kind="cuda",
         mod=mod,
-        target=tvm.target.Target({"kind": "cuda", "arch": "sm_70"}),
+        target=tvm.target.Target({"kind": "maca", "arch": "sm_70"}),
         types=None,
         sch_rules=[multi_level_tiling_tensor_core(write_reuse_scope="shared")]
         + get_rules("cuda", ms.schedule_rule.AutoInline),
@@ -1046,7 +1046,7 @@ def test_conv_1x1():
     actual = generate_design_space(
         kind="cuda",
         mod=mod,
-        target=tvm.target.Target({"kind": "cuda", "arch": "sm_70"}),
+        target=tvm.target.Target({"kind": "maca", "arch": "sm_70"}),
         types=None,
         sch_rules=[multi_level_tiling_tensor_core(write_reuse_scope="shared")]
         + get_rules("cuda", ms.schedule_rule.AutoInline),
@@ -1198,7 +1198,7 @@ def test_padded_conv():
     actual = generate_design_space(
         kind="cuda",
         mod=mod,
-        target=tvm.target.Target({"kind": "cuda", "arch": "sm_70"}),
+        target=tvm.target.Target({"kind": "maca", "arch": "sm_70"}),
         types=None,
         sch_rules=[multi_level_tiling_tensor_core(write_reuse_scope="shared")]
         + get_rules("cuda", ms.schedule_rule.AutoInline),
@@ -1346,7 +1346,7 @@ def test_padded_matmul_single_padded_input():
     actual = generate_design_space(
         kind="cuda",
         mod=mod,
-        target=tvm.target.Target({"kind": "cuda", "arch": "sm_70"}),
+        target=tvm.target.Target({"kind": "maca", "arch": "sm_70"}),
         types=None,
         sch_rules=[multi_level_tiling_tensor_core()]
         + get_rules("cuda", ms.schedule_rule.AutoInline),
@@ -1493,7 +1493,7 @@ def test_padded_matmul_no_padded_output():
     actual = generate_design_space(
         kind="cuda",
         mod=mod,
-        target=tvm.target.Target({"kind": "cuda", "arch": "sm_70"}),
+        target=tvm.target.Target({"kind": "maca", "arch": "sm_70"}),
         types=None,
         sch_rules=[multi_level_tiling_tensor_core()]
         + get_rules("cuda", ms.schedule_rule.AutoInline),

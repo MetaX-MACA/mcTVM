@@ -35,7 +35,7 @@ NUM_WORKERS = 4
 
 def run_prim_func(sess, prim_func, *args):
     """Compile, export, load, and run a PrimFunc in the shared disco session."""
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with tempfile.TemporaryDirectory() as tmpdir:
         path = f"{tmpdir}/test.so"
         mod = tvm.compile(prim_func, target=target, tir_pipeline="tirx")
@@ -63,8 +63,12 @@ def create_nvshmem_array(sess, shape, dtype, init_data_fn=None, zero_out=True):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
-@pytest.mark.skip(reason="nvshmem doesn't work with pytest")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.xfail(
+    reason="TODO(maca): [nvshmem] support NVSHMEM TIRx codegen under pytest process isolation",
+    run=False,
+    strict=False,
+)
 def test_codegen_nvshmem():
     def _test_func():
         ############ setup ############

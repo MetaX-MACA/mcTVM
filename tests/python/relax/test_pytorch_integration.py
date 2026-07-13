@@ -104,19 +104,19 @@ class TestPyTorchIntegration:
     def test_module_creation_and_instantiation_gpu(self):
         module = PyTorchIntegrationModule
 
-        if tvm.cuda().exist:
+        if tvm.maca().exist:
             assert hasattr(module, "__call__"), "Module should be callable"
 
-            device = tvm.cuda(0)
+            device = tvm.maca(0)
             instance = module(device)
 
             assert isinstance(instance, BasePyModule), "Instance should be BasePyModule"
             required_methods = ["main", "call_tir", "call_dps_packed"]
             for method in required_methods:
                 assert hasattr(instance, method), f"Instance should have method: {method}"
-            assert "cuda" in str(instance.target)
+            assert "maca" in str(instance.target)
         else:
-            pytest.skip("CUDA not available")
+            pytest.skip("MACA not available")
 
     def test_python_function_execution(self):
         """Test that Python functions execute correctly."""
@@ -229,13 +229,13 @@ class TestPyTorchIntegration:
     def test_end_to_end_pipeline_gpu(self):
         module = PyTorchIntegrationModule
 
-        if tvm.cuda().exist:
-            device = tvm.cuda(0)
+        if tvm.maca().exist:
+            device = tvm.maca(0)
             instance = module(device)
 
             # Test basic GPU functionality without complex TIR operations
             assert isinstance(instance, BasePyModule)
-            assert "cuda" in str(instance.target)
+            assert "maca" in str(instance.target)
 
             # Test that we can create and work with GPU tensors
             n = 5
@@ -254,7 +254,7 @@ class TestPyTorchIntegration:
             assert result.dtype == torch.float32
             assert result.device.type == "cuda"
         else:
-            pytest.skip("CUDA not available")
+            pytest.skip("MACA not available")
 
     def test_cross_function_data_flow(self):
         """Test data flow between different function types."""

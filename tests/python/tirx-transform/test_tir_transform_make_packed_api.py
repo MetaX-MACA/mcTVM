@@ -75,7 +75,7 @@ def test_target_host_removed():
     class before:
         @T.prim_func(s_tir=True)
         def main(A: T.Buffer(1, "float32")):
-            T.func_attr({"global_symbol": "main", "target": T.target("cuda", host=host)})
+            T.func_attr({"global_symbol": "main", "target": T.target("maca", host=host)})
             T.evaluate(0)
 
     after = tvm.tirx.transform.MakePackedAPI()(before)

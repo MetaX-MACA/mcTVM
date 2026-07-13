@@ -665,7 +665,14 @@ def test_lower_runtime_builtin_view_with_multiple_updated_fields():
     tvm.ir.assert_structural_equal(Expected, After)
 
 
-@pytest.mark.parametrize("target", ["llvm", pytest.param("cuda", marks=pytest.mark.gpu)])
+@pytest.mark.parametrize(
+    "target",
+    [
+        "llvm",
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param("maca", marks=pytest.mark.gpu),
+    ],
+)
 def test_execute_no_op_view(target):
     if not tvm.testing.device_enabled(target):
         pytest.skip(f"{target} not enabled")
@@ -689,7 +696,14 @@ def test_execute_no_op_view(target):
     tvm.testing.assert_allclose(tvm_output.numpy(), np_expected)
 
 
-@pytest.mark.parametrize("target", ["llvm", pytest.param("cuda", marks=pytest.mark.gpu)])
+@pytest.mark.parametrize(
+    "target",
+    [
+        "llvm",
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param("maca", marks=pytest.mark.gpu),
+    ],
+)
 def test_execute_view_with_new_shape(target):
     if not tvm.testing.device_enabled(target):
         pytest.skip(f"{target} not enabled")
@@ -713,7 +727,14 @@ def test_execute_view_with_new_shape(target):
     tvm.testing.assert_allclose(tvm_output.numpy(), np_expected)
 
 
-@pytest.mark.parametrize("target", ["llvm", pytest.param("cuda", marks=pytest.mark.gpu)])
+@pytest.mark.parametrize(
+    "target",
+    [
+        "llvm",
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param("maca", marks=pytest.mark.gpu),
+    ],
+)
 def test_execute_view_with_new_byte_offset(target):
     if not tvm.testing.device_enabled(target):
         pytest.skip(f"{target} not enabled")
@@ -741,7 +762,14 @@ def test_execute_view_with_new_byte_offset(target):
     tvm.testing.assert_allclose(tvm_output.numpy(), np_expected)
 
 
-@pytest.mark.parametrize("target", ["llvm", pytest.param("cuda", marks=pytest.mark.gpu)])
+@pytest.mark.parametrize(
+    "target",
+    [
+        "llvm",
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param("maca", marks=pytest.mark.gpu),
+    ],
+)
 def test_execute_view_with_new_dtype(target):
     if not tvm.testing.device_enabled(target):
         pytest.skip(f"{target} not enabled")
@@ -765,7 +793,14 @@ def test_execute_view_with_new_dtype(target):
     tvm.testing.assert_allclose(tvm_output.numpy(), np_expected)
 
 
-@pytest.mark.parametrize("target", ["llvm", pytest.param("cuda", marks=pytest.mark.gpu)])
+@pytest.mark.parametrize(
+    "target",
+    [
+        "llvm",
+        pytest.param("cuda", marks=pytest.mark.gpu),
+        pytest.param("maca", marks=pytest.mark.gpu),
+    ],
+)
 def test_execute_view_with_multiple_updated_fields(target):
     if not tvm.testing.device_enabled(target):
         pytest.skip(f"{target} not enabled")

@@ -175,7 +175,7 @@ def cuda_workload(var_inp0: T.handle, inp1: T.Buffer((T.int64(4096), T.int64(409
 # pylint: enable=no-self-argument,invalid-name,line-too-long,no-method-argument
 
 
-@pytest.mark.skip("requires CUDA")
+@pytest.mark.skip("requires MACA")
 def test_benchmark_prim_func_rpc():
     with LocalRPC() as rpc:
         rpc_config = ms.runner.RPCConfig(
@@ -203,7 +203,7 @@ def test_benchmark_prim_func_rpc():
         ]
 
 
-@pytest.mark.skip("requires CUDA")
+@pytest.mark.skip("requires MACA")
 def test_benchmark_prim_func_local():
     input_infos, _, _ = benchmark(
         cuda_workload,
@@ -222,7 +222,7 @@ def test_benchmark_prim_func_local():
     ]
 
 
-@pytest.mark.skip("requires CUDA")
+@pytest.mark.skip("requires MACA")
 def test_benchmark_prim_func_full_local():
     with tvm.target.Target("nvidia/geforce-rtx-3070"):
         benchmark_prim_func(
@@ -230,7 +230,7 @@ def test_benchmark_prim_func_full_local():
         )
 
 
-@pytest.mark.skip("requires CUDA")
+@pytest.mark.skip("requires MACA")
 def test_benchmark_prim_func_full_rpc():
     with LocalRPC() as rpc:
         rpc_config = ms.runner.RPCConfig(

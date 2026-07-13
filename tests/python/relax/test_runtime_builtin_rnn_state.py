@@ -38,7 +38,7 @@ np_three = np.full((32, 32), 3.0, "float32")
 reserved_nseq = 4
 max_history = 4
 num_layers = 1
-device = tvm.cuda()
+device = tvm.maca()
 # Note that kernels in this test file cannot support 1-dim states.
 states = [((16, 16), "float16"), ((32, 32), "float32")]
 
@@ -75,7 +75,7 @@ def set_global_func():
     f_set = tvm.get_global_func("vm.builtin.rnn_state_set")
     f_debug_get = tvm.get_global_func("vm.builtin.rnn_state_debug_get")
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
 
     def _build(tir_func):
         mod = tvm.IRModule({"main": tir_func})
@@ -118,7 +118,7 @@ def verify_state(state, seq_ids, expected_values):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_rnn_state_get(rnn_state):  # pylint: disable=redefined-outer-name
     state = rnn_state
     f_clear(state)
@@ -134,7 +134,7 @@ def test_rnn_state_get(rnn_state):  # pylint: disable=redefined-outer-name
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_rnn_state_set(rnn_state):  # pylint: disable=redefined-outer-name
     state = rnn_state
     f_clear(state)
@@ -151,7 +151,7 @@ def test_rnn_state_set(rnn_state):  # pylint: disable=redefined-outer-name
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_rnn_state_popn(rnn_state):  # pylint: disable=redefined-outer-name
     state = rnn_state
     f_clear(state)
@@ -170,7 +170,7 @@ def test_rnn_state_popn(rnn_state):  # pylint: disable=redefined-outer-name
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_rnn_state_fork_sequence(rnn_state):  # pylint: disable=redefined-outer-name
     state = rnn_state
     f_clear(state)

@@ -28,7 +28,11 @@ from tvm import relax
 from tvm.support import utils
 
 
-@pytest.mark.skip(reason="Requires FlashInfer enabled and proper setup")
+@pytest.mark.xfail(
+    reason="TODO(maca): [flashinfer] support FlashInfer sampling runtime setup on MACA",
+    run=False,
+    strict=False,
+)
 def test_sampling():
     def load_module(name: str, static_modules: list[tvm.runtime.Module]):
         assert len(static_modules) > 0
@@ -52,11 +56,11 @@ def test_sampling():
     # Probability tensor (each row sums to 1)
     probs_np = np.array([[0.1, 0.2, 0.3, 0.2, 0.2] for _ in range(batch_size)], dtype="float32")
 
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     prob_tvm = tvm.runtime.tensor(probs_np, device=dev)
     output_tvm = tvm.runtime.empty((batch_size,), "int32", device=dev)
 
-    device = tvm.cuda()
+    device = tvm.maca()
     target = tvm.target.Target.from_device(device)
     sampling_mod = load_module(
         "flashinfer_sampling",

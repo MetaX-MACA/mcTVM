@@ -85,7 +85,7 @@ binary_arith_ops = [
 def test_binary_arith_infer_ty(binary_arith_op: Callable):
     bb = relax.BlockBuilder()
     vdevice0 = VDevice("llvm")
-    vdevice1 = VDevice("cuda", 0)
+    vdevice1 = VDevice("maca", 0)
     x0 = relax.Var("x", R.Tensor((2, 3), "float32"))
     x1 = relax.Var("x", R.Tensor((1, 3), "float32"))
     x2 = relax.Var("x", R.Tensor((3, 2, 3), "float32"))
@@ -309,7 +309,7 @@ def test_binary_arith_infer_ty_dtype_mismatch(binary_arith_op: Callable):
 def test_binary_arith_infer_ty_vdevice_mismatch(binary_arith_op: Callable):
     bb = relax.BlockBuilder()
     x = relax.Var("x", R.Tensor((2, 3), "float32", VDevice("llvm")))
-    y = relax.Var("y", R.Tensor((2, 3), "int32", VDevice("cuda")))
+    y = relax.Var("y", R.Tensor((2, 3), "int32", VDevice("maca")))
     with pytest.raises(TypeError):
         bb.normalize(binary_arith_op(x, y))
 

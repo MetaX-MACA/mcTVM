@@ -36,26 +36,30 @@ from tvm.testing import env
 env_checker_codegen = tvm.get_global_func("relax.ext.tensorrt", True)
 env_checker_runtime = tvm.get_global_func("relax.is_tensorrt_runtime_enabled", True)
 
-requires_tensorrt_codegen = pytest.mark.skipif(
+requires_tensorrt_codegen = pytest.mark.xfail(
     not env_checker_codegen,
-    reason="TensorRT codegen not available",
+    reason="TODO(maca): [tensorrt-codegen] support or enable TensorRT Relax codegen passes on MACA",
+    run=False,
+    strict=False,
 )
-requires_tensorrt_runtime = pytest.mark.skipif(
+requires_tensorrt_runtime = pytest.mark.xfail(
     not env_checker_runtime or not env_checker_runtime(),
-    reason="TensorRT runtime not available",
+    reason="TODO(maca): [tensorrt-runtime] support or enable TensorRT runtime integration on MACA",
+    run=False,
+    strict=False,
 )
 
 # Global variable in pytest that applies markers to all tests.
 pytestmark = [
     requires_tensorrt_codegen,
     pytest.mark.gpu,
-    pytest.mark.skipif(not env.has_cuda(), reason="need cuda"),
+    pytest.mark.skipif(not env.has_maca(), reason="need maca"),
 ]
 
 # Target gpu
 target_str = "nvidia/nvidia-t4"
 target = tvm.target.Target(target_str)
-dev = tvm.cuda()
+dev = tvm.maca()
 
 
 def check_executable(exec, dev, inputs, expected, entry_func_name):

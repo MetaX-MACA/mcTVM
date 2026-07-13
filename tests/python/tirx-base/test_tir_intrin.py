@@ -282,7 +282,7 @@ dtype = tvm.testing.parameter("int32", "int64")
 )
 def test_clz(target, dtype):
     if not tvm.testing.device_enabled(target):
-        pytest.skip(f"{target} not enabled")
+        pytest.skip("target not enabled")
     dev = tvm.device(target["kind"] if isinstance(target, dict) else target)
     target = tvm.target.Target(target)
     if (

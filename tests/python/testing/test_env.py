@@ -60,10 +60,10 @@ def test_probe_returns_bool(probe):
     assert isinstance(probe(), bool)
 
 
-def test_has_cuda_implies_device():
-    """has_cuda() requires a device (it also requires the kind to be enabled)."""
-    if env.has_cuda():
-        assert tvm.cuda().exist
+def test_has_maca_implies_device():
+    """has_maca() requires a device (it also requires the kind to be enabled)."""
+    if env.has_maca():
+        assert tvm.maca().exist
 
 
 def test_has_gpu_is_raw_any_device():
@@ -82,9 +82,9 @@ def test_has_gpu_is_raw_any_device():
 def test_target_enabled_respects_tvm_test_targets(monkeypatch):
     """A device kind excluded from TVM_TEST_TARGETS is reported as not enabled."""
     env._target_enabled.cache_clear()  # pylint: disable=protected-access
-    monkeypatch.setenv("TVM_TEST_TARGETS", "cuda;llvm")
+    monkeypatch.setenv("TVM_TEST_TARGETS", "maca;llvm")
     try:
-        assert env._target_enabled("cuda")  # pylint: disable=protected-access
+        assert env._target_enabled("maca")  # pylint: disable=protected-access
         assert env._target_enabled("llvm")  # pylint: disable=protected-access
         assert not env._target_enabled("opencl")  # pylint: disable=protected-access
         assert not env._target_enabled("metal")  # pylint: disable=protected-access
@@ -92,16 +92,16 @@ def test_target_enabled_respects_tvm_test_targets(monkeypatch):
         env._target_enabled.cache_clear()  # pylint: disable=protected-access
 
 
-def test_cuda_compute_is_monotonic():
-    """has_cuda_compute is monotone in the requested version."""
-    if not env.has_cuda():
-        # Without a CUDA device every query is False, including the (0, 0) floor.
-        assert not env.has_cuda_compute(1, 0)
-        assert not env.has_cuda_compute(0, 0)
+def test_maca_compute_is_monotonic():
+    """has_maca_compute is monotone in the requested version."""
+    if not env.has_maca():
+        # Without a MACA device every query is False, including the (0, 0) floor.
+        assert not env.has_maca_compute(1, 0)
+        assert not env.has_maca_compute(0, 0)
         return
     # A device that satisfies (major, minor) also satisfies anything lower.
-    assert env.has_cuda_compute(1, 0)
-    assert env.has_cuda_compute(0, 0)
+    assert env.has_maca_compute(1, 0)
+    assert env.has_maca_compute(0, 0)
 
 
 def test_has_multi_gpu_is_bool():
@@ -121,7 +121,7 @@ def test_llvm_min_version_is_monotone():
 
 def test_probes_are_memoized():
     """Probes are cached so the driver/subprocess is hit once per process."""
-    env.has_cuda()
+    env.has_maca()
     info = env._device_exists.cache_info()  # pylint: disable=protected-access
     assert info.hits + info.misses >= 1
 
@@ -133,9 +133,9 @@ def test_probes_are_memoized():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
-def test_thin_cuda_idiom():
-    dev = tvm.cuda()
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+def test_thin_maca_idiom():
+    dev = tvm.maca()
     assert dev.exist
 
 

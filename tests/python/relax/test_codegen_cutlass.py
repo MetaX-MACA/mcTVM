@@ -85,8 +85,18 @@ class Conv2dx2:
 
 
 pytestmark = [
-    pytest.mark.skipif(not env.build_flag_enabled("USE_CUTLASS"), reason="need cutlass"),
+    pytest.mark.xfail(
+        not env.build_flag_enabled("USE_CUTLASS"),
+        reason="TODO(maca): [cutlass-offload] support or enable CUTLASS-compatible Relax offload on MACA",
+        run=False,
+        strict=False,
+    ),
 ]
+
+MACA_CUTLASS_CUDA_GRAPH_XFAIL_REASON = (
+    "TODO(maca): [cutlass-offload] support Relax CUDA graph capture and replay for MACA on the CUTLASS "
+    "offload path"
+)
 
 
 def build_and_run(mod, inputs_np, target, legalize=True, cuda_graph=False):
@@ -128,7 +138,7 @@ def get_result_with_relax_cutlass_offload(
     mod, *args, assert_all_bindings_fused=True, num_final_bindings=1
 ):
     mod = build_cutlass(mod, assert_all_bindings_fused, num_final_bindings)
-    return build_and_run(mod, args, "cuda")
+    return build_and_run(mod, args, "maca")
 
 
 def test_kernel_sharing():
@@ -1033,12 +1043,12 @@ def test_attention_rewrite_offload(attention_rewrite_size):
     original_mod = codegen_pass(original_mod)
     expected_mod = codegen_pass(expected_mod)
     if bias is None:
-        original_out = build_and_run(original_mod, [q, k, v], "cuda")
-        expected_out = build_and_run(expected_mod, [q, k, v], "cuda")
+        original_out = build_and_run(original_mod, [q, k, v], "maca")
+        expected_out = build_and_run(expected_mod, [q, k, v], "maca")
         tvm.testing.assert_allclose(original_out, expected_out, rtol=1e-5, atol=1e-5)
     else:
-        original_out = build_and_run(original_mod, [q, k, v, bias], "cuda", legalize=False)
-        expected_out = build_and_run(expected_mod, [q, k, v, bias], "cuda", legalize=False)
+        original_out = build_and_run(original_mod, [q, k, v, bias], "maca", legalize=False)
+        expected_out = build_and_run(expected_mod, [q, k, v, bias], "maca", legalize=False)
         tvm.testing.assert_allclose(original_out, expected_out, rtol=1e-5, atol=1e-5)
 
 
@@ -1135,7 +1145,7 @@ def test_layer_norm(data_shape, dtype, axes):
     inp = np.random.randn(*data_shape).astype(dtype)
     gamma = np.random.randn(data_shape[-1]).astype(dtype)
     beta = np.random.randn(data_shape[-1]).astype(dtype)
-    out = build_and_run(mod, [inp, gamma, beta], "cuda")
+    out = build_and_run(mod, [inp, gamma, beta], "maca")
     ref = build_and_run(Module, [inp, gamma, beta], "llvm")
 
     tvm.testing.assert_allclose(out, ref, rtol=1e-2, atol=1e-2)
@@ -1491,8 +1501,8 @@ def test_fp16A_int4B_gemm():
         (tvm.runtime.tensor(y), tvm.runtime.tensor(bias))
     )
 
-    dev = tvm.device("cuda", 0)
-    ex = tvm.compile(mod_deploy, target="cuda")
+    dev = tvm.device("maca", 0)
+    ex = tvm.compile(mod_deploy, target="maca")
     vm = relax.vm.VirtualMachine(ex, dev)
 
     x_nd = tvm.runtime.tensor(x, dev)
@@ -1642,8 +1652,8 @@ def test_fp16A_int8B_gemm():
         (tvm.runtime.tensor(y), tvm.runtime.tensor(bias))
     )
 
-    dev = tvm.device("cuda", 0)
-    ex = tvm.compile(mod_deploy, target="cuda")
+    dev = tvm.device("maca", 0)
+    ex = tvm.compile(mod_deploy, target="maca")
     vm = relax.vm.VirtualMachine(ex, dev)
 
     x_nd = tvm.runtime.tensor(x, dev)
@@ -1721,7 +1731,7 @@ def test_rms_norm():
     # This is because RunCodegen does not support PrimFunc well yet.
     # i.e., it does remove the global symbol of PrimFunc, which would be no longer used,
     # and thus, the following DCE cannot remove this. Revisit when resolved.
-    with tvm.target.Target("cuda"):
+    with tvm.target.Target("maca"):
         mod = tvm.s_tir.transform.DefaultGPUSchedule()(mod)
 
     mod = relax.transform.RunCodegen(
@@ -1730,13 +1740,16 @@ def test_rms_norm():
 
     inp = np.random.randn(*data_shape).astype(dtype)
     weight = np.random.randn(data_shape[-1]).astype(dtype)
-    out = build_and_run(mod, [inp, weight], "cuda")
+    out = build_and_run(mod, [inp, weight], "maca")
     ref = build_and_run(Module, [inp, weight], "llvm", legalize=True)
 
     tvm.testing.assert_allclose(out, ref, rtol=1e-2, atol=1e-2)
 
 
 def test_conv2d_cuda_graph():
+    if env.has_maca():
+        pytest.xfail(MACA_CUTLASS_CUDA_GRAPH_XFAIL_REASON)
+
     @tvm.script.ir_module
     class Conv2d:
         @R.function
@@ -1786,10 +1799,10 @@ def test_conv2d_cuda_graph():
     mod = relax.transform.RunCodegen({"cutlass": {"sm": 80, "find_first_valid": True}})(mod)
     mod = relax.pipeline.get_pipeline()(mod)  # pylint: disable=no-value-for-parameter
 
-    with tvm.target.Target("cuda"):
+    with tvm.target.Target("maca"):
         mod = tvm.s_tir.transform.DefaultGPUSchedule()(mod)
 
-    out = build_and_run(mod, inputs, "cuda", cuda_graph=True)
+    out = build_and_run(mod, inputs, "maca", cuda_graph=True)
     ref = build_and_run(Conv2d, inputs, "llvm", legalize=True)
     tvm.testing.assert_allclose(out, ref, rtol=1e-2, atol=1e-2)
 
@@ -1914,8 +1927,8 @@ def test_fp16A_int8B_gemm_batched():
 
     packed_weight, scales = vm[transform_func_name]((tvm.runtime.tensor(y),))
 
-    dev = tvm.device("cuda", 0)
-    ex = tvm.compile(mod_deploy, target="cuda")
+    dev = tvm.device("maca", 0)
+    ex = tvm.compile(mod_deploy, target="maca")
     vm = relax.vm.VirtualMachine(ex, dev)
 
     x_nd = tvm.runtime.tensor(x, dev)
@@ -2069,8 +2082,8 @@ def test_fp16A_int8B_gemm_batched_finegrained():
 
     packed_weight, scales = vm[transform_func_name]((tvm.runtime.tensor(y),))
 
-    dev = tvm.device("cuda", 0)
-    ex = tvm.compile(mod_deploy, target="cuda")
+    dev = tvm.device("maca", 0)
+    ex = tvm.compile(mod_deploy, target="maca")
     vm = relax.vm.VirtualMachine(ex, dev)
 
     x_nd = tvm.runtime.tensor(x, dev)
@@ -2121,7 +2134,7 @@ def test_attention_rewrite_multi_query():
     codegen_pass = relax.transform.RunCodegen({"cutlass": {"sm": 80}})
     mod = codegen_pass(mod)
 
-    out = build_and_run(mod, args, "cuda")
+    out = build_and_run(mod, args, "maca")
 
     tvm.testing.assert_allclose(out, ref, rtol=1e-2, atol=1e-2)
 
@@ -2168,7 +2181,7 @@ def _test_batched_var_len_attention(
     codegen_pass = relax.transform.RunCodegen({"cutlass": {"sm": 80}})
     mod = codegen_pass(mod)
 
-    with tvm.target.Target("cuda"):
+    with tvm.target.Target("maca"):
         mod = relax.transform.LegalizeOps()(mod)
         mod = tvm.s_tir.transform.DefaultGPUSchedule()(mod)
 

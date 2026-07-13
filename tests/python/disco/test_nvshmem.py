@@ -167,8 +167,8 @@ def _run_in_fresh_process(target, *args):
 
 def _require_cuda_devices(num_workers):
     # Each nvshmem worker binds its own CUDA device (cudaSetDevice(worker_id)).
-    if not all(tvm.cuda(i).exist for i in range(num_workers)):
-        pytest.skip(f"Requires {num_workers} CUDA devices")
+    if not all(tvm.maca(i).exist for i in range(num_workers)):
+        pytest.skip(f"Requires {num_workers} MACA devices")
 
 
 def _init_finalize(session_kind, num_workers):
@@ -184,7 +184,7 @@ def _init_finalize(session_kind, num_workers):
 
 
 def _empty(session_kind, num_workers):
-    device = tvm.cuda()
+    device = tvm.maca()
     sess = session_kind(num_workers=num_workers)
     f_init_nvshmem_uid = tvm.get_global_func("runtime.disco.nvshmem.init_nvshmem_uid")
     uid = f_init_nvshmem_uid()
@@ -244,7 +244,7 @@ def _compile():
         B_array = sess.empty(B_np.shape, "float32")
         A_array.debug_copy_from(0, A_np)
 
-        target = tvm.target.Target("cuda")
+        target = tvm.target.Target("maca")
         tvm.compile(main, target=target).export_library(path)
         mod = sess.load_vm_module(path)
         mod["main"](A_array, B_array)
@@ -334,7 +334,7 @@ def _kernel_compile(compile_mode):
         try:
             path = tmpdir + "/test_nvshmem_kernel.so"
 
-            target = tvm.target.Target("cuda")
+            target = tvm.target.Target("maca")
             tvm.compile(NvshmemQueryModule, target=target).export_library(path)
             mod = sess.load_vm_module(path)
             result = mod["main"]()
@@ -375,7 +375,7 @@ def test_nvshmem_kernel_compile_nvrtc():
     try:
         from cuda.bindings import nvrtc  # noqa: F401
     except ImportError:
-        pytest.skip("cuda-python not available, skipping nvrtc test")
+        pytest.skip("runtime compiler binding not available")
 
     _run_in_fresh_process(_kernel_compile, "nvrtc")
 

@@ -453,7 +453,7 @@ def test_inline_consumer_chain():
 
 def test_inline_into_cache():
     mod = MultiLevelTiledConv2D
-    target = Target("cuda", host="llvm")
+    target = Target("maca", host="llvm")
     (space,) = generate_design_space(
         kind="cuda",
         mod=mod,
@@ -465,7 +465,7 @@ def test_inline_into_cache():
 
 def test_inline_into_multiple_consumers():
     mod = SoftmaxBeforeInline
-    target = Target("cuda", host="llvm")
+    target = Target("maca", host="llvm")
     (space,) = generate_design_space(
         kind="cuda",
         mod=mod,
@@ -489,7 +489,7 @@ def test_inline_pure_spatial():
 
 def test_inline_constant_tensor():
     mod = ConstConsumer
-    target = Target("cuda", host="llvm")
+    target = Target("maca", host="llvm")
     (space,) = generate_design_space(
         kind="cuda",
         mod=mod,

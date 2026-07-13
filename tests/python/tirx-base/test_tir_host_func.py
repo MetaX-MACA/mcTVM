@@ -60,7 +60,7 @@ def test_host_func():
         te_workload.matmul(729, 729, 729, in_dtype="float32", out_dtype="float32")
     )
     mod = tvm.ir.IRModule({"main": func})
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     mod = tvm.tirx.transform.Apply(
         lambda f: f.with_attr(
             {

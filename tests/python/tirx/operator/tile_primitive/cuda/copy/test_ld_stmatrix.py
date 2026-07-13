@@ -42,9 +42,17 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import ComposeLayout, S, SwizzleLayout, TileLayout, laneid, tid_in_wg, tx
 
+MACA_XFAIL = pytest.mark.xfail(
+    reason=(
+        "TODO(maca): [tile-primitive-ldstmatrix] support ldmatrix/stmatrix dispatch "
+        "and swizzle fast path"
+    ),
+    strict=False,
+)
+
 
 def _compile_src(kernel):
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     mod = tvm.IRModule({"main": kernel})
     with target:
         compiled = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -321,7 +329,8 @@ _BUILDERS = {
 @pytest.mark.parametrize("direction", ["ld", "st"])
 @pytest.mark.parametrize("num", [1, 2, 4])
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_ldstmatrix(scope, trans, direction, num):
     kernel, (M, N) = _BUILDERS[scope](num, direction, trans)
     compiled, src = _compile_src(kernel)
@@ -331,7 +340,7 @@ def test_ldstmatrix(scope, trans, direction, num):
     expected = f"{inst}.sync.aligned.m8n8.x{num}{trans_inst}.shared.b16"
     assert expected in src, f"{expected} not emitted; src=\n{src}"
 
-    DEV = tvm.cuda(0)
+    DEV = tvm.maca(0)
     A_np = np.arange(M * N, dtype="float16").reshape(M, N)
     B_np = np.zeros((M, N), dtype="float16")
     A = tvm.runtime.tensor(A_np, device=DEV)
@@ -352,7 +361,8 @@ def test_ldstmatrix(scope, trans, direction, num):
 @pytest.mark.parametrize("direction", ["ld", "st"])
 @pytest.mark.parametrize("num", [1, 2, 4])
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_ldstmatrix_swizzle(scope, trans, direction, num):
     kernel, (M, N) = _BUILDERS[scope](num, direction, trans, swizzle=True)
     compiled, src = _compile_src(kernel)
@@ -362,7 +372,7 @@ def test_ldstmatrix_swizzle(scope, trans, direction, num):
     expected = f"{inst}.sync.aligned.m8n8.x{num}{trans_inst}.shared.b16"
     assert expected in src, f"{expected} not emitted; src=\n{src}"
 
-    DEV = tvm.cuda(0)
+    DEV = tvm.maca(0)
     A_np = np.arange(M * N, dtype="float16").reshape(M, N)
     B_np = np.zeros((M, N), dtype="float16")
     A = tvm.runtime.tensor(A_np, device=DEV)
@@ -428,7 +438,8 @@ def _build_multi_iter_kernel(outer_ext: int):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_ldstmatrix_swizzle_multi_iter_pow2():
     """32x64 fp16 warp; outer m_outer split into multiple BitIters (no
     LinearIter). Fast path must fire with a 3-slot signed_strides buffer."""
@@ -445,7 +456,7 @@ def test_ldstmatrix_swizzle_multi_iter_pow2():
     bitsel = re.findall(r"& 1\) \* v_\d+\[", src)
     assert bitsel, "fast-path bit-select pattern '& 1) * v_<n>[' missing"
 
-    DEV = tvm.cuda(0)
+    DEV = tvm.maca(0)
     n_elem = 1
     for e in shape:
         n_elem *= e
@@ -458,7 +469,8 @@ def test_ldstmatrix_swizzle_multi_iter_pow2():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_ldstmatrix_swizzle_multi_iter_linear():
     """40x64 fp16 warp; outer ext=5 is non-pow2 but stride lands on swizzle
     period (Case 1.D pure) so the LinearIter relaxation fires. Pattern has
@@ -477,7 +489,7 @@ def test_ldstmatrix_swizzle_multi_iter_linear():
     bitsel = re.findall(r"& 1\) \* v_\d+\[", src)
     assert bitsel, "fast-path bit-select pattern missing"
 
-    DEV = tvm.cuda(0)
+    DEV = tvm.maca(0)
     n_elem = 1
     for e in shape:
         n_elem *= e

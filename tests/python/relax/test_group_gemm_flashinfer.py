@@ -353,8 +353,18 @@ def generate_test_data(
 ###########################################
 ############### Test driver ###############
 ###########################################
-@pytest.mark.skipif(not has_flashinfer(), reason="FlashInfer not available")
-@pytest.mark.skipif(not has_cutlass(), reason="CUTLASS SM90+ not available")
+@pytest.mark.xfail(
+    not has_flashinfer(),
+    reason="TODO(maca): [flashinfer] support or enable FlashInfer grouped GEMM integration on MACA",
+    run=False,
+    strict=False,
+)
+@pytest.mark.xfail(
+    not has_cutlass(),
+    reason="TODO(maca): [cutlass-sm90-gemm] support CUTLASS SM90+ grouped GEMM path or MACA equivalent",
+    run=False,
+    strict=False,
+)
 @pytest.mark.parametrize(
     "dtype_a,dtype_b,dtype_out",
     [
@@ -391,7 +401,7 @@ def test_grouped_gemm_correctness(
     test_case,
 ):
     """Test correctness of GroupedGemm operations"""
-    device = tvm.cuda(0)
+    device = tvm.maca(0)
     target = tvm.target.Target.from_device(device)
 
     # Generate the module

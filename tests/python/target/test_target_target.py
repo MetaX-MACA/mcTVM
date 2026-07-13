@@ -327,17 +327,17 @@ def test_target_features():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
-@pytest.mark.parametrize("input_device", ["cuda", tvm.cuda()])
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.parametrize("input_device", ["maca", tvm.maca()])
 def test_target_from_device_cuda(input_device):
     target = Target.from_device(input_device)
 
-    dev = tvm.cuda()
-    assert target.kind.name == "cuda"
+    dev = tvm.maca()
+    assert target.kind.name == "maca"
     assert target.attrs["max_threads_per_block"] == dev.max_threads_per_block
     assert int(target.attrs["max_shared_memory_per_block"]) == dev.max_shared_memory_per_block
     assert int(target.attrs["thread_warp_size"]) == dev.warp_size
-    assert str(target.attrs.get("arch", "")) == "sm_" + dev.compute_version.replace(".", "")
+    assert str(target.attrs.get("mcpu", "")) == "xcore" + dev.compute_version.replace(".", "") + "0"
 
 
 @pytest.mark.gpu

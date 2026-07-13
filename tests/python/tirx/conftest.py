@@ -31,10 +31,8 @@ from tvm.testing import env
 
 
 def pytest_collection_modifyitems(config, items):
-    if env.has_cuda_compute(10):
+    if env.has_maca():
         return
-    skip = pytest.mark.skip(
-        reason="tirx suite requires a CUDA compute capability 10.0 (sm_100a) device"
-    )
+    skip = pytest.mark.skip(reason="tirx suite requires a MACA device enabled by TVM_TEST_TARGETS")
     for item in items:
         item.add_marker(skip)

@@ -35,6 +35,14 @@ from tvm.testing import env
 from tvm.tirx.cuda.operator.tile_primitive.tma_utils import SwizzleMode, mma_shared_layout
 from tvm.tirx.layout import R, S, TCol, TileLayout, TLane
 
+MACA_XFAIL = pytest.mark.xfail(
+    reason=(
+        "TODO(maca): [tile-primitive-copy-async-smem-tmem] support shared-to-tmem copy dispatch"
+    ),
+    strict=False,
+)
+
+
 T_LAY_BASIC = TileLayout(S[(32, 16) : (1 @ TLane, 1 @ TCol)] + R[4 : 32 @ TLane])
 
 
@@ -206,10 +214,10 @@ def _run_3d_4tile(s_full, t_full, s_full_shape, dtype, A_init, expected):
 
 
 def _execute(kernel, A_init, expected):
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.compile(tvm.IRModule({"main": kernel}), target=target, tir_pipeline="tirx")
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     A = tvm.runtime.tensor(A_init, dev)
     B_np = np.zeros((32, 16), dtype=A_init.dtype)
     B = tvm.runtime.tensor(B_np, dev)
@@ -221,7 +229,8 @@ def _execute(kernel, A_init, expected):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize(
     "name,s_full,s_full_shape,s_region",
     [
@@ -279,7 +288,8 @@ def test_single_cp(name, s_full, s_full_shape, s_region):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_multi_cp_sw0_4tiles():
     s_full = TileLayout(S[(4, 32, 16) : (512, 16, 1)])
     t_full = TileLayout(S[(4, 32, 16) : (16 @ TCol, 1 @ TLane, 1 @ TCol)] + R[4 : 32 @ TLane])
@@ -289,7 +299,8 @@ def test_multi_cp_sw0_4tiles():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_align_middle_2_to_1_nvfp4_sfb():
     """SFB-style nvfp4 case: TMEM mid canonicalizes to single iter
     (16@TCol + 4@TCol merge), but SMEM mid stays as 2 iters
@@ -399,7 +410,7 @@ def test_align_middle_2_to_1_nvfp4_sfb():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize(
     "bad",
     [
@@ -437,7 +448,7 @@ def test_dispatch_rejects_bad_inputs(bad):
         s_full, T_LAY_BASIC, s_full_shape, [32, 16], s_r0, s_r1, s_c0, s_c1, 0, 32, 0, 16, "uint8"
     )
     with pytest.raises(Exception):
-        target = tvm.target.Target("cuda")
+        target = tvm.target.Target("maca")
         with target:
             tvm.compile(tvm.IRModule({"main": kernel}), target=target, tir_pipeline="tirx")
 

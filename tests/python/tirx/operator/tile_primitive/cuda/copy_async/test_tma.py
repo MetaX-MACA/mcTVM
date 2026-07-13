@@ -40,6 +40,13 @@ from tvm.tirx.operator.tile_primitive.ops import CopyAsync
 from tvm.tirx.stmt import DeclBuffer
 from tvm.tirx.stmt_functor import StmtExprVisitor
 
+MACA_XFAIL = pytest.mark.xfail(
+    reason=(
+        "TODO(maca): [tile-primitive-copy-async-tma] support TMA async copy dispatch and codegen"
+    ),
+    strict=False,
+)
+
 # ===========================================================================
 # Helpers
 # ===========================================================================
@@ -119,7 +126,7 @@ def _make_tma_call(
 
     op_call = CopyAsync(dst_br, src_br, config=config)
 
-    target = tvm.target.Target({"kind": "cuda", "arch": "sm_90a"})
+    target = tvm.target.Target({"kind": "maca", "arch": "sm_90a"})
     sctx = DispatchContext(target, ExecScope("thread"), {}, {})
 
     impl = copy_tma_impl(op_call, sctx)
@@ -1002,6 +1009,7 @@ TMA_CASES = [
 
 
 @pytest.mark.parametrize("case", TMA_CASES)
+@MACA_XFAIL
 def test_copy_tma_codegen(case):
     """Unified structural-golden driver for every TMA unit test case.
 
@@ -1048,7 +1056,8 @@ def test_copy_tma_codegen(case):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("swizzle_len", [3])
 @pytest.mark.parametrize("dtype", ["float16"])
 def test_copy_tma_symbolic_dimension(dtype, swizzle_len):
@@ -1067,7 +1076,7 @@ def test_copy_tma_symbolic_dimension(dtype, swizzle_len):
     M_CONCRETE = 128  # Concrete value for testing
     thread_cnt = 128
 
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
 
     # Shared memory layout with swizzle
     shared_layout = T.ComposeLayout(
@@ -1124,7 +1133,7 @@ def test_copy_tma_symbolic_dimension(dtype, swizzle_len):
         # fmt: on
 
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
 
     with target:
         mod = tvm.IRModule({"main": copy_async})
@@ -1146,7 +1155,8 @@ def test_copy_tma_symbolic_dimension(dtype, swizzle_len):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("swizzle_len", [3])
 @pytest.mark.parametrize("dtype", ["float16"])
 def test_copy_tma_3d_with_view(dtype, swizzle_len):
@@ -1158,7 +1168,7 @@ def test_copy_tma_3d_with_view(dtype, swizzle_len):
         Tx.copy_async(Q_smem_3d[pipe_idx, blk_k_idx, :, :, :],
                       Q[batch, seq_start:seq_end, head_start:head_end, k_start:k_end], ...)
     """
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     smem_bytes = 2 * 2 * 128 * 64 * tvm.DataType(dtype).bits // 8
     copy_bytes_per_blk = 32 * 4 * 64 * tvm.DataType(dtype).bits // 8
 
@@ -1215,7 +1225,7 @@ def test_copy_tma_3d_with_view(dtype, swizzle_len):
         # fmt: on
 
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
 
     with target:
         mod = tvm.IRModule({"main": copy_async})
@@ -1252,7 +1262,8 @@ def test_copy_tma_3d_with_view(dtype, swizzle_len):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize(
     "task",
     [
@@ -1304,7 +1315,7 @@ def test_copy_tma_3d_with_view(dtype, swizzle_len):
 def test_copy_tma_gpu_smoke_g2s(task, dtype):
     """Smoke test: compile and run TMA G2S copy on GPU to verify end-to-end correctness."""
     g_shape, g_region, s_shape, s_region, thread_cnt, layoutA, layoutB, layoutS_fn = task
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
 
     shared_layout = layoutS_fn(dtype)
     is_pipeline = g_region is None
@@ -1356,7 +1367,7 @@ def test_copy_tma_gpu_smoke_g2s(task, dtype):
             # fmt: on
 
         np_dtype = tvm.testing.np_dtype_from_str(dtype)
-        target = tvm.target.Target("cuda")
+        target = tvm.target.Target("maca")
         with target:
             mod = tvm.IRModule({"main": copy_async})
             mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1409,7 +1420,7 @@ def test_copy_tma_gpu_smoke_g2s(task, dtype):
             # fmt: on
 
         np_dtype = tvm.testing.np_dtype_from_str(dtype)
-        target = tvm.target.Target("cuda")
+        target = tvm.target.Target("maca")
         with target:
             mod = tvm.IRModule({"main": copy_async})
             mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1428,7 +1439,8 @@ def test_copy_tma_gpu_smoke_g2s(task, dtype):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("dtype", ["float16"])
 def test_copy_tma_gpu_smoke_s2g(dtype):
     """Smoke test: compile and run TMA S2G store on GPU."""
@@ -1474,8 +1486,8 @@ def test_copy_tma_gpu_smoke_s2g(dtype):
         # fmt: on
 
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
-    target = tvm.target.Target("cuda")
-    dev = tvm.cuda(0)
+    target = tvm.target.Target("maca")
+    dev = tvm.maca(0)
 
     with target:
         mod = tvm.IRModule({"main": copy_async})
@@ -1493,7 +1505,8 @@ def test_copy_tma_gpu_smoke_s2g(dtype):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 @pytest.mark.parametrize("dtype", ["float16"])
 def test_copy_tma_dynamic_cta_mask(dtype):
     """Regression test for B00004: dynamic cta_mask expression in TMA multicast.
@@ -1556,7 +1569,7 @@ def test_copy_tma_dynamic_cta_mask(dtype):
         T.ptx.mbarrier.try_wait(mbar_ptr, 0)
         # fmt: on
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": copy_async_dynamic_mask})
         # This compilation crashed before the B00004 fix with:

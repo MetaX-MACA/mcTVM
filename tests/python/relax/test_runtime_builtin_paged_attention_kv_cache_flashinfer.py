@@ -48,7 +48,7 @@ rope_scale = 1.0
 rope_theta = 1e4
 dtype = "float16"
 dtype_torch = getattr(torch, dtype)
-device = tvm.cuda()
+device = tvm.maca()
 device_torch = torch.device("cuda")
 
 fclear = None
@@ -410,7 +410,11 @@ def apply_attention(
     verify_cached_kv(kv_cache, seq_ids, cached_k, cached_v)
 
 
-@pytest.mark.skip(reason="Require FlashInfer enabled")
+@pytest.mark.xfail(
+    reason="TODO(maca): [flashinfer] support FlashInfer paged attention KV cache runtime on MACA",
+    run=False,
+    strict=False,
+)
 def test_paged_attention_kv_cache_prefill_and_decode(kv_cache_and_rope_mode):
     kv_cache, rope_mode = kv_cache_and_rope_mode
     fclear(kv_cache)
@@ -431,7 +435,11 @@ def test_paged_attention_kv_cache_prefill_and_decode(kv_cache_and_rope_mode):
         apply_attention(kv_cache, rope_mode, batch, cached_k, cached_v)
 
 
-@pytest.mark.skip(reason="Require FlashInfer enabled")
+@pytest.mark.xfail(
+    reason="TODO(maca): [flashinfer] support FlashInfer paged attention KV cache runtime on MACA",
+    run=False,
+    strict=False,
+)
 def test_paged_attention_kv_cache_remove_sequence(kv_cache_and_rope_mode):
     kv_cache, rope_mode = kv_cache_and_rope_mode
     fclear(kv_cache)
@@ -454,7 +462,11 @@ def test_paged_attention_kv_cache_remove_sequence(kv_cache_and_rope_mode):
         )
 
 
-@pytest.mark.skip(reason="Require FlashInfer enabled")
+@pytest.mark.xfail(
+    reason="TODO(maca): [flashinfer] support FlashInfer paged attention KV cache runtime on MACA",
+    run=False,
+    strict=False,
+)
 def test_paged_attention_kv_cache_fork_sequence(kv_cache_and_rope_mode):
     kv_cache, rope_mode = kv_cache_and_rope_mode
     fclear(kv_cache)
@@ -520,7 +532,11 @@ def test_paged_attention_kv_cache_fork_sequence(kv_cache_and_rope_mode):
     apply_attention(kv_cache, rope_mode, [(10, 1), (12, 1)], cached_k, cached_v)
 
 
-@pytest.mark.skip(reason="Require FlashInfer enabled")
+@pytest.mark.xfail(
+    reason="TODO(maca): [flashinfer] support FlashInfer paged attention KV cache runtime on MACA",
+    run=False,
+    strict=False,
+)
 def test_paged_attention_kv_cache_popn(kv_cache_and_rope_mode):
     kv_cache, rope_mode = kv_cache_and_rope_mode
     fclear(kv_cache)

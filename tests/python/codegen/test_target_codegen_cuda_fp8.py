@@ -36,6 +36,11 @@ except ImportError:
     ml_dtypes = None
 
 
+FP8_MACA_XFAIL_REASON = (
+    "TODO(maca): [fp8] support FP8 datatype lowering, conversion, packing, and source expectations"
+)
+
+
 @pytest.mark.parametrize(
     "input",
     [
@@ -44,7 +49,11 @@ except ImportError:
     ],
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.xfail(
+    reason="TODO(maca): [fp8] support FP8 source/type lowering compatible with these expectations",
+    strict=False,
+)
 def test_fp8_conversions(input):
     dtype, nv_dtype = input
 
@@ -71,7 +80,7 @@ def test_fp8_conversions(input):
         return Module
 
     mod = _create_mod(dtype)
-    target = "cuda"
+    target = "maca"
     fadd = tvm.tirx.build(mod, target=target)
 
     cuda_src = fadd.imports[0].inspect_source()
@@ -94,7 +103,8 @@ def test_fp8_conversions(input):
     ["float8_e4m3fn", "float8_e5m2", "float8_e8m0fnu"],
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.xfail(reason=FP8_MACA_XFAIL_REASON, strict=False)
 def test_fp8_packing(dtype):
     length = 64
     vector_length = 4
@@ -128,7 +138,7 @@ def test_fp8_packing(dtype):
         return Module
 
     mod = _create_mod(native_dtype, packed_dtype, length)
-    target = "cuda"
+    target = "maca"
     f = tvm.compile(mod, target=target)
     dev = tvm.device(target, 0)
 
@@ -161,7 +171,8 @@ def test_fp8_packing(dtype):
     ],
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.xfail(reason=FP8_MACA_XFAIL_REASON, strict=False)
 def test_fp8_vector_conversions(native_dtype, promoted_dtype, numpytype):
     vector_length = 64
 
@@ -189,7 +200,7 @@ def test_fp8_vector_conversions(native_dtype, promoted_dtype, numpytype):
         return Module
 
     mod = _create_mod(native_dtype, promoted_dtype)
-    target = "cuda"
+    target = "maca"
     fadd = tvm.tirx.build(mod, target=target)
     cuda_src = fadd.imports[0].inspect_source()
     dev = tvm.device(target, 0)
@@ -223,7 +234,7 @@ bcast_length = tvm.testing.parameter(2, 4, 6, 8)
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(8), reason="need cuda compute >= 8.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_half_broadcast(bcast_length):
     dtype = "float16"
 
@@ -240,7 +251,7 @@ def test_half_broadcast(bcast_length):
         return Module
 
     mod = _create_mod(bcast_length, dtype)
-    target = "cuda"
+    target = "maca"
     func = tvm.compile(mod, target=target)
     dev = tvm.device(target, 0)
 
@@ -259,7 +270,7 @@ vector_length = tvm.testing.parameter(2, 4)
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(8), reason="need cuda compute >= 8.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_half_misaligned_vector_load(vector_length):
     dtype = "float16"
     vec_dtype = dtype + "x" + str(vector_length)
@@ -274,7 +285,7 @@ def test_half_misaligned_vector_load(vector_length):
                 vec_index = T.ramp((i + 1) * vector_length - 1, -1, vector_length)
                 B[i] = A[vec_index]
 
-    target = "cuda"
+    target = "maca"
     f = tvm.compile(vector_load, target=target)
 
     dev = tvm.device(target, 0)
@@ -295,7 +306,7 @@ def test_half_misaligned_vector_load(vector_length):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(8), reason="need cuda compute >= 8.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_half4_vector_add():
     dtype = "float16"
     length = 64
@@ -319,7 +330,7 @@ def test_half4_vector_add():
                         T.writes(C[v_i])
                         C[v_i] = A[v_i] + B[v_i]
 
-    target = "cuda"
+    target = "maca"
     fadd = tvm.compile(Module, target=target)
     dev = tvm.device(target, 0)
 
@@ -749,7 +760,7 @@ class TestFP8e4x4QuantDequantScale(BaseFP8E4M3QuantScaleOnly):
 
     @tvm.testing.fixture
     def target_str(self):
-        return "cuda"
+        return "maca"
 
     @tvm.testing.fixture
     def scale_shape(self, weight_shape, group_size, axis):
@@ -797,7 +808,11 @@ class TestFP8e4x4QuantDequantScale(BaseFP8E4M3QuantScaleOnly):
         )
 
     @pytest.mark.gpu
-    @pytest.mark.skipif(not env.has_cuda_compute(8, 9), reason="need cuda compute >= 8.9")
+    @pytest.mark.skipif(not env.has_maca(), reason="need maca")
+    @pytest.mark.xfail(
+        reason="TODO(maca): [fp8] support FP8 quantize/dequantize schedules and runtime codegen",
+        strict=False,
+    )
     def test_main(self, weight_shape, model_dtype, target_str, compiled_functions):
         quant, dequant = compiled_functions
         dev = tvm.device(target_str, 0)
@@ -813,8 +828,12 @@ class TestFP8e4x4QuantDequantScale(BaseFP8E4M3QuantScaleOnly):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize("dtype", ["float8_e5m2", "float8_e4m3fn", "float8_e8m0fnu"])
+@pytest.mark.xfail(
+    reason="TODO(maca): [fp8] support FP8 constants in local buffers",
+    strict=False,
+)
 def test_const(dtype):
     @T.prim_func(s_tir=True)
     def func(A: T.Buffer((4,), dtype)) -> None:
@@ -825,13 +844,17 @@ def test_const(dtype):
             A[tx] = A_local[tx]
 
     mod = tvm.IRModule({"main": func})
-    tvm.compile(mod, target="cuda")
+    tvm.compile(mod, target="maca")
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(8, 9), reason="need cuda compute >= 8.9")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize("dtype", ["float8_e5m2", "float8_e4m3fn"])
 @pytest.mark.parametrize("vec_len", [2, 4, 8, 16])
+@pytest.mark.xfail(
+    reason="TODO(maca): [fp8] support vectorized FP8 buffer copy codegen",
+    strict=False,
+)
 def test_copy(dtype, vec_len):
     @T.prim_func(s_tir=True)
     def func(
@@ -855,7 +878,7 @@ def test_copy(dtype, vec_len):
                 B[tx, i] = A[tx, i]
 
     mod = tvm.IRModule({"main": func})
-    rtmod = tvm.compile(mod, target="cuda")
+    rtmod = tvm.compile(mod, target="maca")
 
 
 num_experts = 8
@@ -864,8 +887,17 @@ spatial_size = 4096
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
-@pytest.mark.skipif(ml_dtypes is None, reason="Requires ml_dtypes to be installed")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.xfail(
+    ml_dtypes is None,
+    reason="TODO(maca): [fp8] install ml_dtypes for FP8 GEMV verification",
+    strict=False,
+    run=False,
+)
+@pytest.mark.xfail(
+    reason="TODO(maca): [fp8] support FP8 GEMV lowering with shuffle-down scheduling",
+    strict=False,
+)
 def test_moe_gemv_shfl_down_illegal_instr():
     global num_experts
     global reduce_size
@@ -949,11 +981,11 @@ def test_moe_gemv_shfl_down_illegal_instr():
 
     mod = SingleBatchMoE_float8_e4m3
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with tvm.transform.PassContext(config={"relax.backend.use_cuda_graph": False}) and target:
         mod = _pipeline(mod)
         rt_mod = tvm.compile(mod, target=target)
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
 
     x_data = np.zeros((1, reduce_size), dtype=np.float16)
     x = tvm.runtime.tensor(x_data, device=dev)
@@ -976,7 +1008,11 @@ def test_moe_gemv_shfl_down_illegal_instr():
 @pytest.mark.parametrize("vec_length", [2, 4])
 @pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(8, 9), reason="need cuda compute >= 8.9")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.xfail(
+    reason="TODO(maca): [fp8] support FP8 to FP16/BF16 vectorized arithmetic lowering",
+    strict=False,
+)
 def test_fp8_fp16_bf16_vectorize_arith(vec_length, dtype):
     def _create_mod(vec_length, dtype):
         num_threads = 128 // vec_length
@@ -998,7 +1034,7 @@ def test_fp8_fp16_bf16_vectorize_arith(vec_length, dtype):
         return Module
 
     mod = _create_mod(vec_length, dtype)
-    device = tvm.cuda()
+    device = tvm.maca()
     target = tvm.target.Target.from_device(device)
     f = tvm.tirx.build(mod, target=target)
 

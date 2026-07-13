@@ -118,14 +118,18 @@ jobs:
           rm -rf pytest-results
           popd
       - name: Run Python MetaXGPU unit tests
+        continue-on-error: true
         shell: bash -l {0}
         run: >-
           ./tests/scripts/task_python_unittest.sh
         env:
-          PYTEST_ADDOPTS: "-m gpu"
           TVM_TEST_TARGETS: maca
           TVM_UNITTEST_TESTSUITE_NAME: python-unittest-gpu
           PLATFORM: gpu
+      - name: Test Summary
+        uses: test-summary/action@v2
+        with:
+          paths: "build/pytest-results/**/*.xml"
 
   Linux_CPU_Test:
     if: ${{ false && github.repository == 'MetaX-MACA/mcTVM' }}

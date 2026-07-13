@@ -332,13 +332,15 @@ def test_vm_emit_te_extern(exec_mode):
     if not tvm.get_global_func("tvm.contrib.cblas.matmul", True):
         print("skip because extern function is not available")
         return
+    from tvm.contrib import cblas
+
     bb = relax.BlockBuilder()
     n, m = tirx.Var("n", "int64"), tirx.Var("m", "int64")
     x = relax.Var("x", R.Tensor([n, m], "float32"))
     y = relax.Var("y", R.Tensor([m, n], "float32"))
 
     with bb.function("rx_cblas_matmul", [x, y]):
-        out = bb.emit_te(tvm.contrib.cblas.matmul, x, y, transa=False, transb=False)
+        out = bb.emit_te(cblas.matmul, x, y, transa=False, transb=False)
         bb.emit_func_output(out)
 
     mod = bb.get()
@@ -473,7 +475,7 @@ def test_vm_emit_te_constant_param_cpu(exec_mode):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_vm_emit_te_constant_param_gpu(exec_mode):
     x_np = np.random.rand(2, 2).astype("float32")
     c_np = np.random.rand(2, 2).astype("float32")
@@ -492,8 +494,8 @@ def test_vm_emit_te_constant_param_gpu(exec_mode):
     loops = sch.get_loops(sch.get_sblock(name="T_add", func_name="add"))
     sch.bind(loops[0], "threadIdx.x")
 
-    exec = relax.build(sch.mod, "cuda", exec_mode=exec_mode)
-    dev = tvm.cuda()
+    exec = relax.build(sch.mod, "maca", exec_mode=exec_mode)
+    dev = tvm.maca()
     vm = relax.VirtualMachine(exec, dev)
 
     add_res = check_saved_func(vm, "main", tvm.runtime.tensor(x_np, dev))
@@ -855,7 +857,7 @@ def test_recursion(exec_mode):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_vm_to_device(exec_mode):
     @tvm.script.ir_module
     class TestToVDevice:
@@ -863,7 +865,7 @@ def test_vm_to_device(exec_mode):
         def foo1(
             x: R.Tensor((2, 3), "float32"),
         ) -> R.Tensor((2, 3), "float32"):
-            copied = R.to_vdevice(x, tvm.ir.VDevice("cuda", 0, "global"))
+            copied = R.to_vdevice(x, tvm.ir.VDevice("maca", 0, "global"))
             return copied
 
         @R.function
@@ -882,7 +884,7 @@ def test_vm_to_device(exec_mode):
     res_2 = check_saved_func(vm, "foo2", x_inp)
 
     # check the copied tensor's device
-    assert res_1.device == tvm.cuda(0)
+    assert res_1.device == tvm.maca(0)
     assert res_2.device == tvm.cpu(0)
 
     tvm.testing.assert_allclose(res_1.numpy(), x_inp.numpy())
@@ -1264,7 +1266,7 @@ def test_set_input_get_failure_rpc(exec_mode):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_relax_module_with_multiple_targets(exec_mode):
     """Relax functions may contain kernels for multiple targets
 
@@ -1296,7 +1298,7 @@ def test_relax_module_with_multiple_targets(exec_mode):
         ],
         name="LegalizeAndSchedule",
     )
-    with tvm.target.Target("cuda"):
+    with tvm.target.Target("maca"):
         built = tvm.relax.build(seq(Module))
 
     np_A = np.random.random([32, 32]).astype("float32")
@@ -1309,7 +1311,7 @@ def test_relax_module_with_multiple_targets(exec_mode):
         tvm.runtime.tensor(np_B, dev_llvm),
     )
 
-    dev_cuda = tvm.device("cuda")
+    dev_cuda = tvm.device("maca")
     vm_cuda = tvm.relax.VirtualMachine(built, device=dev_cuda)
 
     cuda_output = vm_cuda["func_cuda"](

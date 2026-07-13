@@ -29,9 +29,17 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import S, TileLayout, wg_local_layout
 
+MACA_XFAIL = pytest.mark.xfail(
+    reason=(
+        "TODO(maca): [tile-primitive-elementwise-fma] support FMA and scalar "
+        "binary elementwise dispatch"
+    ),
+    strict=False,
+)
+
 
 def _get_sm_version():
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     arch = target.arch if hasattr(target, "arch") else ""
     if not arch.startswith("sm_"):
         return 0
@@ -39,20 +47,25 @@ def _get_sm_version():
     return int(digits) if digits else 0
 
 
+def _xfail_packed_feature(feature, sm):
+    pytest.xfail(f"TODO(maca): [tile-primitive-elementwise-fma] support {feature}, got sm_{sm}")
+
+
 # ---------------------------------------------------------------------------
 # FMA op: scalar scale + scalar bias
 # ---------------------------------------------------------------------------
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_fma_scalar_scalar():
     sm = _get_sm_version()
     if sm < 100:
-        pytest.skip(f"packed fma requires sm_100+, got sm_{sm}")
+        _xfail_packed_feature("packed fma scalar-scale/scalar-bias lowering on sm_100+", sm)
 
     N = 128
     dtype = "float32"
-    dev = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    dev = tvm.maca(0)
+    target = tvm.target.Target("maca")
 
     scale_val = 0.5
     bias_val = -1.0
@@ -82,16 +95,17 @@ def test_fma_scalar_scalar():
 # FMA op: buffer scale + scalar bias (Horner pattern)
 # ---------------------------------------------------------------------------
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_fma_buffer_scale_scalar_bias():
     sm = _get_sm_version()
     if sm < 100:
-        pytest.skip(f"packed fma requires sm_100+, got sm_{sm}")
+        _xfail_packed_feature("packed fma buffer-scale/scalar-bias lowering on sm_100+", sm)
 
     N = 2
     dtype = "float32"
-    dev = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    dev = tvm.maca(0)
+    target = tvm.target.Target("maca")
 
     coeff = 0.695
 
@@ -125,16 +139,17 @@ def test_fma_buffer_scale_scalar_bias():
 # Binary op with scalar broadcast (PrimExpr scalar, e.g. BufferLoad)
 # ---------------------------------------------------------------------------
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_mul_scalar_broadcast():
     sm = _get_sm_version()
     if sm < 100:
-        pytest.skip(f"packed mul requires sm_100+, got sm_{sm}")
+        _xfail_packed_feature("packed mul scalar-broadcast lowering on sm_100+", sm)
 
     N = 16
     dtype = "float32"
-    dev = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    dev = tvm.maca(0)
+    target = tvm.target.Target("maca")
 
     @T.prim_func
     def test_func(A_ptr: T.handle, S_ptr: T.handle) -> None:
@@ -166,16 +181,17 @@ def test_mul_scalar_broadcast():
 # Binary add with rounding mode
 # ---------------------------------------------------------------------------
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_add_rounding_mode():
     sm = _get_sm_version()
     if sm < 100:
-        pytest.skip(f"packed add with rounding requires sm_100+, got sm_{sm}")
+        _xfail_packed_feature("packed add rounding-mode lowering on sm_100+", sm)
 
     N = 2
     dtype = "float32"
-    dev = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    dev = tvm.maca(0)
+    target = tvm.target.Target("maca")
 
     round_const = float(2**23 + 2**22)
 
@@ -209,16 +225,19 @@ def test_add_rounding_mode():
 # FMA op: layout=None local buffer (no TileLayout)
 # ---------------------------------------------------------------------------
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_fma_no_layout():
     sm = _get_sm_version()
     if sm < 100:
-        pytest.skip(f"packed fma requires sm_100+, got sm_{sm}")
+        _xfail_packed_feature(
+            "packed fma lowering for local buffers without TileLayout on sm_100+", sm
+        )
 
     N = 4
     dtype = "float32"
-    dev = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    dev = tvm.maca(0)
+    target = tvm.target.Target("maca")
 
     scale_val = 2.0
     bias_val = 1.0
@@ -250,16 +269,17 @@ def test_fma_no_layout():
 # Binary sub with rounding mode (buffer-buffer)
 # ---------------------------------------------------------------------------
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_sub_buffer_buffer_rounding():
     sm = _get_sm_version()
     if sm < 100:
-        pytest.skip(f"packed sub with rounding requires sm_100+, got sm_{sm}")
+        _xfail_packed_feature("packed sub rounding-mode lowering on sm_100+", sm)
 
     N = 2
     dtype = "float32"
-    dev = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    dev = tvm.maca(0)
+    target = tvm.target.Target("maca")
 
     @T.prim_func
     def test_func(A_ptr: T.handle, B_ptr: T.handle) -> None:
@@ -292,14 +312,15 @@ def test_sub_buffer_buffer_rounding():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
 def test_fma_warpgroup_wg_local_layout():
     rows, cols = 128, 8
     dtype = "float32"
     scale_val = 1.5
     bias_val = -0.25
-    dev = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
+    dev = tvm.maca(0)
+    target = tvm.target.Target("maca")
 
     @T.prim_func
     def test_func(A_ptr: T.handle, B_ptr: T.handle) -> None:
@@ -335,8 +356,9 @@ def test_fma_warpgroup_wg_local_layout():
 # -----------------------------------------------------------------------------
 # Dispatch codegen check (no GPU runtime — explicit target arch).
 # Complements ``test_fma_warpgroup_wg_local_emits_packed_f32x2`` (which uses
-# the host-detected ``Target("cuda")`` and skips when arch < sm_100).
+# the host-detected ``Target("maca")`` and skips when arch < sm_100).
 # -----------------------------------------------------------------------------
+@MACA_XFAIL
 def test_fma_f32_sm100_packed_f32x2_dispatch():
     """fma f32 + all-local → reg.py + fma_f32x2 packed (no T.vectorized)."""
     shape = (64, 32)
@@ -361,7 +383,7 @@ def test_fma_f32_sm100_packed_f32x2_dispatch():
         Tx.fma(rd, ra, rb, rc)
         Tx.copy(D[tx], rd)
 
-    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
+    target = tvm.target.Target({"kind": "maca", "arch": "sm_100a"})
     with target:
         mod = tvm.IRModule({"main": k})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")

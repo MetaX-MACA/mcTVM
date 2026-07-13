@@ -87,7 +87,7 @@ class TestRetainCrossFunctionSubroutines(BaseTestCase):
 
         @T.prim_func(private=True, s_tir=True)
         def subroutine(A_data: T.handle("float32"), B_data: T.handle("float32")):
-            T.func_attr({"target": T.target("cuda")})
+            T.func_attr({"target": T.target("maca")})
             A = T.decl_buffer([16, 16], "float32", data=A_data)
             B = T.decl_buffer([16], "float32", data=B_data)
             for i in range(16):
