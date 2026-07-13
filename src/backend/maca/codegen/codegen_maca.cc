@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1633,7 +1634,10 @@ inline void PrintConst(const FloatImmNode* op, std::ostream& os, CodeGenMACA* p)
         p->codegen_tags_.insert("math_constants");
         p->need_math_constants_h_ = true;
       } else {
-        temp << std::fixed << std::setprecision(15) << op->value;
+        // std::fixed counts digits after the point, so a small magnitude such as
+        // 1e-20 would print as 0.000000000000000. scientific keeps 17 significant
+        // digits, which is what float64 needs to round-trip.
+        temp << std::scientific << std::setprecision(16) << op->value;
       }
       p->MarkConst(temp.str());
       os << temp.str();
