@@ -136,10 +136,145 @@ jobs:
           source tests/scripts/setup-pytest-env.sh
           run_pytest ffi, tests/python/ffi -n 4
 
+      - name: Run 'arith' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest arith, tests/python/arith -n 4
+
+      - name: Run 'ci' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest ci, tests/python/ci -n 4
+
+      - name: Run 'codegen' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest codegen, tests/python/codegen -n 4
+
+      - name: Run 'driver' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest driver, tests/python/driver -n 4
+
+      - name: Run 'ir' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest ir, tests/python/ir -n 4
+
+      - name: Run 'meta_schedule' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest meta_schedule, tests/python/meta_schedule -n 4
+
+      - name: Run 'runtime' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest runtime, tests/python/runtime -n 4
+
+      - name: Run 'target' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest target, tests/python/target -n 4
+
+      - name: Run 'te' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest te, tests/python/te -n 4
+
+      - name: Run 'testing' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest testing, tests/python/testing -n 4
+
+      - name: Run 's_tir/base' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest s_tir/base, tests/python/s_tir/base -n 4
+
+      - name: Run 's_tir/schedule' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest s_tir/schedule, tests/python/s_tir/schedule -n 4
+
+      - name: Run 's_tir/dlight' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest s_tir/dlight, tests/python/s_tir/dlight -n 4
+
+      - name: Run 's_tir/analysis' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest s_tir/analysis, tests/python/s_tir/analysis -n 4
+
+      - name: Run 's_tir/transform' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest s_tir/transform, tests/python/s_tir/transform -n 4
+
+      - name: Run 'tirx-analysis' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest tirx-analysis, tests/python/tirx-analysis -n 4
+
+      - name: Run 'tirx-base' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest tirx-base, tests/python/tirx-base -n 4
+
+      - name: Run 'tirx-transform' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest tirx-transform, tests/python/tirx-transform -n 4
+
+      - name: Run 'tirx' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest tirx, tests/python/tirx -n 4
+
+      - name: Run 'tvmscript' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest tvmscript, tests/python/tvmscript -n 4
+
+      - name: Run 'relax' unittests
+        run: |
+          set -euxo pipefail
+          source tests/scripts/setup-pytest-env.sh
+          run_pytest relax, tests/python/relax -n 4
+
       - name: Test Summary
+        if: always()
         uses: test-summary/action@v2
         with:
           paths: "build/pytest-results/**/*.xml"
+          output: test-summary.md
+
+      - name: Upload test summary
+        if: ${{ always() && hashFiles('gpu_smoke_report.md') != '' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-summary
+          path: test-summary.md
 
   Linux_CPU_Test:
     if: ${{ false && github.repository == 'MetaX-MACA/mcTVM' }}
