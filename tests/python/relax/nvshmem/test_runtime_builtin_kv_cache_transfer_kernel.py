@@ -40,11 +40,7 @@ def get_comm_rank():
     return comm, rank
 
 
-@pytest.mark.xfail(
-    reason="TODO(maca): [nvshmem] support NVSHMEM KV transfer kernels on MACA",
-    run=False,
-    strict=False,
-)
+@pytest.mark.skip(reason="Require NVSHMEM")
 def test_kv_transfer_without_disco():
     comm, rank = get_comm_rank()
     layer_id = 1
@@ -98,11 +94,7 @@ def test_kv_transfer_without_disco():
     comm.Barrier()
 
 
-@pytest.mark.xfail(
-    reason="TODO(maca): [nvshmem] support NVSHMEM page-to-page KV transfer kernels on MACA",
-    run=False,
-    strict=False,
-)
+@pytest.mark.skip(reason="Require NVSHMEM")
 def test_kv_transfer_page_to_page_without_disco():
     comm, rank = get_comm_rank()
     layer_id = 1
@@ -168,11 +160,7 @@ def test_kv_transfer_page_to_page_without_disco():
     comm.Barrier()
 
 
-@pytest.mark.xfail(
-    reason="TODO(maca): [nvshmem] support NVSHMEM KV transfer kernels with Disco on MACA",
-    run=False,
-    strict=False,
-)
+@pytest.mark.skip(reason="Require NVSHMEM")
 def test_kv_transfer_with_disco():
     comm, rank = get_comm_rank()
     layer_id = 1
