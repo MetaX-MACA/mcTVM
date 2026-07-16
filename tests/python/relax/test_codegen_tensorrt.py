@@ -46,25 +46,21 @@ class Conv2dResidualBlock:
 has_tensorrt = tvm.get_global_func("relax.ext.tensorrt", True)
 env_checker_runtime = tvm.get_global_func("relax.is_tensorrt_runtime_enabled", True)
 
-requires_tensorrt_codegen = pytest.mark.xfail(
+requires_tensorrt_codegen = pytest.mark.skipif(
     not has_tensorrt,
-    reason="TODO(maca): [tensorrt-codegen] support or enable TensorRT Relax codegen on MACA",
-    run=False,
-    strict=False,
+    reason="TENSORRT not enabled.",
 )
 
-requires_tensorrt_runtime = pytest.mark.xfail(
+requires_tensorrt_runtime = pytest.mark.skipif(
     not env_checker_runtime or not env_checker_runtime(),
-    reason="TODO(maca): [tensorrt-runtime] support or enable TensorRT runtime integration on MACA",
-    run=False,
-    strict=False,
+    reason="TensorRT runtime not available",
 )
 
 pytestmark = [
     requires_tensorrt_codegen,
     requires_tensorrt_runtime,
     pytest.mark.gpu,
-    pytest.mark.skipif(not env.has_maca(), reason="need maca"),
+    pytest.mark.skipif(not env.has_cuda(), reason="need cuda"),
 ]
 
 
@@ -113,7 +109,7 @@ def test_tensorrt_offload():
         ]
     )(Conv2dResidualBlock)
 
-    out = build_and_run(mod, inputs[:1], "maca")
+    out = build_and_run(mod, inputs[:1], "cuda")
 
     tvm.testing.assert_allclose(out, ref, rtol=1e-3, atol=1e-3)
 
@@ -140,7 +136,7 @@ def _offload_and_compare(mod, params_np, patterns, data_np, rtol=1e-2, atol=1e-2
         for fn in partitioned.functions.values()
     ), "expected the op under test to be offloaded to TensorRT, but nothing was partitioned"
     offloaded = relax.transform.RunCodegen()(partitioned)
-    out = build_and_run(offloaded, [data_np], "maca")
+    out = build_and_run(offloaded, [data_np], "cuda")
     tvm.testing.assert_allclose(out, ref, rtol=rtol, atol=atol)
 
 
@@ -313,8 +309,8 @@ def test_tensorrt_int8_calibration(monkeypatch):
     monkeypatch.setenv("TVM_TENSORRT_USE_INT8", "1")
     monkeypatch.setenv("TENSORRT_NUM_CALI_INT8", str(num_calibration_batches))
 
-    dev = tvm.device("maca", 0)
-    vm = relax.VirtualMachine(tvm.compile(offloaded, "maca"), dev)
+    dev = tvm.device("cuda", 0)
+    vm = relax.VirtualMachine(tvm.compile(offloaded, "cuda"), dev)
     data_trt = tvm.runtime.tensor(data, dev)
     out = None
     for _ in range(num_calibration_batches + 1):
@@ -629,7 +625,7 @@ def test_partition_for_tensorrt():
     ), "expected partition_for_tensorrt to offload a subgraph to TensorRT"
 
     mod = relax.transform.RunCodegen()(mod)
-    out = build_and_run(mod, [data], "maca")
+    out = build_and_run(mod, [data], "cuda")
     tvm.testing.assert_allclose(out, ref, rtol=1e-2, atol=1e-2)
 
 

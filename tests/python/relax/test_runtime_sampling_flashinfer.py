@@ -28,11 +28,7 @@ from tvm import relax
 from tvm.support import utils
 
 
-@pytest.mark.xfail(
-    reason="TODO(maca): [flashinfer] support FlashInfer sampling runtime setup on MACA",
-    run=False,
-    strict=False,
-)
+@pytest.mark.skip(reason="Requires FlashInfer enabled and proper setup")
 def test_sampling():
     def load_module(name: str, static_modules: list[tvm.runtime.Module]):
         assert len(static_modules) > 0

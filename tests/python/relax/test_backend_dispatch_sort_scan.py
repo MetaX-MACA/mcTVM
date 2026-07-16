@@ -64,13 +64,6 @@ def test_dispatch_scanop():
     assert_structural_equal(mod, expected_mod)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [scan-dispatch] align GPU scan dispatch vdevice structural "
-        "expectations for MACA targets"
-    ),
-    strict=False,
-)
 def test_dispatch_scanop_cuda():
     """R.cumsum and R.cumprod may be lowered with TOPI for GPU
 
@@ -155,13 +148,7 @@ def test_dispatch_sort():
     assert_structural_equal(mod, expected_mod)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [sort-dispatch] support Thrust-backed sort dispatch and "
-        "structural expectations for MACA"
-    ),
-    strict=False,
-)
+@pytest.mark.xfail(reason="skipping broken tests")
 def test_dispatch_sort_cuda():
     @I.ir_module
     class Before:

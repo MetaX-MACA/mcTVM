@@ -36,17 +36,13 @@ from tvm.testing import env
 env_checker_codegen = tvm.get_global_func("relax.ext.tensorrt", True)
 env_checker_runtime = tvm.get_global_func("relax.is_tensorrt_runtime_enabled", True)
 
-requires_tensorrt_codegen = pytest.mark.xfail(
+requires_tensorrt_codegen = pytest.mark.skipif(
     not env_checker_codegen,
-    reason="TODO(maca): [tensorrt-codegen] support or enable TensorRT Relax codegen passes on MACA",
-    run=False,
-    strict=False,
+    reason="TensorRT codegen not available",
 )
-requires_tensorrt_runtime = pytest.mark.xfail(
+requires_tensorrt_runtime = pytest.mark.skipif(
     not env_checker_runtime or not env_checker_runtime(),
-    reason="TODO(maca): [tensorrt-runtime] support or enable TensorRT runtime integration on MACA",
-    run=False,
-    strict=False,
+    reason="TensorRT runtime not available",
 )
 
 # Global variable in pytest that applies markers to all tests.
