@@ -15,9 +15,4 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Relax backends"""
-
-from . import contrib, cpu_generic, cuda, gpu_generic, metal, rocm, adreno, maca
-from .dispatch_sampling import DispatchSampling
-from .dispatch_sort_scan import DispatchSortScan
-from .pattern_registry import get_pattern, get_patterns_with_prefix
+"""The Relax MACA backend compilation pipeline and other passes."""

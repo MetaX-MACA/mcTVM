@@ -74,6 +74,7 @@ __all__ = [
     "has_maca",
     "has_maca_compute",
     "has_matrixcore",
+    "has_mcblas",
     "has_metal",
     "has_multi_gpu",
     "has_nccl",
@@ -264,6 +265,11 @@ def has_nvshmem() -> bool:
         )
     except Exception:  # pylint: disable=broad-except
         return False
+
+
+def has_mcblas() -> bool:
+    """True if mcBLAS was built in and a MACA device is present."""
+    return has_maca() and build_flag_enabled("USE_MCBLAS")
 
 
 # --- version / capability probes -------------------------------------------

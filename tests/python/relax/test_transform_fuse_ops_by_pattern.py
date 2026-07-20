@@ -20,8 +20,8 @@ import pytest
 
 import tvm
 from tvm import relax
-from tvm.relax.backend.cuda.cublas import partition_for_cublas
 from tvm.relax.backend.cuda.cutlass import partition_for_cutlass
+from tvm.relax.backend.maca.mcblas import partition_for_mcblas as partition_for_cublas
 from tvm.relax.dpl.pattern import (
     is_op,
     is_tuple,
@@ -1103,7 +1103,7 @@ def test_intermediate_var_to_var_binding():
 
     mod = partition_for_cublas(Module)
     func_names = [name.name_hint for (name, _) in mod.functions.items()]
-    assert "fused_relax_permute_dims_relax_matmul_cublas" in func_names  # add is not fused
+    assert "fused_relax_permute_dims_relax_matmul_mcblas" in func_names  # add is not fused
 
 
 def test_multple_runs():
@@ -1177,14 +1177,14 @@ def test_matmul_symbolic_var():
             w1: R.Tensor([1024, 1024], "float16"),
         ) -> R.Tensor(["batch_size", 1024], "float16"):
             batch_size = T.int64()
-            R.func_attr({"Codegen": "cublas"})
+            R.func_attr({"Codegen": "mcblas"})
 
             @R.function
             def inner_func(
                 x: R.Tensor([batch_size, 1024], "float16"),
                 w1: R.Tensor([1024, 1024], "float16"),
             ) -> R.Tensor([batch_size, 1024], "float16"):
-                R.func_attr({"Composite": "cublas.matmul"})
+                R.func_attr({"Composite": "mcblas.matmul"})
                 with R.dataflow():
                     out = R.matmul(x, w1)
                     R.output(out)
@@ -1200,14 +1200,14 @@ def test_matmul_symbolic_var():
         ) -> R.Tensor(["batch_size", "M"], "float16"):
             batch_size = T.int64()
             M = T.int64()
-            R.func_attr({"Codegen": "cublas"})
+            R.func_attr({"Codegen": "mcblas"})
 
             @R.function
             def inner_func(
                 x: R.Tensor([batch_size, 1024], "float16"),
                 w2: R.Tensor((1024, M), "float16"),
             ) -> R.Tensor([batch_size, M], "float16"):
-                R.func_attr({"Composite": "cublas.matmul"})
+                R.func_attr({"Composite": "mcblas.matmul"})
                 with R.dataflow():
                     out = R.matmul(x, w2)
                     R.output(out)
@@ -1216,7 +1216,7 @@ def test_matmul_symbolic_var():
             out = inner_func(x, w2)
             return out
 
-    patterns = relax.backend.pattern_registry.get_patterns_with_prefix("cublas.matmul")
+    patterns = relax.backend.pattern_registry.get_patterns_with_prefix("mcblas.matmul")
     After = relax.transform.FuseOpsByPattern(patterns, bind_constants=False, annotate_codegen=True)(
         Before
     )
@@ -1303,14 +1303,14 @@ def test_dataflow_inside_branch():
             w: R.Tensor((1024, 1024), dtype="float16"),
             x: R.Tensor((1024, 1024), dtype="float16"),
         ) -> R.Tensor((1024, 1024), dtype="float16"):
-            R.func_attr({"Codegen": "cublas"})
+            R.func_attr({"Codegen": "mcblas"})
 
             @R.function
             def local_func(
                 w_1: R.Tensor((1024, 1024), dtype="float16"),
                 x_1: R.Tensor((1024, 1024), dtype="float16"),
             ) -> R.Tensor((1024, 1024), dtype="float16"):
-                R.func_attr({"Composite": "cublas.matmul_transposed"})
+                R.func_attr({"Composite": "mcblas.matmul_transposed"})
                 with R.dataflow():
                     w_t = R.permute_dims(w_1)
                     out = R.matmul(x_1, w_t)
@@ -1325,14 +1325,14 @@ def test_dataflow_inside_branch():
             x: R.Tensor((1024, 1024), dtype="float16"),
             w: R.Tensor((1024, 1024), dtype="float16"),
         ) -> R.Tensor((1024, 1024), dtype="float16"):
-            R.func_attr({"Codegen": "cublas"})
+            R.func_attr({"Codegen": "mcblas"})
 
             @R.function
             def local_func(
                 x_1: R.Tensor((1024, 1024), dtype="float16"),
                 w_1: R.Tensor((1024, 1024), dtype="float16"),
             ) -> R.Tensor((1024, 1024), dtype="float16"):
-                R.func_attr({"Composite": "cublas.matmul"})
+                R.func_attr({"Composite": "mcblas.matmul"})
                 with R.dataflow():
                     out = R.matmul(x_1, w_1)
                     R.output(out)
@@ -1341,7 +1341,7 @@ def test_dataflow_inside_branch():
             output = local_func(x, w)
             return output
 
-    patterns = relax.backend.pattern_registry.get_patterns_with_prefix("cublas.matmul")
+    patterns = relax.backend.pattern_registry.get_patterns_with_prefix("mcblas.matmul")
     After = relax.transform.FuseOpsByPattern(
         patterns,
         bind_constants=False,

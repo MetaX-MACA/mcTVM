@@ -34,12 +34,14 @@ _BOOL_PROBES = [
     env.has_maca,
     env.has_llvm,
     env.has_gpu,
+    env.has_maca,
     # build support
     env.has_cudnn,
     env.has_cublas,
     env.has_nccl,
     env.has_hipblas,
     env.has_nvshmem,
+    env.has_mcblas,
     # version / capability
     env.has_matrixcore,
     env.has_cudagraph,
