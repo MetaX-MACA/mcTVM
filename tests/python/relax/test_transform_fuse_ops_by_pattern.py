@@ -1165,14 +1165,14 @@ def test_matmul_symbolic_var():
         ):
             cls = Expected
             with R.dataflow():
-                matmul1 = cls.fused_relax_matmul_cublas(x, w1)
-                matmul2 = cls.fused_relax_matmul1_cublas(x, w2)
+                matmul1 = cls.fused_relax_matmul_mcblas(x, w1)
+                matmul2 = cls.fused_relax_matmul1_mcblas(x, w2)
                 out = (matmul1, matmul2)
                 R.output(out)
             return out
 
         @R.function
-        def fused_relax_matmul_cublas(
+        def fused_relax_matmul_mcblas(
             x: R.Tensor(["batch_size", 1024], "float16"),
             w1: R.Tensor([1024, 1024], "float16"),
         ) -> R.Tensor(["batch_size", 1024], "float16"):
@@ -1194,7 +1194,7 @@ def test_matmul_symbolic_var():
             return out
 
         @R.function
-        def fused_relax_matmul1_cublas(
+        def fused_relax_matmul1_mcblas(
             x: R.Tensor(["batch_size", 1024], "float16"),
             w2: R.Tensor([1024, "M"], "float16"),
         ) -> R.Tensor(["batch_size", "M"], "float16"):
@@ -1288,18 +1288,18 @@ def test_dataflow_inside_branch():
             cls = Expected
             if transpose_weights:
                 with R.dataflow():
-                    out_then = cls.fused_relax_permute_dims_relax_matmul_cublas(w, x)
+                    out_then = cls.fused_relax_permute_dims_relax_matmul_mcblas(w, x)
                     R.output(out_then)
                 out = out_then
             else:
                 with R.dataflow():
-                    out_else = cls.fused_relax_matmul_cublas(x, w)
+                    out_else = cls.fused_relax_matmul_mcblas(x, w)
                     R.output(out_else)
                 out = out_else
             return out
 
         @R.function
-        def fused_relax_permute_dims_relax_matmul_cublas(
+        def fused_relax_permute_dims_relax_matmul_mcblas(
             w: R.Tensor((1024, 1024), dtype="float16"),
             x: R.Tensor((1024, 1024), dtype="float16"),
         ) -> R.Tensor((1024, 1024), dtype="float16"):
@@ -1321,7 +1321,7 @@ def test_dataflow_inside_branch():
             return output
 
         @R.function
-        def fused_relax_matmul_cublas(
+        def fused_relax_matmul_mcblas(
             x: R.Tensor((1024, 1024), dtype="float16"),
             w: R.Tensor((1024, 1024), dtype="float16"),
         ) -> R.Tensor((1024, 1024), dtype="float16"):
