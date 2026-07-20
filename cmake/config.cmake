@@ -329,7 +329,7 @@ set(USE_OPENCL_EXTN_QCOM OFF)
 # - ON: enable MACA with cmake's auto search
 # - OFF: disable MACA
 # - /path/to/maca: use specific path to maca toolkit
-set(USE_MACA OFF)
+set(USE_MACA ON)
 
 # Whether use mcBLAS
 set(USE_MCBLAS OFF)
