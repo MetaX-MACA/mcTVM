@@ -58,8 +58,6 @@ class mcDNNJSONRuntime : public JSONRuntimeBase {
         std::string op_name = node.GetOpName();
         if (op_name.find("conv2d") != std::string::npos) {
           op_execs_[i] = GetConv2DExec(node);
-        } else if (op_name.find("attention") != std::string::npos) {
-          op_execs_[i] = GetAttentionExec(node);
         } else {
           TVM_FFI_THROW(InternalError) << "Unsupported op: " << op_name;
         }
@@ -187,49 +185,6 @@ class mcDNNJSONRuntime : public JSONRuntimeBase {
       }
     };
     return op_exec;
-  }
-
-  std::function<void()> GetAttentionExec(const JSONGraphNode& node) {
-#ifdef TVM_USE_MCDNN_FRONTEND
-    auto dtype = node.GetOpDataType()[0];
-    int num_heads = static_cast<int>(node.GetAttr<int64_t>("num_heads"));
-    int num_kv_heads = static_cast<int>(node.GetAttr<int64_t>("num_kv_heads"));
-    int head_size = static_cast<int>(node.GetAttr<int64_t>("head_size"));
-    int head_size_v = static_cast<int>(node.GetAttr<int64_t>("head_size_v"));
-    std::string layout = std::string(node.GetAttr<ffi::String>("layout"));
-    const auto& input_qkv_node = nodes_[EntryID(node.GetInputs()[0])];
-    auto qkv_shapes = input_qkv_node.GetOpShape()[0];
-
-    int64_t batch, seq_len;
-    if (layout == "BS3NH") {
-      TVM_FFI_ICHECK_EQ(qkv_shapes.size(), 3);
-      batch = qkv_shapes[0];
-      seq_len = qkv_shapes[1];
-    } else if (layout == "SBN3H") {
-      TVM_FFI_ICHECK_EQ(qkv_shapes.size(), 4);
-      batch = qkv_shapes[1];
-      seq_len = qkv_shapes[0];
-    } else {
-      TVM_FFI_THROW(InternalError) << "Unsupported layout: " << layout;
-    }
-    double scale = 1 / std::sqrt(head_size);
-    if (node.HasAttr("scale")) {
-      scale = node.GetAttr<double>("scale");
-    }
-
-    auto runner = tvm::contrib::McDNNSDPARunner::Create();
-    runner->Init(batch, seq_len, num_heads, num_kv_heads, head_size, head_size_v, scale, dtype,
-                 layout);
-    return [=, this]() {
-      auto qkv = GetInput(node, 0);
-      auto workspace = const_cast<DLTensor*>(GetInput(node, 1));
-      auto out = const_cast<DLTensor*>(data_entry_[EntryID(outputs_[0])]);
-      runner->Run(qkv, workspace, out);
-    };
-#else
-    TVM_FFI_THROW(InternalError) << "Please build with MCDNN frontend to use attention op";
-    return nullptr;
-#endif
   }
 
   std::vector<std::function<void()>> op_execs_;
