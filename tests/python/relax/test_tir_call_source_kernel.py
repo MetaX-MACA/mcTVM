@@ -39,38 +39,36 @@ extern "C" __global__ void add_kernel(float* x, float* y, float* output, int n_e
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_tir_call_source_kernel():
-    with tvm.target.Target("maca"):
+    @I.ir_module(s_tir=True)
+    class Module:
+        @T.prim_func(s_tir=True)
+        def add(x_handle: T.handle, y_handle: T.handle, output_handle: T.handle) -> None:
+            T.func_attr({"global_symbol": "add"})
+            m = T.int64()
+            x = T.match_buffer(x_handle, (m,), "float32")
+            y = T.match_buffer(y_handle, (m,), "float32")
+            output = T.match_buffer(output_handle, (m,), "float32")
+            with T.sblock("root"):
+                T.reads(x[0:m], y[0:m])
+                T.writes(output[0:m])
+                BLOCK_SIZE = T.meta_var(64)
+                T.call_kernel(
+                    add_cuda_source,
+                    ((T.ceildiv(m, BLOCK_SIZE),), (BLOCK_SIZE,)),
+                    x.data,
+                    y.data,
+                    output.data,
+                    m,
+                    kernel_name="add_kernel",
+                )
 
-        @I.ir_module(s_tir=True)
-        class Module:
-            @T.prim_func(s_tir=True)
-            def add(x_handle: T.handle, y_handle: T.handle, output_handle: T.handle) -> None:
-                T.func_attr({"global_symbol": "add"})
-                m = T.int64()
-                x = T.match_buffer(x_handle, (m,), "float32")
-                y = T.match_buffer(y_handle, (m,), "float32")
-                output = T.match_buffer(output_handle, (m,), "float32")
-                with T.sblock("root"):
-                    T.reads(x[0:m], y[0:m])
-                    T.writes(output[0:m])
-                    BLOCK_SIZE = T.meta_var(64)
-                    T.call_kernel(
-                        add_cuda_source,
-                        ((T.ceildiv(m, BLOCK_SIZE),), (BLOCK_SIZE,)),
-                        x.data,
-                        y.data,
-                        output.data,
-                        m,
-                        kernel_name="add_kernel",
-                    )
-
-            @R.function
-            def main(x: R.Tensor(("m",), "float32"), y: R.Tensor(("m",), "float32")):
-                m = T.int64()
-                with R.dataflow():
-                    output = R.call_tir(Module.add, [x, y], relax.TensorType((m,), "float32"))
-                    R.output(output)
-                return output
+        @R.function
+        def main(x: R.Tensor(("m",), "float32"), y: R.Tensor(("m",), "float32")):
+            m = T.int64()
+            with R.dataflow():
+                output = R.call_tir(Module.add, [x, y], relax.TensorType((m,), "float32"))
+                R.output(output)
+            return output
 
     @I.ir_module(s_tir=True)
     class Parsed:

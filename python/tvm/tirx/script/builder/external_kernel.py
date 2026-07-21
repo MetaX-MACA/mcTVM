@@ -327,18 +327,13 @@ def call_kernel(
     else:
         raise ValueError(f"Unsupported kernel type {kernel_type}")
 
-    current_target = kwargs.get("target")
-    if current_target is None:
-        ctx_target = tvm.target.Target.current()
-        if ctx_target is not None:
-            current_target = str(ctx_target.kind.name)
-    
-    if current_target is not None and current_target == "maca":
-        kernel_name, kernel_module, runtime_args = kernel.compile_to_device_module_maca(
+    current_target = tvm.target.Target.current()  
+    if current_target is not None and current_target.kind.name == "cuda":
+        kernel_name, kernel_module, runtime_args = kernel.compile_to_device_module(
             launch_args, *args, **kwargs
         )
     else:
-        kernel_name, kernel_module, runtime_args = kernel.compile_to_device_module(
+        kernel_name, kernel_module, runtime_args = kernel.compile_to_device_module_maca(
             launch_args, *args, **kwargs
         )
 
