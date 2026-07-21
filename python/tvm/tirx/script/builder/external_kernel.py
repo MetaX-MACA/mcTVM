@@ -149,6 +149,7 @@ class BaseKernel:  # pylint: disable=too-few-public-methods
             tvm_ffi.registry.register_global_func(kernel_name, maca_func, override=True)
         return kernel_module
 
+
 class SourceKernel(BaseKernel):  # pylint: disable=too-few-public-methods
     """A kernel from source code."""
 
