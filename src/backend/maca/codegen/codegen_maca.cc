@@ -1251,7 +1251,7 @@ void CodeGenMACA::VisitStmt_(const AllocBufferNode* op) {
       }
     } else {
       if (align > 0) {
-        stream << "alignas(" << align << ") ";
+        stream << "__attribute__((aligned(" << align << "))) ";
       }
       PrintType(dtype, stream);
     }

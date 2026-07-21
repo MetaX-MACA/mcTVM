@@ -86,18 +86,6 @@ fattention_rotary = None
 fcopy_single_page = None
 fcompact_copy = None
 
-MACA_PAGED_ATTENTION_XFAIL_REASON = (
-    "TODO(maca): [paged-attention] support aligned shared-memory declarations emitted by paged-attention "
-    "TIR codegen in the MACA compiler path"
-)
-
-
-def _xfail_kv_cache_param(param):
-    return pytest.param(
-        param,
-        marks=pytest.mark.xfail(reason=MACA_PAGED_ATTENTION_XFAIL_REASON, strict=False),
-    )
-
 
 def set_global_func(head_dim, dtype):
     global fclear, fadd_sequence, fremove_sequence, ffork_sequence, fenable_sliding_window_for_seq
@@ -223,7 +211,7 @@ def create_kv_cache(head_dim, dtype, rope_mode, support_sliding_window):
 
 @pytest.fixture(
     params=[
-        _xfail_kv_cache_param(param)
+        param
         for param in itertools.chain(
             itertools.product(
                 [64, 128],

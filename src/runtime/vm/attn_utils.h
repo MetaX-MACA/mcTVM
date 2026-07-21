@@ -682,10 +682,12 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
   }
 
   Tensor CopyTreeAttnMaskOnDepthAsync(HostMemoryVector* data, int depth) final {
-    Tensor view =
+    Tensor view_1d =
         tree_attn_mask_device_[depth].CreateView({static_cast<int64_t>(data->size())}, dtype_aux_);
-    CopyVecDataToArray(view, data->data());
-    return view;
+    Tensor view_2d = tree_attn_mask_device_[depth].CreateView(
+        {static_cast<int64_t>(data->size()) / 2, 2}, dtype_aux_);
+    CopyVecDataToArray(view_1d, data->data());
+    return view_2d;
   }
   Tensor CopyTreeAttnMNIndptrOnDepthAsync(HostMemoryVector* data, int depth) final {
     Tensor view = tree_attn_mn_indptr_device_[depth].CreateView(
@@ -768,6 +770,7 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
       TVM_FFI_ICHECK_EQ(shape.value().size(), 1);
       copy_dst.ndim = 1;
       copy_dst.shape = const_cast<int64_t*>(shape.value()->data);
+      copy_dst.strides = nullptr;
     }
     copy_dst.byte_offset = dst_elem_offset * sizeof(int32_t);
 
