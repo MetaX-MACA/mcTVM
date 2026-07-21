@@ -42,6 +42,7 @@ _BOOL_PROBES = [
     env.has_hipblas,
     env.has_nvshmem,
     env.has_mcblas,
+    env.has_mcdnn,
     # version / capability
     env.has_matrixcore,
     env.has_cudagraph,
