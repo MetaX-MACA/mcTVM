@@ -363,6 +363,14 @@ class SourceModule(ExternModule):  # pylint: disable=too-few-public-methods
                 # Enable `-fPIC` for the host compiler
                 "-Xcompiler=-fPIC",
             ]
+        elif source_format == "maca":
+            host_flags = [
+                "-c",  # generate object file
+                "-O3",
+                "-std=c++17",
+                # Enable `-fPIC` for the host compiler
+                "-Xcompiler=-fPIC",
+            ]
         else:
             raise ValueError(f"Invalid source format: {source_format}")
         return include_flags + host_flags
