@@ -26,7 +26,7 @@ pytest.importorskip("scipy")  # tvm.topi.testing imports scipy
 
 import tvm.topi.testing
 from tvm import relax
-from tvm.relax.backend.cuda.cublas import partition_for_cublas
+from tvm.relax.backend.maca.mcblas import partition_for_mcblas as partition_for_cublas
 from tvm.relax.testing import get_relax_matmul_module
 from tvm.script import relax as R
 from tvm.script.ir_builder import IRBuilder
@@ -45,21 +45,8 @@ def reset_seed():
 
 pytestmark = [
     pytest.mark.gpu,
-    pytest.mark.xfail(
-        not env.has_cublas(),
-        reason=(
-            "TODO(maca): [cublas-offload] support or enable cuBLAS-compatible Relax offload on MACA"
-        ),
-        run=False,
-        strict=False,
-    ),
+    pytest.mark.skipif(not env.has_mcblas(), reason="need mcblas"),
 ]
-
-MACA_CUBLAS_CUDA_GRAPH_XFAIL_REASON = (
-    "TODO(maca): [cublas-offload] support Relax CUDA graph capture and replay for MACA "
-    "on the cuBLAS "
-    "offload path"
-)
 
 
 def build_and_run(mod, inputs_np, target, legalize=False, cuda_graph=False):
@@ -321,7 +308,7 @@ def test_matmul_igemm_offload(
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 @pytest.mark.skipif(ml_dtypes is None, reason="requires ml_dtypes to be installed")
 @pytest.mark.parametrize(
     "x_shape, y_shape, transpose_y, out_dtype",
@@ -360,7 +347,7 @@ def test_matmul_fp8_offload(
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 @pytest.mark.skipif(ml_dtypes is None, reason="requires ml_dtypes to be installed")
 def test_matmul_fp8_dequantize_offload():
     x_shape = (10, 32)
@@ -387,7 +374,7 @@ def test_matmul_fp8_dequantize_offload():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 @pytest.mark.skipif(ml_dtypes is None, reason="requires ml_dtypes to be installed")
 def test_matmul_fp8_multiply_offload():
     x_shape = (10, 32)
@@ -475,7 +462,7 @@ def test_cublas_partition_fp8_matmul(M, N, K, out_dtype, transposed_y, partition
         (M, K), (N, K), "float8_e4m3fn", out_dtype, transposed_y=transposed_y
     )
     mod = partition_for_cublas(mod)
-    func_name = "relax_matmul_cublas" if partition_done else "R.matmul"
+    func_name = "relax_matmul_mcblas" if partition_done else "R.matmul"
     assert func_name in mod["main"].script()
 
 
@@ -532,7 +519,7 @@ def test_cublas_partition_matmul_without_bias():
 def test_cublas_partition_igemm(M, N, K, was_partitioned):
     mod = get_relax_matmul_module((M, K), (K, N), "int8", "int32")
     mod = partition_for_cublas(mod)
-    func_name = "fused_relax_matmul_cublas" if was_partitioned else "R.matmul"
+    func_name = "fused_relax_matmul_mcblas" if was_partitioned else "R.matmul"
     assert func_name in mod["main"].script()
 
 
@@ -540,13 +527,10 @@ def test_cublas_partition_igemm_with_bias():
     mod = get_relax_matmul_module((16, 32), (32, 8), "int8", "int32", bias_shape=(8,))
     mod = partition_for_cublas(mod)
     func = mod["main"].script()
-    assert "fused_relax_matmul_cublas" in func and "R.add" in func
+    assert "fused_relax_matmul_mcblas" in func and "R.add" in func
 
 
 def test_cublas_matmul_cuda_graph():
-    if env.has_maca():
-        pytest.xfail(MACA_CUBLAS_CUDA_GRAPH_XFAIL_REASON)
-
     @tvm.script.ir.ir_module
     class Mod:
         @R.function

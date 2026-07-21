@@ -292,7 +292,7 @@ def test_default_entry_func():
 
 
 def test_dynamic_shape():
-    import tvm.relax.backend.cuda.cublas
+    import tvm.relax.backend.maca.mcblas
 
     @I.ir_module
     class Before:
@@ -319,14 +319,14 @@ def test_dynamic_shape():
             x: R.Tensor((1, 4096), dtype="float16"), w1: R.Tensor((4096, "r1"), dtype="float16")
         ) -> R.Tensor((1, "r1"), dtype="float16"):
             r1 = T.int64()
-            R.func_attr({"Codegen": "cublas"})
+            R.func_attr({"Codegen": "mcblas"})
 
             @R.function
             def gv(
                 x_1: R.Tensor((1, 4096), dtype="float16"),
                 w1_1: R.Tensor((4096, r1), dtype="float16"),
             ) -> R.Tensor((1, r1), dtype="float16"):
-                R.func_attr({"Composite": "cublas.matmul"})
+                R.func_attr({"Composite": "mcblas.matmul"})
                 with R.dataflow():
                     gv_1: R.Tensor((1, r1), dtype="float16") = R.matmul(x_1, w1_1, out_dtype=None)
                     R.output(gv_1)

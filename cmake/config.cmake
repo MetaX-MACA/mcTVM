@@ -330,3 +330,6 @@ set(USE_OPENCL_EXTN_QCOM OFF)
 # - OFF: disable MACA
 # - /path/to/maca: use specific path to maca toolkit
 set(USE_MACA ON)
+
+# Whether use mcBLAS
+set(USE_MCBLAS OFF)
