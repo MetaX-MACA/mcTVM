@@ -333,3 +333,6 @@ set(USE_MACA ON)
 
 # Whether use mcBLAS
 set(USE_MCBLAS OFF)
+
+# Whether use mcDNN
+set(USE_MCDNN OFF)

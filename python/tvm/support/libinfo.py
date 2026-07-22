@@ -44,4 +44,5 @@ def libinfo():
         "USE_NNAPI_CODEGEN": "OFF",
         "USE_MACA": "ON",
         "USE_MCBLAS": "ON",
+        "USE_MCDNN": "ON",
     }

@@ -75,6 +75,7 @@ __all__ = [
     "has_maca_compute",
     "has_matrixcore",
     "has_mcblas",
+    "has_mcdnn",
     "has_metal",
     "has_multi_gpu",
     "has_nccl",
@@ -270,6 +271,11 @@ def has_nvshmem() -> bool:
 def has_mcblas() -> bool:
     """True if mcBLAS was built in and a MACA device is present."""
     return has_maca() and build_flag_enabled("USE_MCBLAS")
+
+
+def has_mcdnn() -> bool:
+    """True if mcDNN was built in and a MACA device is present."""
+    return has_maca() and build_flag_enabled("USE_MCDNN")
 
 
 # --- version / capability probes -------------------------------------------

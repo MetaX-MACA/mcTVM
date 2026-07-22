@@ -117,6 +117,7 @@ tvm_option(USE_CLML "Build with CLML Codegen support" OFF)
 tvm_option(USE_CLML_GRAPH_EXECUTOR "Build with CLML graph runtime" OFF)
 tvm_option(USE_NVSHMEM "Build with NVSHMEM support" OFF)
 tvm_option(USE_MCBLAS "Build with mcBLAS" OFF)
+tvm_option(USE_MCDNN "Build with mcDNN" OFF)
 
 # Python package options
 tvm_option(TVM_BUILD_PYTHON_MODULE "Build Python module with scikit-build-core" OFF)
