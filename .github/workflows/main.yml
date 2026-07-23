@@ -82,12 +82,27 @@ jobs:
           submodules: 'recursive'
       - name: Set up environment
         uses: ./.github/actions/setup
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.4
+      - name: sccache cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: ${{ runner.os }}-sccache-tvm-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-sccache-tvm-
       - name: Install TVM
         shell: cmd /C call {0}
+        env:
+          SCCACHE_DIR: ${{ github.workspace }}\.sccache
+          CMAKE_GENERATOR: Ninja
         run: |
           pip install scikit-build-core
-          set CMAKE_ARGS=-DUSE_LLVM=ON -DBUILD_TESTING=OFF
+          sccache --start-server
+          set CMAKE_ARGS=-DUSE_LLVM=ON -DBUILD_TESTING=OFF -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           pip install --no-deps . -v
+          sccache --show-stats
+          sccache --stop-server
       - name: Install test dependencies
         shell: cmd /C call {0}
         run: |
