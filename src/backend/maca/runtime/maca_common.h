@@ -44,10 +44,10 @@ namespace runtime {
     }                                                                              \
   }
 
-#define MACA_CALL(func)                                                     \
-  {                                                                         \
-    mcError_t e = (func);                                                   \
-    TVM_FFI_ICHECK(e == mcSuccess) << "MACA MACA: " << mcGetErrorString(e); \
+#define MACA_CALL(func)                                                \
+  {                                                                    \
+    mcError_t e = (func);                                              \
+    TVM_FFI_ICHECK(e == mcSuccess) << "MACA: " << mcGetErrorString(e); \
   }
 
 /*! \brief Thread local workspace */

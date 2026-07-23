@@ -27,7 +27,7 @@ pytest.importorskip("scipy")  # tvm.topi.testing imports scipy
 import tvm.topi.testing
 from tvm import relax
 from tvm.contrib.pickle_memoize import memoize
-from tvm.relax.backend.cuda.cudnn import partition_for_cudnn
+from tvm.relax.backend.maca.mcdnn import partition_for_mcdnn as partition_for_cudnn
 from tvm.relax.testing import get_relax_stacked_attention_module
 from tvm.script import relax as R
 from tvm.script.ir_builder import IRBuilder
@@ -41,14 +41,7 @@ def reset_seed():
 
 pytestmark = [
     pytest.mark.gpu,
-    pytest.mark.xfail(
-        not env.has_cudnn(),
-        reason=(
-            "TODO(maca): [cudnn-offload] support or enable cuDNN-compatible Relax offload on MACA"
-        ),
-        run=False,
-        strict=False,
-    ),
+    pytest.mark.skipif(not env.has_mcdnn(), reason="need mcdnn"),
 ]
 
 
@@ -166,7 +159,7 @@ def test_cudnn_partition_conv2d_without_bias(
     )
     mod = partition_for_cudnn(mod)
     assert (
-        mod["main"].body.blocks[0].bindings[0].value.op.name_hint == "fused_relax_nn_conv2d_cudnn"
+        mod["main"].body.blocks[0].bindings[0].value.op.name_hint == "fused_relax_nn_conv2d_mcdnn"
     )
 
 
@@ -217,14 +210,7 @@ def test_conv2d_offload(data_shape, weight_shape, dtype, with_bias, activation):
         tvm.testing.assert_allclose(out, ref, rtol=2.5e-2, atol=2.5e-2)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [cudnn-layout] keep cuDNN NCHW/OIHW offload disabled until the "
-        "MACA-compatible cuDNN path is stable"
-    ),
-    run=False,
-    strict=False,
-)
+@pytest.mark.skip(reason="flaky test")
 @pytest.mark.parametrize(
     "data_shape, weight_shape, dtype, with_bias, activation",
     [
@@ -307,11 +293,7 @@ def stacked_attention_size(request):
     return request.param
 
 
-@pytest.mark.xfail(
-    reason="TODO(maca): [cudnn-frontend] support cuDNN frontend integration on MACA",
-    run=False,
-    strict=False,
-)
+@pytest.mark.skip(reason="require cudnn frontend")
 def test_stacked_attention_split_offload(stacked_attention_size):
     b, s, n, (h, h_v), bias_shape, scale, single_shape, layout = stacked_attention_size
     qkv, bias, ref = get_numpy_stacked_attention_ref(
