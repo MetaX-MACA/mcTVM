@@ -87,14 +87,14 @@ jobs:
       - name: sccache cache
         uses: actions/cache@v4
         with:
-          path: ${{ env.SCCACHE_DIR }}
+          path: ${{ github.workspace }}/.sccache
           key: ${{ runner.os }}-sccache-tvm-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-sccache-tvm-
       - name: Install TVM
         shell: cmd /C call {0}
         env:
-          SCCACHE_DIR: ${{ github.workspace }}\.sccache
+          SCCACHE_DIR: ${{ github.workspace }}/.sccache
           CMAKE_GENERATOR: Ninja
         run: |
           pip install scikit-build-core
