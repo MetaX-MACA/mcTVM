@@ -91,6 +91,8 @@ jobs:
           key: ${{ runner.os }}-sccache-tvm-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-sccache-tvm-
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
       - name: Install TVM
         shell: cmd /C call {0}
         env:
