@@ -99,7 +99,7 @@ jobs:
         run: |
           pip install scikit-build-core
           sccache --start-server
-          set CMAKE_ARGS=-DUSE_LLVM=ON -DBUILD_TESTING=OFF -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          set CMAKE_ARGS=-DUSE_LLVM=ON -DBUILD_TESTING=OFF -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
           pip install --no-deps . -v
           sccache --show-stats
           sccache --stop-server
