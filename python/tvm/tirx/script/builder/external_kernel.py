@@ -26,7 +26,6 @@ from typing import Any
 
 import tvm_ffi
 
-import tvm
 from tvm import __version__ as tvm_version
 from tvm import tirx
 from tvm.ir import PrimExpr
@@ -328,15 +327,9 @@ def call_kernel(
     else:
         raise ValueError(f"Unsupported kernel type {kernel_type}")
 
-    current_target = tvm.target.Target.current()  
-    if current_target is not None and current_target.kind.name == "cuda":
-        kernel_name, kernel_module, runtime_args = kernel.compile_to_device_module(
-            launch_args, *args, **kwargs
-        )
-    else:
-        kernel_name, kernel_module, runtime_args = kernel.compile_to_device_module_maca(
-            launch_args, *args, **kwargs
-        )
+    kernel_name, kernel_module, runtime_args = kernel.compile_to_device_module_maca(
+        launch_args, *args, **kwargs
+    )
 
     # Attach the kernel module to the current IRModule
     external_mods: list[Module] = module_get_attr("external_mods") or []
