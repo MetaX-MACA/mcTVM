@@ -101,7 +101,7 @@ jobs:
         run: |
           pip install scikit-build-core
           sccache --start-server
-          set CMAKE_ARGS=-DUSE_LLVM=ON -DBUILD_TESTING=OFF -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DCMAKE_C_FLAGS="/FS /Z7" -DCMAKE_CXX_FLAGS="/FS /Z7"
+          set CMAKE_ARGS=-DUSE_LLVM=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
           pip install --no-deps . -v
           sccache --show-stats
           sccache --stop-server
