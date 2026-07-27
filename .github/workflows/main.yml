@@ -82,15 +82,6 @@ jobs:
           submodules: 'recursive'
       - name: Set up environment
         uses: ./.github/actions/setup
-      - name: Set up sccache
-        uses: mozilla-actions/sccache-action@v0.0.4
-      - name: sccache cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/.sccache
-          key: ${{ runner.os }}-sccache-tvm-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-sccache-tvm-
       - name: Setup MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
       - name: Install TVM
