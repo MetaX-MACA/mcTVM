@@ -294,7 +294,7 @@ jobs:
         run: cat test-summary.md >> "$GITHUB_STEP_SUMMARY"
 
   Linux_CPU_Test:
-    if: ${{ false && github.repository == 'MetaX-MACA/mcTVM' }}
+    if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
     runs-on: ubuntu-latest
     env:
       PLATFORM: cpu
