@@ -35,15 +35,9 @@ extern "C" __global__ void add_kernel(float* x, float* y, float* output, int n_e
 }
 """
 
-MACA_SOURCE_KERNEL_XFAIL_REASON = (
-    "TODO(maca): [source-kernel] support T.call_kernel external source compilation and runtime "
-    "registration through the MACA toolchain"
-)
-
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(reason=MACA_SOURCE_KERNEL_XFAIL_REASON, strict=False)
 def test_tir_call_source_kernel():
     @I.ir_module(s_tir=True)
     class Module:
