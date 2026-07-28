@@ -14,31 +14,23 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+"""Hardware requirements for TIRx codegen tests."""
 
-# Update a branch for nightly test results
-name: Update nightly branch
+from pathlib import Path
 
-on:
-  schedule:
-    # 9 PM PST
-    - cron: "0 5 * * *"
-  workflow_dispatch:
+import pytest
 
-concurrency:
-  group: update-nightly-branch
-  cancel-in-progress: true
+from tvm.testing import env
 
-jobs:
-  update-nightly-branch:
-    if: github.repository == 'apache/tvm'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - name: Update nightly branch
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -eux
-          git checkout -B nightly
-          git log -5
-          git push origin --force nightly
+
+def pytest_collection_modifyitems(items):
+    if env.has_maca():
+        return
+    suite_root = Path(__file__).resolve().parent
+    skip = pytest.mark.skip(reason="requires a MACA device")
+    for item in items:
+        if (
+            Path(item.path).resolve().is_relative_to(suite_root)
+            and item.get_closest_marker("gpu") is not None
+        ):
+            item.add_marker(skip)

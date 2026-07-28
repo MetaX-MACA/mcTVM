@@ -48,30 +48,32 @@ def assert_torch_output_vs_tvm_from_exported_to_cuda(raw_data, torch_module, tar
 
     relax_pipeline = relax.get_default_pipeline(tvm.target.Target.from_device(tvm.maca()))
     ex = relax.build(tvm_mod, target=target, relax_pipeline=relax_pipeline)
-    vm = relax.VirtualMachine(ex, dev)
-
-    gpu_data = tvm.runtime.tensor(raw_data_for_tvm, dev)
-    gpu_params = [tvm.runtime.tensor(p, dev) for p in tvm_params["main"]]
-    gpu_out = vm["main"](gpu_data, *gpu_params)
-
     pytorch_out = torch_module(torch_data)
 
-    if isinstance(pytorch_out, tuple):
-        for i in range(len(pytorch_out)):
-            actual = gpu_out[i].numpy()
-            desired = pytorch_out[i].detach().numpy()
+    def run_and_check():
+        vm = relax.VirtualMachine(ex, dev)
+        gpu_data = tvm.runtime.tensor(raw_data_for_tvm, dev)
+        gpu_params = [tvm.runtime.tensor(p, dev) for p in tvm_params["main"]]
+        gpu_out = vm["main"](gpu_data, *gpu_params)
+
+        if isinstance(pytorch_out, tuple):
+            for i in range(len(pytorch_out)):
+                actual = gpu_out[i].numpy()
+                desired = pytorch_out[i].detach().numpy()
+                tvm.testing.assert_allclose(actual=actual, desired=desired, rtol=1e-5, atol=1e-5)
+        else:
+            actual = gpu_out[0].numpy()
+            desired = pytorch_out.detach().numpy()
             tvm.testing.assert_allclose(actual=actual, desired=desired, rtol=1e-5, atol=1e-5)
-    else:
-        actual = gpu_out[0].numpy()
-        desired = pytorch_out.detach().numpy()
-        tvm.testing.assert_allclose(actual=actual, desired=desired, rtol=1e-5, atol=1e-5)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_index_tensor():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class IndexModel0(nn.Module):
         def __init__(self):
@@ -177,7 +179,7 @@ def test_index_tensor():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_full():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class FullModel(nn.Module):
         def __init__(self):
@@ -195,7 +197,7 @@ def test_full():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_full_like():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class FullLike(nn.Module):
         def __init__(self):
@@ -214,7 +216,7 @@ def test_full_like():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_ones():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class FullModel(nn.Module):
         def __init__(self):
@@ -232,7 +234,7 @@ def test_ones():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_sort():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     raw_data = np.array([[4, 1, 13], [-30, 1, 3], [4, 0, 10]]).astype("float32")
 
@@ -261,7 +263,7 @@ def test_sort():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_tensor_clamp():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class ClampBothTensor(torch.nn.Module):
         def __init__(self):
@@ -346,7 +348,7 @@ def test_tensor_clamp():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_tensor_expand_as():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class ExpandAs0(torch.nn.Module):
         def __init__(self):
@@ -397,7 +399,7 @@ def test_tensor_expand_as():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_copy_():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class CopyTester(nn.Module):
         def __init__(self, size):
@@ -423,7 +425,7 @@ def test_upsample_with_size():
     factor argument but not both. This tests the former.
     """
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     batch_size = 1
     channels = 3
@@ -440,7 +442,7 @@ def test_upsample_with_size():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_detach_no_change():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     # In TVM, detach() is just identity
     class DetachTester(nn.Module):
@@ -461,7 +463,7 @@ def test_upsample_with_scale_factor():
     factor argument but not both. This tests the latter.
     """
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     batch_size = 2
     channels = 3
@@ -479,7 +481,7 @@ def test_upsample_with_scale_factor():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_linalg_vector_norm():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class VectorNorm0(torch.nn.Module):
         def forward(self, x):
@@ -514,7 +516,7 @@ def test_linalg_vector_norm():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_batch_norm_prog():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     # Default args, in a pytorch program (to ensure output is in proper type and format)
     raw_data = np.random.randn(2, 3, 2, 2).astype(np.float32)
@@ -537,7 +539,7 @@ def test_batch_norm_prog():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_split_size():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     # Test split using the split_size argument such that it is not a divisor
     # of the dimension to split (the last tensor will be smaller)
@@ -565,7 +567,7 @@ def test_split_size():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_split_sections_list():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     # Test split using a list of section sizes
     batch = 3
@@ -593,7 +595,7 @@ def test_split_sections_list():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_batch_norm0():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     # Eval, no momentum, no affine, no running stats
     raw_data = np.random.randn(8, 3, 4, 4).astype(np.float32)
@@ -607,7 +609,7 @@ def test_batch_norm0():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_batch_norm1():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     # Eval, with momentum, no affine, with running stats
     raw_data = np.random.randn(1, 4, 2, 2).astype(np.float32)
@@ -621,7 +623,7 @@ def test_batch_norm1():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_batch_norm2():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     # Eval, with momentum, affine, no running stats
     raw_data = np.random.randn(3, 4, 2, 2).astype(np.float32)
@@ -635,7 +637,7 @@ def test_batch_norm2():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_batch_norm3():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     # Eval, no momentum, affine, with running stats
     raw_data = np.random.randn(1, 2, 2, 2).astype(np.float32)
@@ -649,7 +651,7 @@ def test_batch_norm3():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_chunk_even():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     # Chunks is a divisor of the dimension size
     batch = 6
@@ -677,7 +679,7 @@ def test_chunk_even():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_chunk_uneven():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     # Chunks is not a divisor of the dimension size
     batch = 2
@@ -705,7 +707,7 @@ def test_chunk_uneven():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_chunk_too_many():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     # If user asks for more chunks than the size of the dim, pytorch simply splits in sections of size 1
     batch = 1
@@ -733,7 +735,7 @@ def test_chunk_too_many():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_arange():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     # arange.default
     raw_data = np.array([0, 0, 0, 0, 0])
@@ -770,7 +772,7 @@ def test_arange():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_index_select():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class IndexSelectModel(nn.Module):
         def forward(self, x):
@@ -786,7 +788,7 @@ def test_index_select():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_stack():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class StackModel(nn.Module):
         def forward(self, x):
@@ -805,7 +807,7 @@ def test_stack():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_sum():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class SumModel(nn.Module):
         def forward(self, x):
@@ -821,7 +823,7 @@ def test_sum():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_mul():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class MulModule(nn.Module):
         def __init__(self):
@@ -840,7 +842,7 @@ def test_mul():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_concat():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class ConcatFour(nn.Module):
         def __init__(self, dim=0):
@@ -862,7 +864,7 @@ def test_concat():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_leakyrelu_module():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class LeakyReLUModule(nn.Module):
         def __init__(self):
@@ -881,7 +883,7 @@ def test_leakyrelu_module():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_log_softmax_module():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class LogSoftmaxModule(nn.Module):
         def __init__(self):
@@ -900,7 +902,7 @@ def test_log_softmax_module():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_softmax_module():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class SoftmaxModule(nn.Module):
         def __init__(self):
@@ -919,7 +921,7 @@ def test_softmax_module():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_adaptive_avg_pool2d_module():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class AdaptiveAvgPool2dModule(nn.Module):
         def __init__(self):
@@ -938,7 +940,7 @@ def test_adaptive_avg_pool2d_module():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_avg_pool2d_module():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class AvgPool2dModule(nn.Module):
         def __init__(self):
@@ -957,7 +959,7 @@ def test_avg_pool2d_module():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_conv1d_module():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class Conv1dModule(nn.Module):
         def __init__(self):
@@ -976,7 +978,7 @@ def test_conv1d_module():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_conv2d_module():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class Conv2dModule(nn.Module):
         def __init__(self):
@@ -995,7 +997,7 @@ def test_conv2d_module():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_conv3d_module():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class Conv3dModule(nn.Module):
         def __init__(self):
@@ -1014,7 +1016,7 @@ def test_conv3d_module():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_group_norm_module():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class GroupNormModule(nn.Module):
         def __init__(self):
@@ -1033,7 +1035,7 @@ def test_group_norm_module():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_layer_norm_module():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class LayerNormModule(nn.Module):
         def __init__(self):
@@ -1052,7 +1054,7 @@ def test_layer_norm_module():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_linear_module():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class LinearModule(nn.Module):
         def __init__(self):
@@ -1071,7 +1073,7 @@ def test_linear_module():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_max_pool2d_module():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class MaxPool2dModule(nn.Module):
         def __init__(self):
@@ -1090,7 +1092,7 @@ def test_max_pool2d_module():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_embedding_module():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class EmbeddingModule(nn.Module):
         def __init__(self):
@@ -1109,7 +1111,7 @@ def test_embedding_module():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_flatten_module():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class FlattenModule(nn.Module):
         def __init__(self):
@@ -1128,7 +1130,7 @@ def test_flatten_module():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_numel():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class NumelModule(nn.Module):
         def forward(self, x):
@@ -1143,7 +1145,7 @@ def test_numel():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_size():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class SizeModule(nn.Module):
         def forward(self, x):
@@ -1158,7 +1160,7 @@ def test_size():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_tensor():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class TensorModule(nn.Module):
         def forward(self, x):
@@ -1173,7 +1175,7 @@ def test_tensor():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_type():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class TypeModule(nn.Module):
         def forward(self, x):
@@ -1188,7 +1190,7 @@ def test_type():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_float():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class FloatModule(nn.Module):
         def forward(self, x):
@@ -1203,7 +1205,7 @@ def test_float():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_half():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class HalfModule(nn.Module):
         def forward(self, x):
@@ -1218,7 +1220,7 @@ def test_half():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_getattr():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class GetAttrModule(nn.Module):
         def forward(self, x):
@@ -1234,7 +1236,7 @@ def test_getattr():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_sym_size_int():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class SymSizeIntModule(nn.Module):
         def forward(self, x):
@@ -1249,7 +1251,7 @@ def test_sym_size_int():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_interpolate():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class InterpolateModule(nn.Module):
         def forward(self, x):
@@ -1265,7 +1267,7 @@ def test_interpolate():
 @pytest.mark.skipif(not tvm.testing.device_enabled("maca"), reason="maca not enabled")
 def test_cross_entropy_module():
     target = "maca"
-    dev = tvm.device(target)
+    dev = tvm.maca()
 
     class CrossEntropyModule(nn.Module):
         def __init__(self):

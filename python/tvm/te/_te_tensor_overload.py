@@ -14,31 +14,48 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+"""Tensor overload hooks for TE tensors and tensor slices."""
 
-# GH actions.
-# We use it to cover windows and mac builds
-# Jenkins is still the primary CI
 
-name: Update last-successful branch
+def __add__(_lhs, _rhs):
+    return NotImplemented
 
-on:
-  schedule:
-    - cron: "0/15 * * * *"
-  workflow_dispatch:
 
-concurrency:
-  group: update-last-successful-branch
-  cancel-in-progress: true
+def __radd__(_lhs, _rhs):
+    return NotImplemented
 
-jobs:
-  update-last-successful-branch:
-    if: github.repository == 'apache/tvm'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6.0.2
-      - name: Update last-successful branch
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -eux
-          python ci/scripts/github/update_branch.py || echo step failed
+
+def __sub__(_lhs, _rhs):
+    return NotImplemented
+
+
+def __rsub__(_lhs, _rhs):
+    return NotImplemented
+
+
+def __mul__(_lhs, _rhs):
+    return NotImplemented
+
+
+def __rmul__(_lhs, _rhs):
+    return NotImplemented
+
+
+def __div__(_lhs, _rhs):
+    return NotImplemented
+
+
+def __rdiv__(_lhs, _rhs):
+    return NotImplemented
+
+
+def __truediv__(_lhs, _rhs):
+    return NotImplemented
+
+
+def __rtruediv__(_lhs, _rhs):
+    return NotImplemented
+
+
+def astype(_value, _dtype, _span=None):
+    return NotImplemented

@@ -123,17 +123,17 @@ class WarpExecutionAfterRewrite:
             for i0_1_i1_1_fused in T.thread_binding(0, 16, thread="vthread.x"):
                 for i0_2_i1_2_fused in T.thread_binding(0, 8, thread="threadIdx.y"):
                     for i2_0 in T.serial(0, 1):
-                        for ax0_ax1_fused_0 in T.serial(0, 1024):
+                        for ax0_ax1_fused_0 in T.serial(0, 512):
                             for ax0_ax1_fused_1 in T.thread_binding(0, 8, thread="threadIdx.y"):
                                 for ax0_ax1_fused_2 in T.thread_binding(
-                                    0, 32, thread="threadIdx.x"
+                                    0, 64, thread="threadIdx.x"
                                 ):
                                     with T.sblock("A_shared"):
                                         v0 = T.axis.spatial(
                                             512,
                                             (
-                                                ax0_ax1_fused_0 * 256
-                                                + ax0_ax1_fused_1 * 32
+                                                ax0_ax1_fused_0 * 512
+                                                + ax0_ax1_fused_1 * 64
                                                 + ax0_ax1_fused_2
                                             )
                                             // 512,
@@ -141,8 +141,8 @@ class WarpExecutionAfterRewrite:
                                         v1 = T.axis.spatial(
                                             512,
                                             (
-                                                ax0_ax1_fused_0 * 256
-                                                + ax0_ax1_fused_1 * 32
+                                                ax0_ax1_fused_0 * 512
+                                                + ax0_ax1_fused_1 * 64
                                                 + ax0_ax1_fused_2
                                             )
                                             % 512,
@@ -150,18 +150,18 @@ class WarpExecutionAfterRewrite:
                                         T.reads([A[v0, v1]])
                                         T.writes([A_shared[v0, v1]])
                                         A_shared[v0, v1] = A[v0, v1]
-                        for ax0_ax1_fused_0 in T.serial(0, 32):
+                        for ax0_ax1_fused_0 in T.serial(0, 16):
                             for ax0_ax1_fused_1 in T.thread_binding(0, 8, thread="threadIdx.y"):
                                 for ax0_ax1_fused_2 in T.thread_binding(
-                                    0, 32, thread="threadIdx.x"
+                                    0, 64, thread="threadIdx.x"
                                 ):
                                     for ax0_ax1_fused_3 in T.vectorized(0, 2):
                                         with T.sblock("B_shared"):
                                             v0 = T.axis.spatial(
                                                 512,
                                                 (
-                                                    ax0_ax1_fused_0 * 512
-                                                    + ax0_ax1_fused_1 * 64
+                                                    ax0_ax1_fused_0 * 1024
+                                                    + ax0_ax1_fused_1 * 128
                                                     + ax0_ax1_fused_2 * 2
                                                     + ax0_ax1_fused_3
                                                 )
@@ -171,8 +171,8 @@ class WarpExecutionAfterRewrite:
                                                 512,
                                                 i0_0_i1_0_fused * 32
                                                 + (
-                                                    ax0_ax1_fused_0 * 512
-                                                    + ax0_ax1_fused_1 * 64
+                                                    ax0_ax1_fused_0 * 1024
+                                                    + ax0_ax1_fused_1 * 128
                                                     + ax0_ax1_fused_2 * 2
                                                     + ax0_ax1_fused_3
                                                 )

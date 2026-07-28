@@ -27,8 +27,8 @@ from tvm.testing import env
 from tvm.tirx import Buffer
 
 MACA_HOPPER_CODEGEN_XFAIL_REASON = (
-    "TODO(maca): [hopper-codegen] support Hopper-style setmaxnreg, stmatrix, mbarrier, TMA, WGMMA, "
-    "and shared-rank PTX lowering"
+    "TODO(maca): [hopper-codegen] support Hopper-style setmaxnreg, stmatrix, mbarrier, "
+    "TMA, WGMMA, and shared-rank PTX lowering"
 )
 
 pytestmark = pytest.mark.xfail(reason=MACA_HOPPER_CODEGEN_XFAIL_REASON, strict=False)
@@ -60,8 +60,11 @@ def _run_tensormap_encode(shape, dtype, encode_args):
     target = tvm.target.Target("maca")
     mod = tvm.IRModule({"main": main})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-    A = tvm.runtime.tensor(np.zeros(shape, dtype=dtype), device=tvm.maca(0))
-    mod(A)
+    def run_and_check():
+        A = tvm.runtime.tensor(np.zeros(shape, dtype=dtype), device=tvm.maca(0))
+        mod(A)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.parametrize("inc", [False, True])
@@ -109,7 +112,6 @@ def test_stmatrix_sync_aligned(trans):
                 A[i, j] = A_smem[i, j]
         # fmt: on
 
-    DEV = tvm.maca(0)
     target = tvm.target.Target("maca")
     mod = tvm.IRModule({"main": func})
     with target:
@@ -119,8 +121,10 @@ def test_stmatrix_sync_aligned(trans):
             assert "stmatrix.sync.aligned.m8n8.x4.shared.b16" in src
         else:
             assert "stmatrix.sync.aligned.m8n8.x4.trans.shared.b16" in src
+    def run_and_check():
+        dev = tvm.maca(0)
         A_np = np.zeros((16, 16), dtype="float16")
-        A = tvm.runtime.tensor(A_np, device=DEV)
+        A = tvm.runtime.tensor(A_np, device=dev)
         mod(A)
         A_ref = np.zeros((16, 16), dtype="float16")
         for tx in range(32):
@@ -146,9 +150,12 @@ def test_stmatrix_sync_aligned(trans):
                 A_ref[col + 9, row + 8] = tx * 8 + 7
         np.testing.assert_allclose(A.numpy(), A_ref)
 
+    tvm.testing.run_with_gpu_lock(run_and_check)
+
 
 @pytest.mark.parametrize("trans", [False, True])
 @pytest.mark.parametrize("num", [1, 2, 4])
+@pytest.mark.gpu
 def test_ptx_stmatrix(trans, num):
     # fmt: off
     @T.prim_func
@@ -175,7 +182,6 @@ def test_ptx_stmatrix(trans, num):
                 A[i, j] = A_shared[i, j]
         # fmt: on
 
-    DEV = tvm.maca(0)
     target = tvm.target.Target("maca")
     mod = tvm.IRModule({"main": main})
     with target:
@@ -188,9 +194,6 @@ def test_ptx_stmatrix(trans, num):
     A_full[8:16, 0:8] = np.arange(8 * 8, 16 * 8, dtype="float16").reshape((8, 8))
     A_full[0:8, 8:16] = np.arange(16 * 8, 24 * 8, dtype="float16").reshape((8, 8))
     A_full[8:16, 8:16] = np.arange(24 * 8, 32 * 8, dtype="float16").reshape((8, 8))
-    A = tvm.runtime.tensor(A_np, device=DEV)
-
-    mod(A)
     print(src)
 
     if num == 1:
@@ -204,7 +207,12 @@ def test_ptx_stmatrix(trans, num):
         A_ref[8:16, 0:8] = A_full[8:16, 0:8] if not trans else A_full[8:16, 0:8].T
         A_ref[8:16, 8:16] = A_full[8:16, 8:16] if not trans else A_full[8:16, 8:16].T
 
-    np.testing.assert_allclose(A.numpy(), A_ref)
+    def run_and_check():
+        A = tvm.runtime.tensor(A_np, device=tvm.maca(0))
+        mod(A)
+        np.testing.assert_allclose(A.numpy(), A_ref)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.parametrize("trans", [False, True])
@@ -247,7 +255,6 @@ def test_ptx_stmatrix_noncontiguous(trans, num):
                 A[i, j] = A_shared[i, j]
     # fmt: on
 
-    DEV = tvm.maca(0)
     target = tvm.target.Target("maca")
     mod = tvm.IRModule({"main": main})
     with target:
@@ -260,8 +267,6 @@ def test_ptx_stmatrix_noncontiguous(trans, num):
             assert f"*(uint32_t*)src{i}" in src
 
     A_np = np.zeros((16, 16), dtype="float16")
-    A = tvm.runtime.tensor(A_np, device=DEV)
-    mod(A)
     A_ref = np.zeros((16, 16), dtype="float16")
     A_full = np.zeros((16, 16), dtype="float16")
     A_full[0:8, 0:8] = np.arange(8 * 8, dtype="float16").reshape((8, 8))
@@ -275,7 +280,13 @@ def test_ptx_stmatrix_noncontiguous(trans, num):
     if num >= 4:
         A_ref[0:8, 8:16] = A_full[0:8, 8:16] if not trans else A_full[0:8, 8:16].T
         A_ref[8:16, 8:16] = A_full[8:16, 8:16] if not trans else A_full[8:16, 8:16].T
-    np.testing.assert_allclose(A.numpy(), A_ref)
+
+    def run_and_check():
+        A = tvm.runtime.tensor(A_np, device=tvm.maca(0))
+        mod(A)
+        np.testing.assert_allclose(A.numpy(), A_ref)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -442,7 +453,6 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
 
         return main
 
-    DEV = tvm.maca(0)
     target = tvm.target.Target("maca")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
@@ -461,10 +471,15 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
 
     A_np = np.array(A_np).reshape(shape).astype(get_np_dtype(dtype))
     B_np = np.zeros(shape).astype(get_np_dtype(dtype))
-    A = tvm.runtime.tensor(A_np, device=DEV)
-    B = tvm.runtime.tensor(B_np, device=DEV)
-    mod(A, B)
-    assert np.allclose(A.numpy().astype("float32"), B.numpy().astype("float32"))
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        A = tvm.runtime.tensor(A_np, device=dev)
+        B = tvm.runtime.tensor(B_np, device=dev)
+        mod(A, B)
+        assert np.allclose(A.numpy().astype("float32"), B.numpy().astype("float32"))
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -605,7 +620,6 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
 
         return main, shape
 
-    DEV = tvm.maca(0)
     target = tvm.target.Target("maca")
     func, shape = get_ir(swizzle, dtype)
     mod = tvm.IRModule({"main": func})
@@ -617,17 +631,22 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
     A_np = [i for i in range(total_elems)]
     A_np = np.array(A_np).astype(dtype)
     B_np = np.zeros((total_elems,)).astype(dtype)
-    A = tvm.runtime.tensor(A_np, device=DEV)
-    B = tvm.runtime.tensor(B_np, device=DEV)
-    mod(A, B)
     dtype = tvm.DataType(dtype)
     layout = T.SwizzleLayout(
         per_element=int(math.log2(128 // dtype.bits)), swizzle_len=swizzle, atom_len=3
     )
-    B_np = B.numpy()
-    B_swizzle = [B_np[int(layout.apply(i)["m"])] for i in range(total_elems)]
-    B_swizzle = np.array(B_swizzle).astype(str(dtype))
-    assert np.allclose(A.numpy(), B_swizzle)
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        A = tvm.runtime.tensor(A_np, device=dev)
+        B = tvm.runtime.tensor(B_np, device=dev)
+        mod(A, B)
+        B_result = B.numpy()
+        B_swizzle = [B_result[int(layout.apply(i)["m"])] for i in range(total_elems)]
+        B_swizzle = np.array(B_swizzle).astype(str(dtype))
+        assert np.allclose(A.numpy(), B_swizzle)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.parametrize(
@@ -694,7 +713,6 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
 
         return main
 
-    DEV = tvm.maca(0)
     target = tvm.target.Target("maca")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
@@ -705,9 +723,14 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
     A_np = [i for i in range(math.prod(shape))]
     A_np = np.array(A_np, dtype="float32").reshape(shape)
     B_np = np.zeros(shape, dtype="float32")
-    A = tvm.runtime.tensor(A_np, device=DEV)
-    B = tvm.runtime.tensor(B_np, device=DEV)
-    mod(A, B)
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        A = tvm.runtime.tensor(A_np, device=dev)
+        B = tvm.runtime.tensor(B_np, device=dev)
+        mod(A, B)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.parametrize(
@@ -784,7 +807,6 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
 
         return main
 
-    DEV = tvm.maca(0)
     target = tvm.target.Target("maca")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
@@ -795,10 +817,15 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
     A_np = [i for i in range(math.prod(shape))]
     A_np = np.array(A_np, dtype="float32").reshape(shape)
     B_np = np.zeros(shape, dtype="float32")
-    A = tvm.runtime.tensor(A_np, device=DEV)
-    B = tvm.runtime.tensor(B_np, device=DEV)
-    mod(A, B)
-    assert np.allclose(A.numpy(), B.numpy())
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        A = tvm.runtime.tensor(A_np, device=dev)
+        B = tvm.runtime.tensor(B_np, device=dev)
+        mod(A, B)
+        assert np.allclose(A.numpy(), B.numpy())
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.parametrize(
@@ -845,7 +872,6 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
 
         return main
 
-    DEV = tvm.maca(0)
     target = tvm.target.Target("maca")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
@@ -854,12 +880,15 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
     assert "const __grid_constant__ CUtensorMap" in src
 
     A_np = np.zeros(shape, dtype="float32")
-    A = tvm.runtime.tensor(A_np, device=DEV)
-    mod(A)
-
     A_ref = [i for i in range(math.prod(shape))]
     A_ref = np.array(A_ref, dtype="float32").reshape(shape)
-    np.testing.assert_allclose(A.numpy(), A_ref)
+
+    def run_and_check():
+        A = tvm.runtime.tensor(A_np, device=tvm.maca(0))
+        mod(A)
+        np.testing.assert_allclose(A.numpy(), A_ref)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -971,7 +1000,6 @@ def test_wgmma_ss_nt():
     t_in_dtype = tvm.DataType(in_dtype)
     elem_bytes = t_in_dtype.bits // 8
 
-    DEV = tvm.maca(0)
     target = tvm.target.Target("maca")
     M = 64
     N = 64
@@ -1009,13 +1037,16 @@ def test_wgmma_ss_nt():
     B_np = np.random.randn(*shapeB).astype(in_dtype)
     C_np = np.zeros(shapeC).astype(out_dtype)
 
-    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
-    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
-    C_tvm = tvm.runtime.tensor(C_np, device=DEV)
-    mod(A_tvm, B_tvm, C_tvm)
+    def run_and_check():
+        dev = tvm.maca(0)
+        A_tvm = tvm.runtime.tensor(A_np, device=dev)
+        B_tvm = tvm.runtime.tensor(B_np, device=dev)
+        C_tvm = tvm.runtime.tensor(C_np, device=dev)
+        mod(A_tvm, B_tvm, C_tvm)
+        C_ref = np.dot(A_np.T, B_np).astype(out_dtype)
+        tvm.testing.assert_allclose(C_tvm.numpy(), C_ref, rtol=1e-3, atol=1e-3)
 
-    C_ref = np.dot(A_np.T, B_np).astype(out_dtype)
-    tvm.testing.assert_allclose(C_tvm.numpy(), C_ref, rtol=1e-3, atol=1e-3)
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -1136,7 +1167,6 @@ def test_wgmma_rs_nt():
     t_in_dtype = tvm.DataType(in_dtype)
     elem_bytes = t_in_dtype.bits // 8
 
-    DEV = tvm.maca(0)
     target = tvm.target.Target("maca")
     M = 64
     N = 64
@@ -1162,17 +1192,21 @@ def test_wgmma_rs_nt():
     B_np = np.random.randn(*shapeB).astype(in_dtype)
     C_np = np.zeros(shapeC).astype(out_dtype)
 
-    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
-    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
-    C_tvm = tvm.runtime.tensor(C_np, device=DEV)
-    mod(A_tvm, B_tvm, C_tvm)
-
     np.printoptions(threshold=np.inf)
     np.printoptions(linewidth=np.inf)
     np.printoptions(precision=2)
 
     C_ref = np.dot(A_np, B_np).astype(out_dtype)
-    tvm.testing.assert_allclose(C_tvm.numpy(), C_ref, rtol=1e-3, atol=1e-3)
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        A_tvm = tvm.runtime.tensor(A_np, device=dev)
+        B_tvm = tvm.runtime.tensor(B_np, device=dev)
+        C_tvm = tvm.runtime.tensor(C_np, device=dev)
+        mod(A_tvm, B_tvm, C_tvm)
+        tvm.testing.assert_allclose(C_tvm.numpy(), C_ref, rtol=1e-3, atol=1e-3)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu

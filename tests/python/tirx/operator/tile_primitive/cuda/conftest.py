@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -15,10 +14,20 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+"""Hardware requirements for MACA tile-primitive tests."""
 
-set -euxo pipefail
+from pathlib import Path
 
-# Ensure no stale pytest-results remain from a previous test run.
-pushd build
-rm -rf pytest-results
-popd
+import pytest
+
+from tvm.testing import env
+
+
+def pytest_collection_modifyitems(items):
+    if env.has_maca():
+        return
+    suite_root = Path(__file__).resolve().parent
+    skip = pytest.mark.skip(reason="requires a MACA device enabled by TVM_TEST_TARGETS")
+    for item in items:
+        if Path(item.path).resolve().is_relative_to(suite_root):
+            item.add_marker(skip)

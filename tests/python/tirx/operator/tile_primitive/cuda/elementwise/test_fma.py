@@ -64,7 +64,6 @@ def test_fma_scalar_scalar():
 
     N = 128
     dtype = "float32"
-    dev = tvm.maca(0)
     target = tvm.target.Target("maca")
 
     scale_val = 0.5
@@ -83,12 +82,17 @@ def test_fma_scalar_scalar():
 
     with target:
         A_np = np.random.rand(N).astype(dtype)
-        A = tvm.runtime.tensor(A_np, dev)
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-        mod(A)
-        expected = A_np * scale_val + bias_val
-        tvm.testing.assert_allclose(expected, A.numpy(), atol=1e-3)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_np, dev)
+            mod(A)
+            expected = A_np * scale_val + bias_val
+            tvm.testing.assert_allclose(expected, A.numpy(), atol=1e-3)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +108,6 @@ def test_fma_buffer_scale_scalar_bias():
 
     N = 2
     dtype = "float32"
-    dev = tvm.maca(0)
     target = tvm.target.Target("maca")
 
     coeff = 0.695
@@ -126,17 +129,22 @@ def test_fma_buffer_scale_scalar_bias():
     with target:
         A_np = np.random.rand(N).astype(dtype)
         B_np = np.random.rand(N).astype(dtype)
-        A = tvm.runtime.tensor(A_np, dev)
-        B = tvm.runtime.tensor(B_np, dev)
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-        mod(A, B)
-        expected = A_np * B_np + coeff
-        tvm.testing.assert_allclose(expected, A.numpy(), atol=1e-3)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_np, dev)
+            B = tvm.runtime.tensor(B_np, dev)
+            mod(A, B)
+            expected = A_np * B_np + coeff
+            tvm.testing.assert_allclose(expected, A.numpy(), atol=1e-3)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 # ---------------------------------------------------------------------------
-# Binary op with scalar broadcast (PrimExpr scalar, e.g. BufferLoad)
+# Binary op with scalar broadcast (Expr scalar, e.g. BufferLoad)
 # ---------------------------------------------------------------------------
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
@@ -148,7 +156,6 @@ def test_mul_scalar_broadcast():
 
     N = 16
     dtype = "float32"
-    dev = tvm.maca(0)
     target = tvm.target.Target("maca")
 
     @T.prim_func
@@ -168,13 +175,18 @@ def test_mul_scalar_broadcast():
     with target:
         A_np = np.random.rand(N).astype(dtype)
         S_np = np.array([2.5], dtype=dtype)
-        A_dev = tvm.runtime.tensor(A_np, dev)
-        S_dev = tvm.runtime.tensor(S_np, dev)
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-        mod(A_dev, S_dev)
-        expected = A_np * S_np[0]
-        tvm.testing.assert_allclose(expected, A_dev.numpy(), atol=1e-3)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A_dev = tvm.runtime.tensor(A_np, dev)
+            S_dev = tvm.runtime.tensor(S_np, dev)
+            mod(A_dev, S_dev)
+            expected = A_np * S_np[0]
+            tvm.testing.assert_allclose(expected, A_dev.numpy(), atol=1e-3)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +202,6 @@ def test_add_rounding_mode():
 
     N = 2
     dtype = "float32"
-    dev = tvm.maca(0)
     target = tvm.target.Target("maca")
 
     round_const = float(2**23 + 2**22)
@@ -208,7 +219,6 @@ def test_add_rounding_mode():
 
     with target:
         A_np = np.array([1.3, 2.7], dtype=dtype)
-        A_dev = tvm.runtime.tensor(A_np, dev)
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
         # Check that the PTX uses the rounding mode
@@ -216,9 +226,15 @@ def test_add_rounding_mode():
         assert re.search(r"add\.rm\.ftz\.f32x2", src) or re.search(
             r"tvm_builtin_ptx_add_packed_", src
         ), f"Expected packed add with rm rounding in PTX:\n{src}"
-        mod(A_dev)
-        expected = A_np + round_const
-        tvm.testing.assert_allclose(expected, A_dev.numpy(), atol=1.0)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A_dev = tvm.runtime.tensor(A_np, dev)
+            mod(A_dev)
+            expected = A_np + round_const
+            tvm.testing.assert_allclose(expected, A_dev.numpy(), atol=1.0)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +252,6 @@ def test_fma_no_layout():
 
     N = 4
     dtype = "float32"
-    dev = tvm.maca(0)
     target = tvm.target.Target("maca")
 
     scale_val = 2.0
@@ -257,12 +272,17 @@ def test_fma_no_layout():
 
     with target:
         A_np = np.array([1.0, 2.0, 3.0, 4.0], dtype=dtype)
-        A_dev = tvm.runtime.tensor(A_np, dev)
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-        mod(A_dev)
-        expected = A_np * scale_val + bias_val
-        tvm.testing.assert_allclose(expected, A_dev.numpy(), atol=1e-3)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A_dev = tvm.runtime.tensor(A_np, dev)
+            mod(A_dev)
+            expected = A_np * scale_val + bias_val
+            tvm.testing.assert_allclose(expected, A_dev.numpy(), atol=1e-3)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +298,6 @@ def test_sub_buffer_buffer_rounding():
 
     N = 2
     dtype = "float32"
-    dev = tvm.maca(0)
     target = tvm.target.Target("maca")
 
     @T.prim_func
@@ -298,17 +317,22 @@ def test_sub_buffer_buffer_rounding():
     with target:
         A_np = np.array([3.14, 2.71], dtype=dtype)
         B_np = np.array([1.41, 0.57], dtype=dtype)
-        A_dev = tvm.runtime.tensor(A_np, dev)
-        B_dev = tvm.runtime.tensor(B_np, dev)
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
         src = mod.mod.imports[0].inspect_source()
         assert re.search(r"sub\.rn\.ftz\.f32x2", src) or re.search(
             r"tvm_builtin_ptx_sub_packed_", src
         ), f"Expected packed sub with rn rounding in PTX:\n{src}"
-        mod(A_dev, B_dev)
-        expected = A_np - B_np
-        tvm.testing.assert_allclose(expected, A_dev.numpy(), atol=1e-6)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A_dev = tvm.runtime.tensor(A_np, dev)
+            B_dev = tvm.runtime.tensor(B_np, dev)
+            mod(A_dev, B_dev)
+            expected = A_np - B_np
+            tvm.testing.assert_allclose(expected, A_dev.numpy(), atol=1e-6)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -319,7 +343,6 @@ def test_fma_warpgroup_wg_local_layout():
     dtype = "float32"
     scale_val = 1.5
     bias_val = -0.25
-    dev = tvm.maca(0)
     target = tvm.target.Target("maca")
 
     @T.prim_func
@@ -344,13 +367,18 @@ def test_fma_warpgroup_wg_local_layout():
         np.random.seed(0)
         A_np = np.random.rand(rows, cols).astype(dtype)
         B_np = np.zeros((rows, cols), dtype=dtype)
-        A_dev = tvm.runtime.tensor(A_np, dev)
-        B_dev = tvm.runtime.tensor(B_np, dev)
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-        mod(A_dev, B_dev)
-        expected = A_np * scale_val + bias_val
-        tvm.testing.assert_allclose(expected, B_dev.numpy(), atol=1e-5)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A_dev = tvm.runtime.tensor(A_np, dev)
+            B_dev = tvm.runtime.tensor(B_np, dev)
+            mod(A_dev, B_dev)
+            expected = A_np * scale_val + bias_val
+            tvm.testing.assert_allclose(expected, B_dev.numpy(), atol=1e-5)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 # -----------------------------------------------------------------------------

@@ -27,7 +27,10 @@ from tvm.script import ir as I
 from tvm.script import tirx as T
 from tvm.testing import env
 
-MACA_PTX_ASYNC_COPY_XFAIL_REASON = "TODO(maca): [ptx-cp-async] support PTX cp.async lowering and MACA capability detection for async copy"
+MACA_PTX_ASYNC_COPY_XFAIL_REASON = (
+    "TODO(maca): [ptx-cp-async] support PTX cp.async lowering and MACA capability detection "
+    "for async copy"
+)
 
 
 def test_cp_async_raw_dtype_round_trips():
@@ -49,7 +52,7 @@ def count_cp_async(stmt):
     num_alloc = [0]
 
     def verify(n):
-        if isinstance(n, tvm.tirx.Call) and n.op.name == "tirx.ptx.cp_async_raw":
+        if isinstance(n, tvm.ir.Call) and n.op.name == "tirx.ptx.cp_async_raw":
             num_alloc[0] += 1
 
     tvm.tirx.stmt_functor.post_order_visit(stmt, verify)
@@ -170,11 +173,15 @@ def test_inject_async_copy():
 
         A_np = np.random.rand(32, 128).astype(dtype)
         B_np = np.zeros((32, 128)).astype(dtype)
-        dev = tvm.maca(0)
-        A_nd = tvm.runtime.tensor(A_np, device=dev)
-        B_nd = tvm.runtime.tensor(B_np, device=dev)
-        mod(A_nd, B_nd)
-        tvm.testing.assert_allclose(B_nd.numpy(), A_np)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A_nd = tvm.runtime.tensor(A_np, device=dev)
+            B_nd = tvm.runtime.tensor(B_np, device=dev)
+            mod(A_nd, B_nd)
+            tvm.testing.assert_allclose(B_nd.numpy(), A_np)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -201,12 +208,16 @@ def test_inject_async_copy_shared_dyn():
     A_np = np.random.rand(32, 128).astype("float16")
     B_np = np.random.rand(32, 128).astype("float16")
     C_np = np.zeros((32, 128)).astype("float16")
-    dev = tvm.maca(0)
-    A_nd = tvm.runtime.tensor(A_np, device=dev)
-    B_nd = tvm.runtime.tensor(B_np, device=dev)
-    C_nd = tvm.runtime.tensor(C_np, device=dev)
-    mod(A_nd, B_nd, C_nd)
-    tvm.testing.assert_allclose(C_nd.numpy(), A_np + B_np)
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        A_nd = tvm.runtime.tensor(A_np, device=dev)
+        B_nd = tvm.runtime.tensor(B_np, device=dev)
+        C_nd = tvm.runtime.tensor(C_np, device=dev)
+        mod(A_nd, B_nd, C_nd)
+        tvm.testing.assert_allclose(C_nd.numpy(), A_np + B_np)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 # Note: the test_inject_async_copy_barrier case (and its prim_func helper)

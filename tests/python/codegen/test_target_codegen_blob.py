@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# ruff: noqa: F821, F841
+# ruff: noqa: F821
 
 import ctypes
 
@@ -33,9 +33,8 @@ def test_cuda_multi_lib():
     pytest.importorskip("cloudpickle")
 
     # test combining two system lib together
-    # each contains a fatbin component in cuda
-    dev = tvm.maca(0)
-    for device in ["llvm", "cuda"]:
+    # each contains a fatbin component in maca
+    for device in ["llvm", "maca"]:
         if not tvm.testing.device_enabled(device):
             print(f"skip because {device} is not enabled...")
             return
@@ -79,21 +78,24 @@ def test_cuda_multi_lib():
     cc.create_shared(path_dso, ["-Wl,--whole-archive", pathAll, "-Wl,--no-whole-archive"])
 
     def popen_check():
-        # Load dll, will trigger system library registration
-        ctypes.CDLL(path_dso)
-        # Load the system wide library
-        dev = tvm.maca()
-        a_np = np.random.uniform(size=12).astype("float32")
-        a_nd = tvm.runtime.tensor(a_np, dev)
-        b_nd = tvm.runtime.tensor(a_np, dev)
-        syslibA = tvm.runtime.system_lib("modA_")
-        syslibB = tvm.runtime.system_lib("modB_")
-        # reload same lib twice
-        syslibA = tvm.runtime.system_lib("modA_")
-        syslibA["my_inplace_update"](a_nd)
-        syslibB["my_inplace_update"](b_nd)
-        np.testing.assert_equal(a_nd.numpy(), a_np + 1)
-        np.testing.assert_equal(b_nd.numpy(), a_np + 2)
+        def run_and_check():
+            # Load dll, will trigger system library registration
+            ctypes.CDLL(path_dso)
+            # Load the system wide library
+            dev = tvm.maca()
+            a_np = np.random.uniform(size=12).astype("float32")
+            a_nd = tvm.runtime.tensor(a_np, dev)
+            b_nd = tvm.runtime.tensor(a_np, dev)
+            syslibA = tvm.runtime.system_lib("modA_")
+            syslibB = tvm.runtime.system_lib("modB_")
+            # reload same lib twice
+            syslibA = tvm.runtime.system_lib("modA_")
+            syslibA["my_inplace_update"](a_nd)
+            syslibB["my_inplace_update"](b_nd)
+            np.testing.assert_equal(a_nd.numpy(), a_np + 1)
+            np.testing.assert_equal(b_nd.numpy(), a_np + 2)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
     # system lib should be loaded in different process
     worker = popen_pool.PopenWorker()
@@ -105,7 +107,6 @@ def test_cuda_multi_lib():
 def test_maca_multi_lib():
     # test combining two system lib together
     # each contains a fatbin component in maca
-    dev = tvm.maca(0)
     for device in ["llvm", "maca"]:
         if not tvm.testing.device_enabled(device):
             print("skip because %s is not enabled..." % device)
@@ -115,7 +116,7 @@ def test_maca_multi_lib():
     class ModA:
         I.module_attrs({"system_lib_prefix": "modA_"})
 
-        @T.prim_func
+        @T.prim_func(s_tir=True)
         def my_inplace_update(x: T.Buffer((12), "float32")) -> None:
             T.func_attr({"global_symbol": "modA_my_inplace_update"})
             for bx in T.thread_binding(T.int64(1), thread="blockIdx.x"):
@@ -126,7 +127,7 @@ def test_maca_multi_lib():
     class ModB:
         I.module_attrs({"system_lib_prefix": "modB_"})
 
-        @T.prim_func
+        @T.prim_func(s_tir=True)
         def my_inplace_update(x: T.Buffer((12), "float32")) -> None:
             T.func_attr({"global_symbol": "modB_my_inplace_update"})
             for bx in T.thread_binding(T.int64(1), thread="blockIdx.x"):
@@ -150,21 +151,24 @@ def test_maca_multi_lib():
     cc.create_shared(path_dso, ["-Wl,--whole-archive", pathAll, "-Wl,--no-whole-archive"])
 
     def popen_check():
-        # Load dll, will trigger system library registration
-        ctypes.CDLL(path_dso)
-        # Load the system wide library
-        dev = tvm.maca()
-        a_np = np.random.uniform(size=12).astype("float32")
-        a_nd = tvm.nd.array(a_np, dev)
-        b_nd = tvm.nd.array(a_np, dev)
-        syslibA = tvm.runtime.system_lib("modA_")
-        syslibB = tvm.runtime.system_lib("modB_")
-        # reload same lib twice
-        syslibA = tvm.runtime.system_lib("modA_")
-        syslibA["my_inplace_update"](a_nd)
-        syslibB["my_inplace_update"](b_nd)
-        np.testing.assert_equal(a_nd.numpy(), a_np + 1)
-        np.testing.assert_equal(b_nd.numpy(), a_np + 2)
+        def run_and_check():
+            # Load dll, will trigger system library registration
+            ctypes.CDLL(path_dso)
+            # Load the system wide library
+            dev = tvm.maca()
+            a_np = np.random.uniform(size=12).astype("float32")
+            a_nd = tvm.runtime.tensor(a_np, dev)
+            b_nd = tvm.runtime.tensor(a_np, dev)
+            syslibA = tvm.runtime.system_lib("modA_")
+            syslibB = tvm.runtime.system_lib("modB_")
+            # reload same lib twice
+            syslibA = tvm.runtime.system_lib("modA_")
+            syslibA["my_inplace_update"](a_nd)
+            syslibB["my_inplace_update"](b_nd)
+            np.testing.assert_equal(a_nd.numpy(), a_np + 1)
+            np.testing.assert_equal(b_nd.numpy(), a_np + 2)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
     # system lib should be loaded in different process
     worker = popen_pool.PopenWorker()

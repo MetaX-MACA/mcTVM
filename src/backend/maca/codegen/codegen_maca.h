@@ -25,6 +25,7 @@
 #define TVM_BACKEND_MACA_CODEGEN_CODEGEN_MACA_H_
 
 #include <tvm/ffi/error.h>
+#include <tvm/s_tir/stmt.h>
 #include <tvm/target/codegen.h>
 #include <tvm/tirx/expr.h>
 #include <tvm/tirx/op.h>
@@ -49,7 +50,7 @@ class VisitPipelineCommitQueueScope : public StmtExprVisitor {
   void VisitExpr_(const CallNode* op) final { StmtExprVisitor::VisitExpr_(op); }
   void VisitStmt_(const AttrStmtNode* op) final {
     mxc_cp_async_calls.clear();
-    if (op->attr_key == tirx::attr::async_commit_queue_scope) {
+    if (op->attr_key == s_tir::attr::async_commit_queue_scope) {
       this->VisitStmt(op->body);
     }
     if (!mxc_cp_async_calls.empty()) {
@@ -109,7 +110,7 @@ class CodeGenMACA final : public CodeGenC {
   void VisitStmt_(const DeclBufferNode* op) final;
 
  protected:
-  void PrintCallExtern(Type ret_type, ffi::String global_symbol, const ffi::Array<PrimExpr>& args,
+  void PrintCallExtern(Type ret_type, ffi::String global_symbol, const ffi::Array<Expr>& args,
                        bool skip_first_arg, std::ostream& os) final;  // NOLINT(*)
 
  private:

@@ -466,7 +466,7 @@ def _ptr_off(base_ptr, off):
         base_ptr,
         off,
         source_code=_POINTER_OFFSET_SRC,
-        return_type="handle",
+        return_type=base_ptr.ty,
     )
 
 
@@ -567,8 +567,10 @@ def _emit_reg(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc:
         # function with ``alignas(64) int`` arrays and pressures registers.
         for f in range(total_outer):
             ds, dr = _outer_const_offsets(outer, f)
-            s_ptr = _ptr_off(s_buf.ptr_to(s_zero_indices), _s_iter_off(f, ds, s_off))
-            r_ptr = _ptr_off(r_local.ptr_to([0]), r_off_base + dr)
+            s_ptr: T.let = _ptr_off(
+                s_buf.ptr_to(s_zero_indices), _s_iter_off(f, ds, s_off)
+            )
+            r_ptr: T.let = _ptr_off(r_local.ptr_to([0]), r_off_base + dr)
             if r_is_src:
                 copy_op(s_ptr, r_ptr)
             else:
