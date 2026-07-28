@@ -481,6 +481,10 @@ std::string CodeGenMACA::Finish() {
   decl_stream << "\n#ifndef b16vectype\n";
   decl_stream << "  typedef __NATIVE_VECTOR__(1, short) b16vectype;\n";
   decl_stream << "#endif\n";
+  // Generate util functions
+  for (const auto& [name, code] : util_funcs_) {
+    decl_stream << code;
+  }
   return CodeGenC::Finish();
 }
 
@@ -979,6 +983,16 @@ std::string CodeGenMACA::CastFromTo(std::string value, const PrimType& from,
   return os.str();
 }
 
+void CodeGenMACA::AddUtilFunction(const std::string& func_name, const std::string& code) {
+  auto it = this->util_funcs_.find(func_name);
+  if (it != this->util_funcs_.end()) {
+    TVM_FFI_ICHECK_EQ(it->second, code)
+        << "Function " << func_name << " already exists with different code";
+    return;
+  }
+  this->util_funcs_.insert({func_name, code});
+}
+
 void CodeGenMACA::VisitExpr_(const CastNode* op, std::ostream& os) {
   PrimType from_ty = op->value.ty();
   PrimType target_ty = op->ty();
@@ -1077,11 +1091,52 @@ void CodeGenMACA::PrintCallExtern(Type ret_type, ffi::String global_symbol,
   }
 }
 void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
+  auto print_maca_func_call = [&](const CallNode* op, std::ostream& os) {
+    TVM_FFI_ICHECK_GE(op->args.size(), 2U);
+    size_t num_args = op->args.size() - 2;
+    std::vector<std::string> args;
+    for (size_t i = 1; i < num_args + 1; i++) {
+      args.push_back(this->PrintExpr(op->args[i]));
+    }
+    std::string source_code = op->args[num_args + 1].as<StringImmNode>()->value;
+    std::string func_name = op->args[0].as<StringImmNode>()->value;
+    os << func_name << "(";
+    for (size_t i = 0; i < num_args; i++) {
+      const auto& arg = args[i];
+      os << arg;
+      if (i < num_args - 1) {
+        os << ", ";
+      }
+    }
+    os << ")";
+    AddUtilFunction(func_name, source_code);
+  };
+
+  if (auto opt_call_opt = op->op.as<Op>()) {
+    Op call_op = opt_call_opt.value();
+    auto codegen_getter = tvm::ffi::Function::GetGlobal("tirx.intrinsics.maca.get_codegen");
+    TVM_FFI_ICHECK(codegen_getter.has_value())
+        << "tirx.intrinsics.maca.get_codegen is not registered";
+    // either codegen is registered or not
+    auto codegen = codegen_getter.value()(call_op->name).cast<ffi::Optional<tvm::ffi::Function>>();
+    if (codegen.has_value()) {
+      // codegen is registered, it should return a Call to maca_func_call
+      auto func_call = codegen.value()(op->args);
+      auto res = func_call.cast<ffi::Tuple<Call, ffi::Array<ffi::String>>>();
+      print_maca_func_call(res.get<0>().get(), os);
+      // for (const auto& tag : res.get<1>()) {
+      //   codegen_tags_.insert(tag.operator std::string());
+      // }
+      return;
+    }
+  }
   static const Op& tvm_fill_fragment_op = Op::Get("tirx.tvm_fill_fragment");
   static const Op& tvm_load_matrix_sync_op = Op::Get("tirx.tvm_load_matrix_sync");
   static const Op& tvm_store_matrix_sync_op = Op::Get("tirx.tvm_store_matrix_sync");
   static const Op& tvm_mma_sync_op = Op::Get("tirx.tvm_mma_sync");
   static const Op& tvm_bmma_sync_op = Op::Get("tirx.tvm_bmma_sync");
+  static const Op& maca_func_call_op = Op::Get("tirx.maca.func_call");
+
   if (auto opt_call_opt = op->op.as<Op>()) {
     Op call_op = opt_call_opt.value();
     // This is only for backward compatibility with __shfl_{up/down}.
@@ -1150,6 +1205,9 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
       this->PrintExpr(op->args[i * 2 + 1], os);
       os << "]" << ((i < 3) ? ", " : ")");
     }
+  } else if (op->op.same_as(maca_func_call_op) ||
+             (op->op.as<Op>() && op->op.as<Op>().value()->name == "tirx.maca.func_call")) {
+    print_maca_func_call(op, os);
   } else {
     CodeGenC::VisitExpr_(op, os);
   }
@@ -1251,7 +1309,7 @@ void CodeGenMACA::VisitStmt_(const AllocBufferNode* op) {
       }
     } else {
       if (align > 0) {
-        stream << "alignas(" << align << ") ";
+        stream << "__attribute__((aligned(" << align << "))) ";
       }
       PrintType(dtype, stream);
     }

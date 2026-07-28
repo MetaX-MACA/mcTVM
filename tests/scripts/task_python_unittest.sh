@@ -28,7 +28,7 @@ uv pip install -v --target=python ./3rdparty/tvm-ffi/
 
 # NOTE: also set by task_python_unittest_gpuonly.sh.
 if [ -z "${TVM_UNITTEST_TESTSUITE_NAME:-}" ]; then
-    TVM_UNITTEST_TESTSUITE_NAME=python-unittest
+  TVM_UNITTEST_TESTSUITE_NAME=python-unittest
 fi
 
 # First run minimal test on both ctypes and cython.
@@ -61,5 +61,5 @@ TEST_FILES=(
 )
 
 for TEST_FILE in ${TEST_FILES[@]}; do
-    run_pytest ${TEST_FILE}, tests/python/${TEST_FILE} -n 4
+  run_pytest ${TEST_FILE}, tests/python/${TEST_FILE} -n 2
 done

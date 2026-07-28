@@ -106,19 +106,19 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                 B = T.match_buffer(B_ptr, shape, dtype)
                 T.device_entry()
                 T.cta_id([1])
-                T.lane_id([32])
+                T.lane_id([64])
                 tid = T.thread_id([n_threads])
                 A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
                 for kk in range(k):
                     A_smem[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
                 Tx.warp.copy(R_local[full_slices], A_smem[full_slices])
                 for kk in range(k):
                     A_smem[tid, kk] = T.cast(0, dtype)
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
                 Tx.warp.copy(A_smem[full_slices], R_local[full_slices])
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A_smem[tid, kk]
 
@@ -129,20 +129,20 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                 B = T.match_buffer(B_ptr, shape, dtype)
                 T.device_entry()
                 T.cta_id([1])
-                T.warp_id([n_threads // 32])
-                T.lane_id([32])
+                T.warp_id([n_threads // 64])
+                T.lane_id([64])
                 tid = T.thread_id([n_threads])
                 A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
                 for kk in range(k):
                     A_smem[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
                 Tx.cta.copy(R_local[full_slices], A_smem[full_slices])
                 for kk in range(k):
                     A_smem[tid, kk] = T.cast(0, dtype)
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
                 Tx.cta.copy(A_smem[full_slices], R_local[full_slices])
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A_smem[tid, kk]
 
@@ -183,18 +183,18 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                 B = T.match_buffer(B_ptr, shape, dtype)
                 T.device_entry()
                 T.cta_id([1])
-                T.lane_id([32])
+                T.lane_id([64])
                 tid = T.thread_id([n_threads])
                 for kk in range(k):
                     A[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
                 Tx.warp.copy(R_local[full_slices], A[full_slices])
                 for kk in range(k):
                     A[tid, kk] = T.cast(0, dtype)
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
                 Tx.warp.copy(A[full_slices], R_local[full_slices])
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A[tid, kk]
 
@@ -206,19 +206,19 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                 B = T.match_buffer(B_ptr, shape, dtype)
                 T.device_entry()
                 T.cta_id([1])
-                T.warp_id([n_threads // 32])
-                T.lane_id([32])
+                T.warp_id([n_threads // 64])
+                T.lane_id([64])
                 tid = T.thread_id([n_threads])
                 for kk in range(k):
                     A[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
                 Tx.cta.copy(R_local[full_slices], A[full_slices])
                 for kk in range(k):
                     A[tid, kk] = T.cast(0, dtype)
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
                 Tx.cta.copy(A[full_slices], R_local[full_slices])
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A[tid, kk]
 
@@ -239,16 +239,36 @@ def _expected(shape, dtype):
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("non_r_scope", ["shared", "global"])
 @pytest.mark.parametrize(
     "scope,n_threads,k",
     [
-        ("warpgroup", 128, 16),
-        ("warpgroup", 128, 32),
-        ("warpgroup", 128, 8),
-        ("warp", 32, 8),
-        ("warp", 32, 16),
+        pytest.param(
+            "warpgroup",
+            128,
+            16,
+            marks=pytest.mark.xfail(
+                reason="TODO(maca): [Warpgroup] maca c500 not support warpgroup"
+            ),
+        ),
+        pytest.param(
+            "warpgroup",
+            128,
+            32,
+            marks=pytest.mark.xfail(
+                reason="TODO(maca): [Warpgroup] maca c500 not support warpgroup"
+            ),
+        ),
+        pytest.param(
+            "warpgroup",
+            128,
+            8,
+            marks=pytest.mark.xfail(
+                reason="TODO(maca): [Warpgroup] maca c500 not support warpgroup"
+            ),
+        ),
+        ("warp", 64, 8),
+        ("warp", 64, 16),
         ("cta", 256, 8),
         ("cta", 256, 16),
     ],

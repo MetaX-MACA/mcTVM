@@ -95,6 +95,7 @@ class CodeGenMACA final : public CodeGenC {
   void PrintVecElemLoadExpr(const PrimType& t, int i, const std::string& value,
                             std::ostream& os) final;
   std::string CastFromTo(std::string value, const PrimType& from, const PrimType& target) final;
+  void AddUtilFunction(const std::string& name, const std::string& code);
   // overload visitor
   void VisitExpr_(const RampNode* op, std::ostream& os) final;       // NOLINT(*)
   void VisitExpr_(const SelectNode* op, std::ostream& os) final;     // NOLINT(*)
@@ -151,6 +152,8 @@ class CodeGenMACA final : public CodeGenC {
   // The alignment of the barrier array in shared memory
   // Set to 16 to maintain minimum alignment requirements for async bulk copy
   const int barrier_alignment_bytes_ = 16;
+  // Functions to be added to the util functions during codegen
+  std::unordered_map<std::string, std::string> util_funcs_;
 
   std::unordered_map<const VarNode*, std::string> fragment_shapes;
   std::unordered_map<const VarNode*, std::string> fragment_layouts;

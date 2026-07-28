@@ -23,6 +23,7 @@
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/op.h>
 
+#include <limits>
 #include <queue>
 
 namespace tvm {
@@ -425,6 +426,27 @@ ffi::Array<PrimExpr> ResolveCuda(ScopeBinding binding,
   }
   LOG(FATAL) << "Internal Error: unknown ScopeBinding " << static_cast<int>(binding);
 }
+
+ffi::Array<PrimExpr> ResolveMACA(ScopeBinding binding,
+                                 const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,
+                                 const LaunchParams& params) {
+  arith::Analyzer ana;
+  switch (binding) {
+    case ScopeBinding::kKernelCta:
+      return Trivial3DResolve(params, "blockIdx.", out_dim);
+    case ScopeBinding::kCtaThread:
+      return Trivial3DResolve(params, "threadIdx.", out_dim);
+    case ScopeBinding::kCtaWarp: {
+      TVM_FFI_ICHECK_EQ(out_dim, 1) << "ValueError: cta->warp must be 1D";
+      return {ana->Simplify(GetThread("warp_id_in_cta", params).first)};
+    }
+    case ScopeBinding::kWarpThread: {
+      TVM_FFI_ICHECK_EQ(out_dim, 1) << "ValueError: warp->thread must be 1D";
+      return {ana->Simplify(FloorMod(GetLinearThreadIndex(params), 64))};
+    }
+  }
+  LOG(FATAL) << "Internal Error: unknown ScopeBinding " << static_cast<int>(binding);
+}
 }  // namespace
 
 ffi::Array<PrimExpr> ScopeIdResolve::Resolve(ScopeBinding binding,
@@ -432,15 +454,16 @@ ffi::Array<PrimExpr> ScopeIdResolve::Resolve(ScopeBinding binding,
                                              int out_dim, const ffi::String& target_kind,
                                              const LaunchParams& params) {
   if (target_kind == "cuda") return ResolveCuda(binding, extents, out_dim, params);
+  if (target_kind == "maca") return ResolveMACA(binding, extents, out_dim, params);
   LOG(FATAL) << "Cannot resolve ScopeIdDef for target=" << target_kind
              << " binding=" << static_cast<int>(binding);
 }
 
 PrimExpr ScopeIdResolve::ComputeWarpIdInCta(const LaunchParams& params) {
-  PrimExpr warp_id = FloorDiv(GetLinearThreadIndex(params), 32);
-  PrimExpr mask = IntImm(PrimType::UInt(32), 0xffffffff);
+  PrimExpr warp_id = FloorDiv(GetLinearThreadIndex(params), 64);
+  PrimExpr mask = MakeConst(PrimType::UInt(64), std::numeric_limits<uint64_t>::max());
   return Call(warp_id.ty(), builtin::tvm_warp_shuffle(),
-              {mask, warp_id, IntImm::Int32(0), IntImm::Int32(32), IntImm::Int32(32)});
+              {mask, warp_id, IntImm::Int32(0), IntImm::Int32(64), IntImm::Int32(64)});
 }
 
 }  // namespace tirx

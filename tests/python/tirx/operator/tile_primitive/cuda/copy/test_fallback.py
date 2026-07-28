@@ -57,10 +57,10 @@ def _round_trip_shapes_and_threads():
     variants can't accept it (size doesn't divide thread_cnt).
     """
     return [
-        # warp scope, 32 threads, 24 elements (4x6) → 24 % 32 != 0.
-        ("warp", 32, (4, 6), "4*6=24 ∤ 32"),
-        # warp scope, 32 threads, 8 elements (1x8) → 8 % 32 != 0.
-        ("warp", 32, (1, 8), "1*8=8 ∤ 32"),
+        # warp scope, 64 threads, 24 elements (4x6) → 24 % 32 != 0.
+        ("warp", 64, (4, 6), "4*6=24 ∤ 32"),
+        # warp scope, 64 threads, 8 elements (1x8) → 8 % 32 != 0.
+        ("warp", 64, (1, 8), "1*8=8 ∤ 32"),
         # warpgroup scope, 128 threads, 24 elements (4x6) → 24 % 128 != 0.
         ("warpgroup", 128, (4, 6), "4*6=24 ∤ 128"),
         # warpgroup scope, 128 threads, 32 elements (4x8) → 32 % 128 != 0.
@@ -90,11 +90,11 @@ def _build_round_trip_kernel(scope, n_threads, shape, dtype):
             B = T.match_buffer(B_ptr, shape, dtype)
             T.device_entry()
             T.cta_id([1])
-            T.lane_id([32])
+            T.lane_id([64])
             T.thread_id([n_threads])
             A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
             Tx.warp.copy(A_smem[full], A[full])
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             Tx.warp.copy(B[full], A_smem[full])
 
     elif scope == "warpgroup":
@@ -123,12 +123,12 @@ def _build_round_trip_kernel(scope, n_threads, shape, dtype):
             B = T.match_buffer(B_ptr, shape, dtype)
             T.device_entry()
             T.cta_id([1])
-            T.warp_id([n_threads // 32])
-            T.lane_id([32])
+            T.warp_id([n_threads // 64])
+            T.lane_id([64])
             T.thread_id([n_threads])
             A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
             Tx.cta.copy(A_smem[full], A[full])
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             Tx.cta.copy(B[full], A_smem[full])
 
     else:
@@ -139,11 +139,21 @@ def _build_round_trip_kernel(scope, n_threads, shape, dtype):
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize(
     "scope,n_threads,shape,why",
     [
-        pytest.param(s, n, sh, w, id=f"{s}-{n}-{'x'.join(map(str, sh))}")
+        pytest.param(
+            s,
+            n,
+            sh,
+            w,
+            id=f"{s}-{n}-{'x'.join(map(str, sh))}",
+            marks=pytest.mark.xfail(
+                reason="TODO(maca): [tile-primitive-copy-fallback] support warpgroup"
+            )
+            if s == "warpgroup"
+            else (),
+        )
         for s, n, sh, w in _round_trip_shapes_and_threads()
     ],
 )
@@ -172,7 +182,6 @@ def test_fallback_round_trip(scope, n_threads, shape, why):
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 def test_fallback_thread_scope():
     """``T.thread()`` — single thread, no gate. Either ``gmem_smem`` picks
     it up (n_elements % 1 == 0) or ``fallback`` does — both end up emitting
@@ -192,7 +201,7 @@ def test_fallback_thread_scope():
         T.thread_id([1])
         A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
         Tx.copy(A_smem[full], A[full])
-        T.cuda.cta_sync()
+        T.maca.cta_sync()
         Tx.copy(B[full], A_smem[full])
 
     dev = tvm.maca(0)
@@ -210,9 +219,8 @@ def test_fallback_thread_scope():
     np.testing.assert_array_equal(B.numpy(), A_np)
 
 
-@MACA_XFAIL
 def test_fallback_emits_gate():
-    """Compiled CUDA source must contain a single-thread gate so only one
+    """Compiled MACA source must contain a single-thread gate so only one
     active thread executes the scalar copy (not all of them, which would
     work but be racy + wasteful and indicate gate elision)."""
     shape = (4, 6)

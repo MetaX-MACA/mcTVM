@@ -755,7 +755,7 @@ class TilePrimitiveDispatcher : public StmtExprMutator {
       LOG(WARNING) << "ExecContext tracking disabled: missing/symbolic threadIdx extents";
       return false;
     }
-    int64_t warp_ext = thread_ext / 32;
+    int64_t warp_ext = thread_ext / 64;
     auto cluster_cta_axes = collect_extents(
         {{"clusterCtaIdx.x", "cbx"}, {"clusterCtaIdx.y", "cby"}, {"clusterCtaIdx.z", "cbz"}});
     cluster_cta_axis_extents_ = cluster_cta_axes;
@@ -772,7 +772,7 @@ class TilePrimitiveDispatcher : public StmtExprMutator {
     // Preserve the old flattened cta_id split for 0-D/1-D declarations. Multi-dimensional
     // CTA ids keep their concrete factor axes (bx/by/bz or cbx/cby/cbz).
     if (cta_axes.size() <= 1) cta_axes.clear();
-    ctx_stack_.push_back(ExecContext::AtKernelEntry(/*lane_ext=*/32, warp_ext, cta_ext, cta_axes));
+    ctx_stack_.push_back(ExecContext::AtKernelEntry(/*lane_ext=*/64, warp_ext, cta_ext, cta_axes));
     return true;
   }
 
