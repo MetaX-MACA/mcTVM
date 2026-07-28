@@ -193,7 +193,7 @@ class LaneBinding:
     declared_extent: int
 
 
-def initial_A(*, lane_ext: int = 32, warp_ext: int, cta_ext: int = 1) -> ActiveSet:
+def initial_A(*, lane_ext: int = 64, warp_ext: int, cta_ext: int = 1) -> ActiveSet:
     """Build A at PrimFunc device entry: all threads active, offsets all zero."""
     return ActiveSet.from_axes(
         [
@@ -313,9 +313,9 @@ def _factor_warpid(warp: AxisRange) -> tuple[AxisRange, AxisRange] | None:
 def _flat_product_range(
     major: AxisRange, lane: AxisRange, lo: int, hi: int
 ) -> tuple[AxisRange, AxisRange]:
-    active_min = major.offset * 32 + lane.offset
+    active_min = major.offset * 64 + lane.offset
     active_max = (
-        (major.offset + major.stride * (major.extent - 1)) * 32
+        (major.offset + major.stride * (major.extent - 1)) * 64
         + lane.offset
         + lane.stride * (lane.extent - 1)
         + 1
@@ -328,19 +328,19 @@ def _flat_product_range(
 
     lane_hi = lane.offset + lane.extent
     major_hi = major.offset + major.extent
-    hit_lo = max(major.offset, (lo - lane_hi) // 32 + 1)
-    hit_hi = min(major_hi, _ceildiv(hi - lane.offset, 32))
+    hit_lo = max(major.offset, (lo - lane_hi) // 64 + 1)
+    hit_hi = min(major_hi, _ceildiv(hi - lane.offset, 64))
     if hit_hi <= hit_lo:
         raise ExecContextError("flat thread range produces empty active set")
 
     if hit_hi == hit_lo + 1:
-        new_lane_lo = max(lane.offset, lo - hit_lo * 32)
-        new_lane_hi = min(lane_hi, hi - hit_lo * 32)
+        new_lane_lo = max(lane.offset, lo - hit_lo * 64)
+        new_lane_hi = min(lane_hi, hi - hit_lo * 64)
         if new_lane_hi <= new_lane_lo:
             raise ExecContextError("flat thread range produces empty lane range")
         return AxisRange(1, hit_lo), AxisRange(new_lane_hi - new_lane_lo, new_lane_lo)
 
-    if lo <= hit_lo * 32 + lane.offset and (hit_hi - 1) * 32 + lane_hi <= hi:
+    if lo <= hit_lo * 64 + lane.offset and (hit_hi - 1) * 64 + lane_hi <= hi:
         return AxisRange(hit_hi - hit_lo, hit_lo), lane
 
     raise ExecContextError("flat thread range would require a non-rectangular lane/warp active set")

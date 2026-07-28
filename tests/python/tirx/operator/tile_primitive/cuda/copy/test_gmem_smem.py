@@ -59,7 +59,7 @@ def _build_kernel(scope, n_threads, shape, dtype):
             T.thread_id([n_threads])
             A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
             Tx.wg.copy(A_smem[full_slices], A[full_slices])
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             Tx.wg.copy(B[full_slices], A_smem[full_slices])
 
     elif scope == "warp":
@@ -74,7 +74,7 @@ def _build_kernel(scope, n_threads, shape, dtype):
             T.thread_id([n_threads])
             A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
             Tx.warp.copy(A_smem[full_slices], A[full_slices])
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             Tx.warp.copy(B[full_slices], A_smem[full_slices])
 
     elif scope == "cta":
@@ -90,7 +90,7 @@ def _build_kernel(scope, n_threads, shape, dtype):
             T.thread_id([n_threads])
             A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
             Tx.cta.copy(A_smem[full_slices], A[full_slices])
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             Tx.cta.copy(B[full_slices], A_smem[full_slices])
     else:
         raise ValueError(f"unsupported scope {scope!r}")
@@ -234,7 +234,7 @@ def test_copy_g2s_s2g(task, dtype, scope):
         # `scope` is parametrized at runtime; select the scope namespace
         # dynamically (T.cta / T.thread) instead of a literal prefix.
         getattr(Tx, scope).copy(A_smem[r_smem], A[r_gmem])
-        T.cuda.cta_sync()
+        T.maca.cta_sync()
         getattr(Tx, scope).copy(B[r_gmem], A_smem[r_smem])
 
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
@@ -549,7 +549,7 @@ def test_gmem_smem_swizzle_fast_path_fires_with_var_bounds():
         T.thread_id([32])
         smem = T.alloc_buffer(shape, "float16", scope="shared", layout=s_layout)
         Tx.warp.copy(smem, A[:, :])
-        T.cuda.cta_sync()
+        T.maca.cta_sync()
         Tx.warp.copy(B[:, :], smem)
 
     target = tvm.target.Target("maca")

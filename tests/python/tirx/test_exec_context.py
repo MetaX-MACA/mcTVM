@@ -48,7 +48,7 @@ W_INNER = LaneBinding(axis="warpid", kind=LANE_W_INNER, declared_extent=4)
 LANE_BIND = LaneBinding(axis="laneid", kind=LANE_FLAT, declared_extent=32)
 CTA_BIND = LaneBinding(axis="cta_id", kind=LANE_FLAT, declared_extent=1)
 CTA_THREAD_BIND = LaneBinding(axis="thread", kind=LANE_CTA_THREAD, declared_extent=256)
-WG_THREAD_BIND = LaneBinding(axis="thread", kind=LANE_WG_THREAD, declared_extent=128)
+WG_THREAD_BIND = LaneBinding(axis="thread", kind=LANE_WG_THREAD, declared_extent=256)
 
 
 # ---------------------------------------------------------------------------
@@ -58,16 +58,16 @@ WG_THREAD_BIND = LaneBinding(axis="thread", kind=LANE_WG_THREAD, declared_extent
 
 def test_initial_A_single_cta():
     A = initial_A(warp_ext=16)
-    assert A.laneid == AxisRange(32, 0)
+    assert A.laneid == AxisRange(64, 0)
     assert A.warpid == AxisRange(16, 0)
     assert A.cta_id == AxisRange(1, 0)
-    assert A.size == 512
+    assert A.size == 1024
 
 
 def test_initial_A_cluster():
     A = initial_A(warp_ext=16, cta_ext=4)
     assert A.cta_id == AxisRange(4, 0)
-    assert A.size == 2048
+    assert A.size == 4096
 
 
 def test_axis_modulo_filter_uses_stride():
@@ -105,7 +105,7 @@ def test_scope_switch_warpgroup_aligned():
     split = scope_switch(A, WARPGROUP)
     assert split.inter["wgid"] == AxisRange(4, 0)
     assert split.inter["cta_id"] == AxisRange(1, 0)
-    assert split.intra["laneid"] == AxisRange(32, 0)
+    assert split.intra["laneid"] == AxisRange(64, 0)
     assert split.intra["wid_in_wg"] == AxisRange(4, 0)
 
 
@@ -351,14 +351,14 @@ def test_filter_out_of_range_rejected():
 
 def test_filter_flat_cta_thread_full_warp_range():
     A = initial_A(warp_ext=8)
-    A = filter_narrow(A, CTA_THREAD_BIND, 0, 128)
+    A = filter_narrow(A, CTA_THREAD_BIND, 0, 256)
     assert A.warpid == AxisRange(4, 0)
-    assert A.laneid == AxisRange(32, 0)
+    assert A.laneid == AxisRange(64, 0)
 
 
 def test_filter_flat_cta_thread_single_warp_lane_range():
     A = initial_A(warp_ext=8)
-    A = filter_narrow(A, CTA_THREAD_BIND, 34, 40)
+    A = filter_narrow(A, CTA_THREAD_BIND, 66, 72)
     assert A.warpid == AxisRange(1, 1)
     assert A.laneid == AxisRange(6, 2)
 
@@ -366,22 +366,22 @@ def test_filter_flat_cta_thread_single_warp_lane_range():
 def test_filter_flat_cta_thread_nonrectangular_rejected():
     A = initial_A(warp_ext=8)
     with pytest.raises(ExecContextError, match="non-rectangular"):
-        filter_narrow(A, CTA_THREAD_BIND, 20, 50)
+        filter_narrow(A, CTA_THREAD_BIND, 20, 70)
 
 
 def test_filter_flat_warpgroup_thread_range_inside_one_warpgroup():
     A = initial_A(warp_ext=8)
     A = filter_narrow(A, WG_OUTER, 1, 2)
-    A = filter_narrow(A, WG_THREAD_BIND, 32, 64)
+    A = filter_narrow(A, WG_THREAD_BIND, 64, 128)
     assert A.warpid == AxisRange(1, 5)
-    assert A.laneid == AxisRange(32, 0)
+    assert A.laneid == AxisRange(64, 0)
 
 
 def test_filter_flat_warpgroup_thread_full_range_across_warpgroups_is_noop():
     A = initial_A(warp_ext=8)
-    A2 = filter_narrow(A, WG_THREAD_BIND, 0, 128)
+    A2 = filter_narrow(A, WG_THREAD_BIND, 0, 256)
     assert A2.warpid == AxisRange(8, 0)
-    assert A2.laneid == AxisRange(32, 0)
+    assert A2.laneid == AxisRange(64, 0)
 
 
 def test_filter_flat_warpgroup_thread_partial_range_across_warpgroups_rejected():
