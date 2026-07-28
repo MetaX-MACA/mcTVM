@@ -686,6 +686,7 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
         tree_attn_mask_device_[depth].CreateView({static_cast<int64_t>(data->size())}, dtype_aux_);
     CopyVecDataToArray(view, data->data());
     return view;
+  }
   Tensor CopyTreeAttnMNIndptrOnDepthAsync(HostMemoryVector* data, int depth) final {
     Tensor view = tree_attn_mn_indptr_device_[depth].CreateView(
         {static_cast<int64_t>(data->size())}, dtype_aux_);
