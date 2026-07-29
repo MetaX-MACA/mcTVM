@@ -21,7 +21,7 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from tvm.contrib import mxcc
+from tvm.support import mxcc
 
 
 class TestMacaArchDetection(unittest.TestCase):
@@ -36,14 +36,14 @@ class TestMacaArchDetection(unittest.TestCase):
     def test_env_maca_arch_overrides_maca_path(self):
         """Test MACA_ARCH takes priority even when maca_path is given"""
         with patch.dict(os.environ, {"MACA_ARCH": "xcore3000"}):
-            arch = mxcc.get_maca_arch(maca_path="/nonexistent")
+            arch = mxcc.get_maca_arch("/nonexistent")
             self.assertEqual(arch, "xcore3000")
 
     def test_maca_not_installed_default(self):
         """Test default arch is returned when MACA is not installed"""
         with patch.dict(os.environ, {}, clear=True):
             with patch("os.path.exists", return_value=False):
-                arch = mxcc.get_maca_arch(maca_path="/nonexistent")
+                arch = mxcc.get_maca_arch("/nonexistent")
                 self.assertEqual(arch, "xcore1000")
 
     def test_maca_path_env_var(self):
@@ -65,7 +65,7 @@ class TestMacaArchDetection(unittest.TestCase):
                     "subprocess.check_output",
                     side_effect=OSError("macainfo binary not found"),
                 ):
-                    arch = mxcc.get_maca_arch(maca_path="/valid/path")
+                    arch = mxcc.get_maca_arch("/valid/path")
                     self.assertEqual(arch, "xcore1000")
 
     def test_calledprocesserror_is_caught(self):
@@ -76,7 +76,7 @@ class TestMacaArchDetection(unittest.TestCase):
                     "subprocess.check_output",
                     side_effect=subprocess.CalledProcessError(1, "macainfo"),
                 ):
-                    arch = mxcc.get_maca_arch(maca_path="/valid/path")
+                    arch = mxcc.get_maca_arch("/valid/path")
                     self.assertEqual(arch, "xcore1000")
 
     def test_macainfo_parsing(self):
@@ -87,7 +87,7 @@ class TestMacaArchDetection(unittest.TestCase):
                     "subprocess.check_output",
                     return_value=b"Name: XCORE2000\n",
                 ):
-                    arch = mxcc.get_maca_arch(maca_path="/valid/path")
+                    arch = mxcc.get_maca_arch("/valid/path")
                     self.assertEqual(arch, "xcore2000")
 
     def test_macainfo_parsing_no_match(self):
@@ -98,7 +98,7 @@ class TestMacaArchDetection(unittest.TestCase):
                     "subprocess.check_output",
                     return_value=b"Name: UNKNOWN_DEVICE\n",
                 ):
-                    arch = mxcc.get_maca_arch(maca_path="/valid/path")
+                    arch = mxcc.get_maca_arch("/valid/path")
                     self.assertEqual(arch, "xcore1000")
 
 

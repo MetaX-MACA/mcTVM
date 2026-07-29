@@ -32,6 +32,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: CI-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
@@ -46,8 +49,13 @@ jobs:
           submodules: 'recursive'
       - name: Set up environment
         uses: ./.github/actions/setup
+      - name: Detect environment variables
+        uses: ./.github/actions/detect-env-vars
+        id: env_vars
       - name: Build TVM wheel
         shell: bash -l {0}
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
         run: |
           pip install scikit-build-core
           export CMAKE_ARGS="-DUSE_LLVM=ON -DBUILD_TESTING=OFF"
@@ -55,7 +63,17 @@ jobs:
       - name: Install TVM from wheel
         shell: bash -l {0}
         run: |
-          pip install dist/*.whl
+          export TVM_FFI_VERSION="$(python -c 'from importlib.metadata import version; print(version("apache-tvm-ffi"))')"
+          pip install ml_dtypes
+          # Keep the source-matched tvm-ffi installed by the setup action.
+          pip install --no-deps dist/*.whl
+          python - <<'PY'
+          import os
+          from importlib.metadata import requires, version
+
+          assert version("apache-tvm-ffi") == os.environ["TVM_FFI_VERSION"]
+          assert "apache-tvm-ffi>=0.1.13" in requires("apache-tvm")
+          PY
 
       - name: Test
         shell: bash -l {0}
@@ -68,7 +86,7 @@ jobs:
           python -m pytest -v -s 'tests/python/codegen/test_target_codegen_metal.py::test_func_with_trailing_pod_params'
       - name: Minimal Metal Compile-and-Run
         shell: bash -l {0}
-        run: >-
+        run: |
           python -m pytest -v -s 'tests/python/codegen/test_target_codegen_metal.py'
           python -m pytest -v -s 'tests/python/codegen/test_target_codegen_gpu_common.py'
           python -m pytest -v -s 'tests/python/codegen/test_gpu_codegen_allreduce.py::test_allreduce_sum[dims0-metal]'
@@ -82,6 +100,9 @@ jobs:
           submodules: 'recursive'
       - name: Set up environment
         uses: ./.github/actions/setup
+      - name: Detect environment variables
+        uses: ./.github/actions/detect-env-vars
+        id: env_vars
       - name: Set up sccache
         uses: mozilla-actions/sccache-action@v0.0.4
       - name: sccache cache
@@ -96,6 +117,7 @@ jobs:
       - name: Install TVM
         shell: cmd /C call {0}
         env:
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
           SCCACHE_DIR: ${{ github.workspace }}/.sccache
           CMAKE_GENERATOR: Ninja
           SKBUILD_BUILD_TYPE: Release
@@ -118,6 +140,10 @@ jobs:
   MetaXGPU:
     if: ${{ github.repository == 'MetaX-MACA/mcTVM' }}
     runs-on: self-hosted
+    env:
+      PLATFORM: gpu
+      TVM_TEST_TARGETS: maca
+      TVM_PYTEST_RESULT_DIR: build/pytest-results
     steps:
       - uses: actions/checkout@v6.0.2
         with:
@@ -134,156 +160,215 @@ jobs:
           cmake -B build
           make -j $(nproc) -C build
 
-      - name: Setup pytest environment
+      - name: Setup Python test environment
+        id: pytest_setup
         run: |
-          echo "TVM_TEST_TARGETS=maca" | tee -a "${GITHUB_ENV}"
-          echo "TVM_UNITTEST_TESTSUITE_NAME=python-unittest-gpu" | tee -a "${GITHUB_ENV}"
-          echo "PLATFORM=gpu" | tee -a "${GITHUB_ENV}"
-          set -euxo pipefail
-          rm -rf build/pytest-results
-          find . -type f -path "*.pyc" | xargs rm -f
-          pip install -v --target=python ./3rdparty/tvm-ffi/
+          echo "PYTHONPATH=$(pwd)/python" >> "$GITHUB_ENV"
+          echo "PYTEST_ADDOPTS=${CI_PYTEST_ADD_OPTIONS:-} ${PYTEST_ADDOPTS:-}" >> "$GITHUB_ENV"
+          rm -rf "${TVM_PYTEST_RESULT_DIR}"
+          mkdir -p "${TVM_PYTEST_RESULT_DIR}"
+          uv pip install -v --target=python ./3rdparty/tvm-ffi/
 
       - name: Run 'minimal' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest python-platform-gpu-minimal-test, tests/python/all-platform-minimal-test -n 4
-
-      - name: Run 'ffi' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest ffi, tests/python/ffi -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-minimal"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-minimal.xml"
+          --junit-prefix=cython
+          tests/python/all-platform-minimal-test
 
       - name: Run 'arith' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest arith, tests/python/arith -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-arith"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-arith.xml"
+          --junit-prefix=cython
+          tests/python/arith || test $? -eq 5
 
       - name: Run 'ci' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest ci, tests/python/ci -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-ci"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-ci.xml"
+          --junit-prefix=cython
+          tests/python/ci || test $? -eq 5
 
       - name: Run 'codegen' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest codegen, tests/python/codegen -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-codegen"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-codegen.xml"
+          --junit-prefix=cython
+          tests/python/codegen || test $? -eq 5
 
       - name: Run 'driver' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest driver, tests/python/driver -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-driver"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-driver.xml"
+          --junit-prefix=cython
+          tests/python/driver || test $? -eq 5
 
       - name: Run 'ir' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest ir, tests/python/ir -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-ir"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-ir.xml"
+          --junit-prefix=cython
+          tests/python/ir || test $? -eq 5
 
       - name: Run 'meta_schedule' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest meta_schedule, tests/python/meta_schedule -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-meta-schedule"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-meta-schedule.xml"
+          --junit-prefix=cython
+          tests/python/s_tir/meta_schedule || test $? -eq 5
 
       - name: Run 'runtime' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest runtime, tests/python/runtime -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-runtime"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-runtime.xml"
+          --junit-prefix=cython
+          tests/python/runtime || test $? -eq 5
 
       - name: Run 'target' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest target, tests/python/target -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-target"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-target.xml"
+          --junit-prefix=cython
+          tests/python/target || test $? -eq 5
 
       - name: Run 'te' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest te, tests/python/te -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-te"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-te.xml"
+          --junit-prefix=cython
+          tests/python/te || test $? -eq 5
 
       - name: Run 'testing' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest testing, tests/python/testing -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-testing"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-testing.xml"
+          --junit-prefix=cython
+          tests/python/testing || test $? -eq 5
 
       - name: Run 's_tir/base' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest s_tir/base, tests/python/s_tir/base -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-s-tir-base"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-s-tir-base.xml"
+          --junit-prefix=cython
+          tests/python/s_tir/base || test $? -eq 5
 
       - name: Run 's_tir/schedule' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest s_tir/schedule, tests/python/s_tir/schedule -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-s-tir-schedule"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-s-tir-schedule.xml"
+          --junit-prefix=cython
+          tests/python/s_tir/schedule || test $? -eq 5
 
       - name: Run 's_tir/dlight' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest s_tir/dlight, tests/python/s_tir/dlight -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-s-tir-dlight"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-s-tir-dlight.xml"
+          --junit-prefix=cython
+          tests/python/s_tir/dlight || test $? -eq 5
 
       - name: Run 's_tir/analysis' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest s_tir/analysis, tests/python/s_tir/analysis -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-s-tir-analysis"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-s-tir-analysis.xml"
+          --junit-prefix=cython
+          tests/python/s_tir/analysis || test $? -eq 5
 
       - name: Run 's_tir/transform' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest s_tir/transform, tests/python/s_tir/transform -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-s-tir-transform"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-s-tir-transform.xml"
+          --junit-prefix=cython
+          tests/python/s_tir/transform || test $? -eq 5
 
       - name: Run 'tirx-analysis' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest tirx-analysis, tests/python/tirx-analysis -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-tirx-analysis"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-tirx-analysis.xml"
+          --junit-prefix=cython
+          tests/python/tirx-analysis || test $? -eq 5
 
       - name: Run 'tirx-base' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest tirx-base, tests/python/tirx-base -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-tirx-base"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-tirx-base.xml"
+          --junit-prefix=cython
+          tests/python/tirx-base || test $? -eq 5
 
       - name: Run 'tirx-transform' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest tirx-transform, tests/python/tirx-transform -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-tirx-transform"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-tirx-transform.xml"
+          --junit-prefix=cython
+          tests/python/tirx-transform || test $? -eq 5
 
       - name: Run 'tirx' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest tirx, tests/python/tirx -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-tirx"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-tirx.xml"
+          --junit-prefix=cython
+          tests/python/tirx || test $? -eq 5
 
       - name: Run 'tvmscript' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest tvmscript, tests/python/tvmscript -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-tvmscript"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-tvmscript.xml"
+          --junit-prefix=cython
+          tests/python/tvmscript || test $? -eq 5
 
       - name: Run 'relax' unittests
-        run: |
-          set -euxo pipefail
-          source tests/scripts/setup-pytest-env.sh
-          run_pytest relax, tests/python/relax -n 4
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-relax"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-relax.xml"
+          --junit-prefix=cython
+          tests/python/relax || test $? -eq 5
 
       - name: Test Summary
-        if: always()
+        if: ${{ always() && hashFiles('build/pytest-results/**/*.xml') != '' }}
         uses: test-summary/action@v2
         with:
           paths: "build/pytest-results/**/*.xml"

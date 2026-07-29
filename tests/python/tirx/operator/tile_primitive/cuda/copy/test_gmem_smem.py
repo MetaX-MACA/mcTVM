@@ -122,7 +122,6 @@ TASKS = [
 def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
     kernel = _build_kernel(scope, n_threads, shape, dtype)
 
-    dev = tvm.maca(0)
     target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
@@ -131,10 +130,15 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
     A_np = tvm.testing.generate_random_array(dtype, shape)
     B_np = np.zeros(shape, dtype=np_dtype)
-    A = tvm.runtime.tensor(A_np, dev)
-    B = tvm.runtime.tensor(B_np, dev)
-    compiled(A, B)
-    np.testing.assert_array_equal(B.numpy(), A_np)
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
+        compiled(A, B)
+        np.testing.assert_array_equal(B.numpy(), A_np)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 # ----------------------------------------------------------------------------
@@ -155,7 +159,6 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
             TileLayout(S[128, 32]),
             TileLayout(S[128, 32]),
             TileLayout(S[128, 32]),
-            tvm.maca(0),
         ),
         # A[32:64, 32:64] -> A_smem[0:32, 0:32] -> B[32:64, 32:64]
         (
@@ -166,7 +169,6 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
             TileLayout(S[64, 64]),
             TileLayout(S[64, 64]),
             TileLayout(S[32, 32]),
-            tvm.maca(0),
         ),
         # A[0:1, 0:32, 0:32] -> A_smem[0:32, 0:32] -> B[0:1, 0:32, 0:32]
         (
@@ -177,7 +179,6 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
             TileLayout(S[4, 32, 32]),
             TileLayout(S[4, 32, 32]),
             TileLayout(S[32, 32]),
-            tvm.maca(0),
         ),
         # A[0:8, 0:8] -> A_smem[0:8, 0:8] -> B[0:8, 0:8]
         (
@@ -188,7 +189,6 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
             TileLayout(S[16, 16]),
             TileLayout(S[16, 16]),
             TileLayout(S[8, 8]),
-            tvm.maca(0),
         ),
         # A[32:96, 256:512] -> A_smem[0:32, 0:256] -> B[32:96, 256:512] (swizzled)
         (
@@ -201,7 +201,6 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
             ComposeLayout(SwizzleLayout(3, 3, 3), TileLayout(S[8, 64]))
             .tile_to((16, 128), (8, 64))
             .tile_to((32, 256), (16, 128)),
-            tvm.maca(0),
         ),
     ],
 )
@@ -213,7 +212,7 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
 )
 @pytest.mark.parametrize("scope", ["cta", "thread"])
 def test_copy_g2s_s2g(task, dtype, scope):
-    g_shape, s_shape, g_region, thread_cnt, layoutA, layoutB, layoutS, dev = task
+    g_shape, s_shape, g_region, thread_cnt, layoutA, layoutB, layoutS = task
 
     r_smem = tuple(slice(None) for _ in range(len(s_shape)))
     r_gmem = tuple(slice(g_region[i][0], g_region[i][1]) for i in range(len(g_shape)))
@@ -247,13 +246,17 @@ def test_copy_g2s_s2g(task, dtype, scope):
         A_np = tvm.testing.generate_random_array(dtype, g_shape)
         B_np = np.zeros(g_shape, dtype=np_dtype)
 
-        A = tvm.runtime.tensor(A_np, dev)
-        B = tvm.runtime.tensor(B_np, dev)
-        mod(A, B)
-
         B_ref = B_np.copy()
         B_ref[r_gmem] = A_np[r_gmem]
-        np.testing.assert_allclose(B_ref, B.numpy())
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_np, dev)
+            B = tvm.runtime.tensor(B_np, dev)
+            mod(A, B)
+            np.testing.assert_allclose(B_ref, B.numpy())
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 # ----------------------------------------------------------------------------
@@ -570,13 +573,17 @@ def test_gmem_smem_swizzle_fast_path_fires_with_var_bounds():
     )
 
     # Round-trip correctness.
-    dev = tvm.maca(0)
     A_np = np.arange(32 * 64, dtype="float16").reshape(shape)
     B_np = np.zeros(shape, dtype="float16")
-    A = tvm.runtime.tensor(A_np, device=dev)
-    B = tvm.runtime.tensor(B_np, device=dev)
-    ex(A, B)
-    np.testing.assert_allclose(B.numpy(), A_np)
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        A = tvm.runtime.tensor(A_np, device=dev)
+        B = tvm.runtime.tensor(B_np, device=dev)
+        ex(A, B)
+        np.testing.assert_allclose(B.numpy(), A_np)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 if __name__ == "__main__":

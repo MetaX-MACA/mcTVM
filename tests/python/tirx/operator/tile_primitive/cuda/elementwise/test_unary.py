@@ -49,7 +49,7 @@ MACA_XFAIL = pytest.mark.xfail(
             (32, 32),  # extent_a
             (32, 32),  # extent_res
             64,  # thread_cnt
-            tvm.maca(0),  # dev
+            0,  # device_id
         ),
         ######### offset test #########
         (
@@ -59,7 +59,7 @@ MACA_XFAIL = pytest.mark.xfail(
             (5, 6, 7),  # extent_a
             (5, 6, 7),  # extent_res
             64,  # thread_cnt
-            tvm.maca(0),  # dev
+            0,  # device_id
         ),
     ],
 )
@@ -71,7 +71,7 @@ MACA_XFAIL = pytest.mark.xfail(
     "src_dtype,dst_dtype", [("float16", "float16"), ("float32", "float16"), ("float32", "bfloat16")]
 )
 def test_unary_op_shared(input, op_type, src_dtype, dst_dtype):
-    g_shape, st_a, st_res, ext_a, ext_res, thread_cnt, dev = input
+    g_shape, st_a, st_res, ext_a, ext_res, thread_cnt, device_id = input
     s_shape = g_shape
     g_layout = s_layout = TileLayout(S[g_shape])
     in_place = src_dtype == dst_dtype
@@ -141,20 +141,23 @@ def test_unary_op_shared(input, op_type, src_dtype, dst_dtype):
     with target:
         np.random.seed(0)
         A_np = np.abs(np.random.rand(*g_shape).astype(src_dtype)) + 0.1
-        A = tvm.runtime.tensor(A_np, dev)
-
         mod = tvm.IRModule({"main": unary_op})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
 
-        if in_place:
-            mod(A)
-            A_ref = get_ref(A_np)
-            tvm.testing.assert_allclose(A_ref, A.numpy(), atol=1e-3)
-        else:
-            B = tvm.runtime.tensor(np.zeros(g_shape, dtype=dst_dtype), dev)
-            mod(A, B)
-            B_ref = get_ref(A_np)
-            tvm.testing.assert_allclose(B_ref, B.numpy(), atol=1e-2, rtol=1e-2)
+        def run_and_check():
+            dev = tvm.maca(device_id)
+            A = tvm.runtime.tensor(A_np, dev)
+            if in_place:
+                mod(A)
+                A_ref = get_ref(A_np)
+                tvm.testing.assert_allclose(A_ref, A.numpy(), atol=1e-3)
+            else:
+                B = tvm.runtime.tensor(np.zeros(g_shape, dtype=dst_dtype), dev)
+                mod(A, B)
+                B_ref = get_ref(A_np)
+                tvm.testing.assert_allclose(B_ref, B.numpy(), atol=1e-2, rtol=1e-2)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -165,7 +168,6 @@ def test_unary_op_shared_subcta_scope(exec_scope):
     dtype = "float16"
     n_warps = 4 if exec_scope == "warpgroup" else 1
     g_shape = (n_warps * 32, 8)
-    dev = tvm.maca(0)
 
     @T.prim_func
     def unary_op_subcta(A_ptr: T.handle) -> None:
@@ -192,11 +194,16 @@ def test_unary_op_shared_subcta_scope(exec_scope):
     with target:
         np.random.seed(0)
         A_np = np.random.rand(*g_shape).astype(dtype)
-        A = tvm.runtime.tensor(A_np, dev)
         mod = tvm.IRModule({"main": unary_op_subcta})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-        mod(A)
-        tvm.testing.assert_allclose(A.numpy(), np.zeros_like(A_np), atol=1e-3)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_np, dev)
+            mod(A)
+            tvm.testing.assert_allclose(A.numpy(), np.zeros_like(A_np), atol=1e-3)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.parametrize(
@@ -210,7 +217,7 @@ def test_unary_op_shared_subcta_scope(exec_scope):
             (32, 32),  # extent_a
             (32, 32),  # extent_res
             64,  # thread_cnt
-            tvm.maca(0),  # dev
+            0,  # device_id
         ),
         ######### offset test #########
         (
@@ -220,7 +227,7 @@ def test_unary_op_shared_subcta_scope(exec_scope):
             (5, 6, 7),  # extent_a
             (5, 6, 7),  # extent_res
             64,  # thread_cnt
-            tvm.maca(0),  # dev
+            0,  # device_id
         ),
     ],
 )
@@ -239,7 +246,7 @@ def test_unary_op_shared_subcta_scope(exec_scope):
     ],
 )
 def test_unary_op_shared_with_bias_scale(input, op_type, bias_type, src_dtype, dst_dtype):
-    g_shape, st_a, st_res, ext_a, ext_res, thread_cnt, dev = input
+    g_shape, st_a, st_res, ext_a, ext_res, thread_cnt, device_id = input
     s_shape = g_shape
     g_layout = s_layout = TileLayout(S[g_shape])
     in_place = src_dtype == dst_dtype
@@ -402,26 +409,29 @@ def test_unary_op_shared_with_bias_scale(input, op_type, bias_type, src_dtype, d
         np.random.seed(0)
         A_np = np.abs(np.random.rand(*g_shape).astype(src_dtype)) + 0.1
         bias_np = np.random.rand(*g_shape).astype(src_dtype)
-        A = tvm.runtime.tensor(A_np, dev)
-        bias = tvm.runtime.tensor(bias_np, dev)
-
         mod = tvm.IRModule({"main": unary_op_with_bias})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+        atol = (
+            1e-1
+            if src_dtype == "float16" and op_type == "exp"
+            else (1e-2 if src_dtype == "float16" else 1e-3)
+        )
 
-        if in_place:
-            mod(A, bias)
-            A_ref = get_ref(A_np, bias_np)
-            atol = (
-                1e-1
-                if src_dtype == "float16" and op_type == "exp"
-                else (1e-2 if src_dtype == "float16" else 1e-3)
-            )
-            tvm.testing.assert_allclose(A_ref, A.numpy(), atol=atol)
-        else:
-            B = tvm.runtime.tensor(np.zeros(g_shape, dtype=dst_dtype), dev)
-            mod(A, B, bias)
-            B_ref = get_ref(A_np, bias_np)
-            tvm.testing.assert_allclose(B_ref, B.numpy(), atol=1e-1, rtol=1e-2)
+        def run_and_check():
+            dev = tvm.maca(device_id)
+            A = tvm.runtime.tensor(A_np, dev)
+            bias = tvm.runtime.tensor(bias_np, dev)
+            if in_place:
+                mod(A, bias)
+                A_ref = get_ref(A_np, bias_np)
+                tvm.testing.assert_allclose(A_ref, A.numpy(), atol=atol)
+            else:
+                B = tvm.runtime.tensor(np.zeros(g_shape, dtype=dst_dtype), dev)
+                mod(A, B, bias)
+                B_ref = get_ref(A_np, bias_np)
+                tvm.testing.assert_allclose(B_ref, B.numpy(), atol=1e-1, rtol=1e-2)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.parametrize(
@@ -432,21 +442,21 @@ def test_unary_op_shared_with_bias_scale(input, op_type, bias_type, src_dtype, d
             1,  # N_GROUPS
             1,  # N_WARPS
             32,  # thread_cnt
-            tvm.maca(0),  # dev
+            0,  # device_id
         ),
         (
             "wgmma",  # layout
             1,  # N_GROUPS
             4,  # N_WARPS
             32,  # thread_cnt
-            tvm.maca(0),  # dev
+            0,  # device_id
         ),
         (
             "wgmma",  # layout
             2,  # N_GROUPS
             8,  # N_WARPS
             32,  # thread_cnt
-            tvm.maca(0),  # dev
+            0,  # device_id
         ),
     ],
 )
@@ -458,7 +468,7 @@ def test_unary_op_shared_with_bias_scale(input, op_type, bias_type, src_dtype, d
     "src_dtype,dst_dtype", [("float16", "float16"), ("float32", "float16"), ("float32", "bfloat16")]
 )
 def test_unary_op_local(input, op_type, src_dtype, dst_dtype):
-    layout, N_GROUPS, N_WARPS, thread_cnt, dev = input
+    layout, N_GROUPS, N_WARPS, thread_cnt, device_id = input
     assert layout == "wgmma", "logical tensor which is not WGMMA layout is not supported"
 
     # get shape info
@@ -532,10 +542,7 @@ def test_unary_op_local(input, op_type, src_dtype, dst_dtype):
         np.random.seed(0)
         A_np = np.abs(np.random.rand(*g_shape_a).astype(src_dtype)) + 0.1
         B_np = np.zeros(g_shape_b, dtype=dst_dtype)
-        A = tvm.runtime.tensor(A_np, dev)
-        B = tvm.runtime.tensor(B_np, dev)
         print(f"compiled source code: {mod.mod.imports[0].inspect_source()}")
-        mod(A, B)
 
         # find ref result
         if op_type == "reciprocal":
@@ -546,7 +553,15 @@ def test_unary_op_local(input, op_type, src_dtype, dst_dtype):
             B_ref = np.exp2(A_np).astype(dst_dtype)
         else:
             raise ValueError(f"op_type={op_type} is not supported")
-        tvm.testing.assert_allclose(B_ref, B.numpy(), atol=1e-2, rtol=1e-2)
+
+        def run_and_check():
+            dev = tvm.maca(device_id)
+            A = tvm.runtime.tensor(A_np, dev)
+            B = tvm.runtime.tensor(B_np, dev)
+            mod(A, B)
+            tvm.testing.assert_allclose(B_ref, B.numpy(), atol=1e-2, rtol=1e-2)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.parametrize(
@@ -557,21 +572,21 @@ def test_unary_op_local(input, op_type, src_dtype, dst_dtype):
             1,  # N_GROUPS
             1,  # N_WARPS
             32,  # thread_cnt
-            tvm.maca(0),  # dev
+            0,  # device_id
         ),
         (
             "wgmma",  # layout
             1,  # N_GROUPS
             4,  # N_WARPS
             32,  # thread_cnt
-            tvm.maca(0),  # dev
+            0,  # device_id
         ),
         (
             "wgmma",  # layout
             2,  # N_GROUPS
             8,  # N_WARPS
             32,  # thread_cnt
-            tvm.maca(0),  # dev
+            0,  # device_id
         ),
     ],
 )
@@ -584,7 +599,7 @@ def test_unary_op_local(input, op_type, src_dtype, dst_dtype):
     "src_dtype,dst_dtype", [("float32", "float32"), ("float32", "float16"), ("float32", "bfloat16")]
 )
 def test_unary_op_local_with_bias_scale(input, op_type, bias_type, src_dtype, dst_dtype):
-    layout, N_GROUPS, N_WARPS, thread_cnt, dev = input
+    layout, N_GROUPS, N_WARPS, thread_cnt, device_id = input
     assert layout == "wgmma", "logical tensor which is not WGMMA layout is not supported"
 
     # get shape info
@@ -693,17 +708,20 @@ def test_unary_op_local_with_bias_scale(input, op_type, bias_type, src_dtype, ds
         A_np = np.random.rand(*g_shape_a).astype(src_dtype)
         bias_np = np.random.rand(*g_shape_bias).astype(src_dtype)
         B_np = np.zeros(g_shape_b, dtype=dst_dtype)
-        A = tvm.runtime.tensor(A_np, dev)
-        bias = tvm.runtime.tensor(bias_np, dev)
-        B = tvm.runtime.tensor(B_np, dev)
-
         mod = tvm.IRModule({"main": test_unary_with_bias})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-        mod(A, B, bias)
-
         B_ref = get_ref(A_np, bias_np)
         atol = 1e-3 if src_dtype == dst_dtype else 2e-2
-        tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
+
+        def run_and_check():
+            dev = tvm.maca(device_id)
+            A = tvm.runtime.tensor(A_np, dev)
+            bias = tvm.runtime.tensor(bias_np, dev)
+            B = tvm.runtime.tensor(B_np, dev)
+            mod(A, B, bias)
+            tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -716,10 +734,8 @@ def test_unary_op_local_with_bias_scale(input, op_type, bias_type, src_dtype, ds
 def test_unary_op_vectorized(shape, op_type, exec_scope, storage_scope):
     if storage_scope == "local" and exec_scope == "cta":
         return  # skip unsupported case
-    dev = tvm.maca(0)
     dtype = "float16"
     A_ref = np.random.rand(*shape).astype(dtype)
-    A = tvm.runtime.tensor(A_ref, dev)
     value = T.float16(7.89) if dtype == "float16" else T.float32(7.89)
 
     # fmt: off
@@ -762,9 +778,14 @@ def test_unary_op_vectorized(shape, op_type, exec_scope, storage_scope):
             {"main": test_unary_thread if exec_scope == "thread" else test_unary_cta}
         )
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-        mod(A)
         print(mod.mod.imports[0].inspect_source())
-        tvm.testing.assert_allclose(A.numpy(), np.full(shape, value.value), atol=1e-2)
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_ref, dev)
+            mod(A)
+            tvm.testing.assert_allclose(A.numpy(), np.full(shape, value.value), atol=1e-2)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -776,7 +797,6 @@ def test_unary_op_local_thread_wise(op_type, dtype):
     """Test unary ops in thread scope with local buffers (trivial layout)."""
     shape = (64, 32)
     local_shape = shape[1:]
-    dev = tvm.maca(0)
 
     @T.prim_func
     def kernel(A_ptr: T.handle) -> None:
@@ -804,10 +824,8 @@ def test_unary_op_local_thread_wise(op_type, dtype):
     with target:
         np.random.seed(0)
         A_np = np.abs(np.random.rand(*shape).astype(dtype)) + 0.1
-        A = tvm.runtime.tensor(A_np, dev)
         mod = tvm.IRModule({"main": kernel})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-        mod(A)
         if op_type == "zero":
             A_ref = np.zeros_like(A_np)
         elif op_type == "sqrt":
@@ -818,7 +836,14 @@ def test_unary_op_local_thread_wise(op_type, dtype):
             A_ref = np.exp(A_np)
         elif op_type == "silu":
             A_ref = (A_np / (1.0 + np.exp(-A_np.astype("float32")))).astype(dtype)
-        tvm.testing.assert_allclose(A_ref, A.numpy(), atol=1e-2, rtol=1e-2)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_np, dev)
+            mod(A)
+            tvm.testing.assert_allclose(A_ref, A.numpy(), atol=1e-2, rtol=1e-2)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -831,12 +856,8 @@ def test_cast_thread_local(shape, A_dtype, B_dtype):
     if A_dtype == B_dtype:
         return
 
-    dev = tvm.maca(0)
     A_ref = np.random.rand(*shape).astype(A_dtype)
     B_ref = np.random.rand(*shape).astype(B_dtype)
-    A = tvm.runtime.tensor(A_ref, dev)
-    B = tvm.runtime.tensor(B_ref, dev)
-
     B_ref = A_ref.astype(B_dtype)
 
     # fmt: off
@@ -859,9 +880,16 @@ def test_cast_thread_local(shape, A_dtype, B_dtype):
     with target:
         mod = tvm.IRModule({"main": test_cast})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-        mod(A, B)
         print(mod.mod.imports[0].inspect_source())
-        tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_ref, dev)
+            B = tvm.runtime.tensor(np.zeros(shape, dtype=B_dtype), dev)
+            mod(A, B)
+            tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -883,11 +911,8 @@ def test_cast_warpgroup_local_view(A_dtype, B_dtype):
     else:
         cast_layout = TileLayout(S[(N_THREADS, LOCAL_LEN) : (1 @ tid_in_wg, 1)])
 
-    dev = tvm.maca(0)
     A_ref = np.random.rand(*g_shape).astype(A_dtype)
     B_ref = np.zeros(g_shape, dtype=B_dtype)
-    A = tvm.runtime.tensor(A_ref, dev)
-    B = tvm.runtime.tensor(B_ref, dev)
     B_ref = A_ref.astype(B_dtype)
 
     # fmt: off
@@ -915,9 +940,16 @@ def test_cast_warpgroup_local_view(A_dtype, B_dtype):
     with target:
         mod = tvm.IRModule({"main": test_cast})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-        mod(A, B)
         print(mod.mod.imports[0].inspect_source())
-        tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_ref, dev)
+            B = tvm.runtime.tensor(np.zeros(g_shape, dtype=B_dtype), dev)
+            mod(A, B)
+            tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -937,11 +969,8 @@ def test_cast_warpgroup_src_layout_to_flat_uses_vec2_intrinsic(A_dtype, B_dtype)
     g_shape = (N_THREADS, LOCAL_LEN * N_CHUNKS)
     g_layout = TileLayout(S[g_shape])
 
-    dev = tvm.maca(0)
     A_ref = np.random.rand(*g_shape).astype(A_dtype)
     B_ref = np.zeros(g_shape, dtype=B_dtype)
-    A = tvm.runtime.tensor(A_ref, dev)
-    B = tvm.runtime.tensor(B_ref, dev)
     B_ref = A_ref.astype(B_dtype)
 
     # fmt: off
@@ -979,8 +1008,15 @@ def test_cast_warpgroup_src_layout_to_flat_uses_vec2_intrinsic(A_dtype, B_dtype)
         # falling back to scalar T.cast inside T.vectorized.
         helper = f"tvm_builtin_cast_{A_dtype}x2_{B_dtype}x2"
         assert helper in src, f"expected {helper!r} in generated CUDA, fell back to scalar cast"
-        mod(A, B)
-        tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_ref, dev)
+            B = tvm.runtime.tensor(np.zeros(g_shape, dtype=B_dtype), dev)
+            mod(A, B)
+            tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -994,11 +1030,8 @@ def test_cast_cta_local_view(A_dtype, B_dtype):
     g_layout = TileLayout(S[g_shape])
     cast_layout = TileLayout(S[(N_THREADS, LOCAL_LEN) : (1 @ tx, 1)])
 
-    dev = tvm.maca(0)
     A_ref = np.random.rand(*g_shape).astype(A_dtype)
     B_ref = np.zeros(g_shape, dtype=B_dtype)
-    A = tvm.runtime.tensor(A_ref, dev)
-    B = tvm.runtime.tensor(B_ref, dev)
     B_ref = A_ref.astype(B_dtype)
 
     # fmt: off
@@ -1025,9 +1058,16 @@ def test_cast_cta_local_view(A_dtype, B_dtype):
     with target:
         mod = tvm.IRModule({"main": test_cast})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-        mod(A, B)
         print(mod.mod.imports[0].inspect_source())
-        tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_ref, dev)
+            B = tvm.runtime.tensor(np.zeros(g_shape, dtype=B_dtype), dev)
+            mod(A, B)
+            tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -1042,11 +1082,8 @@ def test_cast_local_view_sliced(A_dtype, B_dtype, slice_start, slice_end):
     g_layout = TileLayout(S[g_shape])
     cast_layout = TileLayout(S[(N_THREADS, LOCAL_LEN) : (1 @ tx, 1)])
 
-    dev = tvm.maca(0)
     A_ref = np.random.rand(*g_shape).astype(A_dtype)
     B_ref = np.zeros(g_shape, dtype=B_dtype)
-    A = tvm.runtime.tensor(A_ref, dev)
-    B = tvm.runtime.tensor(np.zeros(g_shape, dtype=B_dtype), dev)
     B_ref[:, slice_start:slice_end] = A_ref[:, slice_start:slice_end].astype(B_dtype)
 
     # fmt: off
@@ -1075,10 +1112,17 @@ def test_cast_local_view_sliced(A_dtype, B_dtype, slice_start, slice_end):
     with target:
         mod = tvm.IRModule({"main": kernel})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        A = tvm.runtime.tensor(A_ref, dev)
+        B = tvm.runtime.tensor(np.zeros(g_shape, dtype=B_dtype), dev)
         mod(A, B)
-    tvm.testing.assert_allclose(
-        B.numpy()[:, slice_start:slice_end], B_ref[:, slice_start:slice_end], atol=1e-2
-    )
+        tvm.testing.assert_allclose(
+            B.numpy()[:, slice_start:slice_end], B_ref[:, slice_start:slice_end], atol=1e-2
+        )
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 def test_cast_layout_partition_and_validation():
@@ -1154,10 +1198,6 @@ def test_cast_mixed_axes_and_subregion(slice_start, slice_end):
     B_ref = np.zeros(full_shape, dtype="float16")
     B_ref[:, :, :, slice_start:slice_end] = A_ref[:, :, :, slice_start:slice_end].astype("float16")
 
-    dev = tvm.maca(0)
-    A = tvm.runtime.tensor(A_ref, dev)
-    B = tvm.runtime.tensor(np.zeros(full_shape, dtype="float16"), dev)
-
     @T.prim_func
     def kernel(A_ptr: T.handle, B_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, full_shape, "float32", layout=g_layout)
@@ -1185,13 +1225,20 @@ def test_cast_mixed_axes_and_subregion(slice_start, slice_end):
     with target:
         mod = tvm.IRModule({"main": kernel})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        A = tvm.runtime.tensor(A_ref, dev)
+        B = tvm.runtime.tensor(np.zeros(full_shape, dtype="float16"), dev)
         mod(A, B)
-    tvm.testing.assert_allclose(
-        B.numpy()[:, :, :, slice_start:slice_end],
-        B_ref[:, :, :, slice_start:slice_end],
-        atol=1e-2,
-        rtol=0,
-    )
+        tvm.testing.assert_allclose(
+            B.numpy()[:, :, :, slice_start:slice_end],
+            B_ref[:, :, :, slice_start:slice_end],
+            atol=1e-2,
+            rtol=0,
+        )
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 def test_cast_joint_decomposition_extents_order():
@@ -1532,6 +1579,96 @@ def test_cast_thread_accepts_local_view():
             B[tx_var, i] = dst[i]
 
     _sl_compile(kernel)
+
+
+# --- tcgen05 split-laneid atom (B00011 / tf32 A-cast path) -----------------
+_TCGEN05_M, _TCGEN05_K = 64, 64
+_TCGEN05_REGS_PER_THREAD = 32  # ``.16x256b`` fp32 atom on (64, 64)
+
+
+def _tcgen05_16x256b_row_col(tid_wg: T.int32, lane: T.int32, reg_idx: T.int32):
+    """Map ``(tid_in_wg, reg)`` → logical ``(row, col)`` for ``.16x256b`` fp32 atom."""
+    t0 = lane & T.int32(3)
+    t1 = lane >> 2
+    v0p = reg_idx & T.int32(1)
+    va = (reg_idx >> 1) & T.int32(1)
+    vb = reg_idx >> 2
+    wid = tid_wg >> 5
+    row = t1 + T.int32(8) * va + T.int32(16) * wid
+    col = v0p + T.int32(2) * t0 + T.int32(8) * vb
+    return row, col
+
+
+def _tcgen05_cast_atom_layout():
+    from tvm.tirx.layout import tcgen05_atom_layout
+
+    # Production tf32_hc_prenorm_gemm pattern: bf16 payload in fp32 atom slots.
+    return tcgen05_atom_layout("16x256b", (_TCGEN05_M, _TCGEN05_K), "float32")
+
+
+def _tcgen05_cast_warpgroup_kernel():
+    """Scatter gmem bf16 → reg, ``Tx.wg.cast``, gather fp32 → gmem."""
+    atom_layout = _tcgen05_cast_atom_layout()
+    m, k = _TCGEN05_M, _TCGEN05_K
+
+    @T.prim_func
+    def kernel(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (m, k), "bfloat16")
+        B = T.match_buffer(B_ptr, (m, k), "float32")
+        T.device_entry()
+        T.cta_id([1])
+        T.warpgroup_id([1])
+        T.warp_id_in_wg([4])
+        T.lane_id([32])
+        tid_wg = T.thread_id_in_wg([128])
+        lane = T.lane_id([32])
+        a_bf16 = T.alloc_buffer((m, k), "bfloat16", scope="local", layout=atom_layout)
+        a_fp32 = T.alloc_buffer((m, k), "float32", scope="local", layout=atom_layout)
+        reg_in = a_bf16.local(_TCGEN05_REGS_PER_THREAD)
+        reg_out = a_fp32.local(_TCGEN05_REGS_PER_THREAD)
+        for r in T.serial(_TCGEN05_REGS_PER_THREAD):
+            row, col = _tcgen05_16x256b_row_col(tid_wg, lane, T.cast(r, "int32"))
+            reg_in[r] = A[row, col]
+        Tx.wg.cast(a_fp32, a_bf16)
+        for r in T.serial(_TCGEN05_REGS_PER_THREAD):
+            row, col = _tcgen05_16x256b_row_col(tid_wg, lane, T.cast(r, "int32"))
+            B[row, col] = reg_out[r]
+
+    return kernel
+
+
+@MACA_XFAIL
+def test_cast_tcgen05_atom_warpgroup_reg_dispatch_compiles():
+    """Regression: tf32 A-cast ``Tx.wg.cast(a_fp32, a_bf16)`` on tcgen05 atom compiles."""
+    _sl_compile(_tcgen05_cast_warpgroup_kernel())
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@MACA_XFAIL
+def test_cast_tcgen05_atom_warpgroup_gpu():
+    """GPU: bf16→fp32 cast on tcgen05 ``.16x256b`` atom must preserve per-slot layout."""
+    m, k = _TCGEN05_M, _TCGEN05_K
+    target = tvm.target.Target("maca")
+    with target:
+        mod = tvm.compile(
+            tvm.IRModule({"main": _tcgen05_cast_warpgroup_kernel()}),
+            target=target,
+            tir_pipeline="tirx",
+        )
+
+    np.random.seed(0)
+    a_np = (np.random.randn(m, k).astype("float32") * 4.0).astype("bfloat16")
+    b_ref = a_np.astype("float32")
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        a = tvm.runtime.tensor(a_np, dev)
+        b = tvm.runtime.tensor(np.zeros((m, k), dtype="float32"), dev)
+        mod(a, b)
+        tvm.testing.assert_allclose(b.numpy(), b_ref, rtol=0, atol=1e-2)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 if __name__ == "__main__":

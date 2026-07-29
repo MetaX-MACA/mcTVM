@@ -138,7 +138,8 @@ struct MACAWarpIntrinsic {
 static PrimExpr DispatchMACAWarpActiveMask(const PrimExpr& e) {
   const CallNode* call = e.as<CallNode>();
   static const Op& maca_active_mask_op = Op::Get("tirx.maca.__activemask");
-  return Call(e.ty(), maca_active_mask_op, call->args);
+  ffi::Array<PrimExpr> args = call->args.as_or_throw<ffi::Array<PrimExpr>>();
+  return Call(e.ty(), maca_active_mask_op, args).as_or_throw<PrimExpr>();
 }
 
 template <typename T>
@@ -146,8 +147,10 @@ static PrimExpr DispatchMACAShuffle(const PrimExpr& e) {
   const CallNode* call = e.as<CallNode>();
   TVM_FFI_ICHECK(call != nullptr);
   TVM_FFI_ICHECK_EQ(call->args.size(), 5);  // mask, value, warp_id, width, warp_size
-  ffi::Array<PrimExpr> maca_args{{call->args[0], call->args[1], call->args[2], call->args[3]}};
-  return Call(e.ty(), T()(e.ty(), call->op.as_or_throw<Op>()), maca_args);
+  ffi::Array<PrimExpr> maca_args{
+      call->args[0].as_or_throw<PrimExpr>(), call->args[1].as_or_throw<PrimExpr>(),
+      call->args[2].as_or_throw<PrimExpr>(), call->args[3].as_or_throw<PrimExpr>()};
+  return Call(e.ty(), T()(e.ty(), call->op.as_or_throw<Op>()), maca_args).as_or_throw<PrimExpr>();
 }
 
 void RegisterMACAIntrinRules() {

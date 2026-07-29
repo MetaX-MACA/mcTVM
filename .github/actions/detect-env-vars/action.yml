@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -15,29 +14,27 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import argparse
-import io
-from contextlib import redirect_stdout
 
-import pytest
+name: Detect Environment Variables
+description: Detects environment variables such as CPU count and sets them as outputs.
+runs:
+  using: "composite"
+  steps:
+    - name: Run Python to detect environment variables
+      shell: python
+      id: detect
+      run: |
+        import multiprocessing, os
 
+        output_file = open(os.environ.get("GITHUB_OUTPUT"), "a")
 
-class NodeidsCollector:
-    def pytest_collection_modifyitems(self, items):
-        self.nodeids = [item.nodeid for item in items]
+        def write_env_var(name, value):
+            output_file.write(f"{name}={value}\n")
+            print(f"Detected environment variable: {name}={value}")
 
+        write_env_var("cpu_count", multiprocessing.cpu_count())
 
-def main(folder):
-    collector = NodeidsCollector()
-    f = io.StringIO()
-    with redirect_stdout(f):
-        pytest.main(["-qq", "--collect-only", folder], plugins=[collector])
-    for nodeid in collector.nodeids:
-        print(nodeid)
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="List pytest nodeids for a folder")
-    parser.add_argument("--folder", required=True, help="test folder to inspect")
-    args = parser.parse_args()
-    main(args.folder)
+outputs:
+  cpu_count:
+    description: "The number of CPU cores"
+    value: ${{ steps.detect.outputs.cpu_count }}

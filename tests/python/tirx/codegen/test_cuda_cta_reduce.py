@@ -29,7 +29,6 @@ MACA_TIRX_CTA_REDUCE_XFAIL_REASON = (
 
 pytestmark = pytest.mark.xfail(reason=MACA_TIRX_CTA_REDUCE_XFAIL_REASON, strict=False)
 
-DEV = tvm.maca(0)
 TARGET = tvm.target.Target("maca")
 
 
@@ -37,9 +36,14 @@ def _build_and_run(func, n):
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=TARGET, tir_pipeline="tirx")
     out_np = np.zeros(n, dtype="float32")
-    out = tvm.runtime.tensor(out_np, device=DEV)
-    mod(out)
-    return out.numpy(), mod
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        out = tvm.runtime.tensor(out_np, device=dev)
+        mod(out)
+        return out.numpy()
+
+    return tvm.testing.run_with_gpu_lock(run_and_check), mod
 
 
 @pytest.mark.gpu

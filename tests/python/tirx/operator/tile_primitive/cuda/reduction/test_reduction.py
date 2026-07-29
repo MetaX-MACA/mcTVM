@@ -25,7 +25,7 @@ from tvm.testing import env
 from tvm.tirx.layout import R, S, TileLayout, laneid, wg_local_layout
 
 MACA_XFAIL = pytest.mark.xfail(
-    reason=("TODO(maca): [tile-primitive-reduction] support reduction dispatch variants"),
+    reason="TODO(maca): [tile-primitive-reduction] support reduction dispatch variants",
     strict=False,
 )
 
@@ -56,7 +56,6 @@ MACA_XFAIL = pytest.mark.xfail(
 def test_reduction_shared(
     src_shape, dst_shape, axes, st_src, st_dst, extent_src, extent_dst, op_type, dtype, accum
 ):
-    dev = tvm.maca(0)
     ndim_src = len(src_shape)
 
     thread_cnt = 32
@@ -111,10 +110,6 @@ def test_reduction_shared(
             B_np = np.random.rand(*dst_shape).astype(dtype) * 0.5
         else:
             B_np = np.zeros(dst_shape, dtype=dtype)
-        A = tvm.runtime.tensor(A_np, dev)
-        B = tvm.runtime.tensor(B_np.copy(), dev)
-        mod(A, B)
-
         A_slice = A_np[tuple(reduce_slice_src)]
         if op_type == "sum":
             ref = A_slice.sum(axis=axes)
@@ -135,7 +130,15 @@ def test_reduction_shared(
                 ref = np.minimum(ref, B_old_slice)
 
         atol = 1e-5 if dtype == "float32" else 1e-1
-        tvm.testing.assert_allclose(ref, B.numpy()[tuple(reduce_slice_dst)], atol=atol)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_np, dev)
+            B = tvm.runtime.tensor(B_np.copy(), dev)
+            mod(A, B)
+            tvm.testing.assert_allclose(ref, B.numpy()[tuple(reduce_slice_dst)], atol=atol)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -146,7 +149,6 @@ def test_reduction_shared(
 @pytest.mark.parametrize("accum", [False, True])
 def test_reduction_shared_subscope(exec_scope, op_type, accum):
     """Test shared reduction at warp/warpgroup/thread exec scope."""
-    dev = tvm.maca(0)
     dtype = "float32"
     src_shape = (4, 8)
     dst_shape = (4,)
@@ -241,10 +243,6 @@ def test_reduction_shared_subscope(exec_scope, op_type, accum):
         else:
             B_np = np.zeros(dst_shape, dtype=dtype)
 
-        A = tvm.runtime.tensor(A_np, dev)
-        B = tvm.runtime.tensor(B_np.copy(), dev)
-        mod(A, B)
-
         if op_type == "sum":
             ref = A_np.sum(axis=-1)
             if accum:
@@ -258,7 +256,14 @@ def test_reduction_shared_subscope(exec_scope, op_type, accum):
             if accum:
                 ref = np.minimum(ref, B_np)
 
-        tvm.testing.assert_allclose(ref, B.numpy(), atol=1e-5)
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_np, dev)
+            B = tvm.runtime.tensor(B_np.copy(), dev)
+            mod(A, B)
+            tvm.testing.assert_allclose(ref, B.numpy(), atol=1e-5)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.parametrize(
@@ -283,7 +288,6 @@ def test_reduction_shared_subscope(exec_scope, op_type, accum):
 @pytest.mark.parametrize("accum", [False, True])
 def test_reduction_local_thread_wise(src_shape, dst_shape, axes, op_type, accum):
     """Test thread-wise local reduction with various shapes and axes."""
-    dev = tvm.maca(0)
     dtype = "float32"
     src_total = 1
     for s in src_shape:
@@ -346,10 +350,6 @@ def test_reduction_local_thread_wise(src_shape, dst_shape, axes, op_type, accum)
         else:
             B_np = np.zeros(dst_shape, dtype=dtype)
 
-        A = tvm.runtime.tensor(A_np, dev)
-        B = tvm.runtime.tensor(B_np.copy(), dev)
-        mod(A, B)
-
         if op_type == "sum":
             ref = A_np.sum(axis=axes)
             if accum:
@@ -363,7 +363,14 @@ def test_reduction_local_thread_wise(src_shape, dst_shape, axes, op_type, accum)
             if accum:
                 ref = np.minimum(ref, B_np)
 
-        tvm.testing.assert_allclose(ref.reshape(B_np.shape), B.numpy(), atol=1e-5)
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_np, dev)
+            B = tvm.runtime.tensor(B_np.copy(), dev)
+            mod(A, B)
+            tvm.testing.assert_allclose(ref.reshape(B_np.shape), B.numpy(), atol=1e-5)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.parametrize(
@@ -388,7 +395,6 @@ def test_reduction_local_thread_wise(src_shape, dst_shape, axes, op_type, accum)
 @pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 def test_reduction_local_view_basic(inner_dims, dst_dims, axes, accum, slice_end, op_type):
     """Test view-based local reduction with simple purely-local layouts."""
-    dev = tvm.maca(0)
     dtype = "float32"
     thread_cnt = 32
 
@@ -481,10 +487,6 @@ def test_reduction_local_view_basic(inner_dims, dst_dims, axes, accum, slice_end
         else:
             B_np = np.zeros(dst_shape, dtype=dtype)
 
-        A = tvm.runtime.tensor(A_np, dev)
-        B = tvm.runtime.tensor(B_np.copy(), dev)
-        mod(A, B)
-
         A_data = A_np[:, slice_end // 2 : slice_end] if slice_end is not None else A_np
         if op_type == "sum":
             ref = A_data.sum(axis=axes, keepdims=True)
@@ -499,7 +501,14 @@ def test_reduction_local_view_basic(inner_dims, dst_dims, axes, accum, slice_end
             if accum:
                 ref = np.minimum(ref, B_np)
 
-        tvm.testing.assert_allclose(ref, B.numpy(), atol=1e-5)
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_np, dev)
+            B = tvm.runtime.tensor(B_np.copy(), dev)
+            mod(A, B)
+            tvm.testing.assert_allclose(ref, B.numpy(), atol=1e-5)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -517,7 +526,6 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
             "TODO(maca): [tile-primitive-reduction] support accum reductions without "
             "shuffle in local-view reduction"
         )
-    dev = tvm.maca(0)
     thread_cnt = 32
     NUM_COL = 128
     g_shape_a = (16 * n_warps, NUM_COL)
@@ -611,10 +619,6 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
             B_np = np.random.rand(*g_shape_b).astype(dtype) * 0.5
         else:
             B_np = np.zeros(g_shape_b, dtype=dtype)
-        A = tvm.runtime.tensor(A_np, dev)
-        B = tvm.runtime.tensor(B_np.copy(), dev)
-        mod(A, B)
-
         if op_type == "sum":
             row_reduce = A_np.sum(axis=-1)
             if accum:
@@ -637,7 +641,15 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
             raise ValueError(f"Unsupported op_type: {op_type}")
 
         atol = 1e-5 if dtype == "float32" else 2e-1
-        tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_np, dev)
+            B = tvm.runtime.tensor(B_np.copy(), dev)
+            mod(A, B)
+            tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -648,7 +660,6 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
 @pytest.mark.parametrize("accum", [False, True])
 def test_reduction_local_optimized_3input_maxmin(reduction_len, op_type, accum):
     """Test thread-level local buffer reduction with 3-input max/min PTX intrinsics."""
-    dev = tvm.maca(0)
     dtype = "float32"
 
     # fmt: off
@@ -694,10 +705,6 @@ def test_reduction_local_optimized_3input_maxmin(reduction_len, op_type, accum):
         else:
             B_np = np.zeros(1, dtype=dtype)
 
-        A = tvm.runtime.tensor(A_np, dev)
-        B = tvm.runtime.tensor(B_np, dev)
-        mod(A, B)
-
         if op_type == "max":
             if accum:
                 B_ref = max(A_np.max(), 0.5)
@@ -709,7 +716,14 @@ def test_reduction_local_optimized_3input_maxmin(reduction_len, op_type, accum):
             else:
                 B_ref = A_np.min()
 
-        tvm.testing.assert_allclose(B_ref, B.numpy()[0], atol=1e-5)
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_np, dev)
+            B = tvm.runtime.tensor(B_np, dev)
+            mod(A, B)
+            tvm.testing.assert_allclose(B_ref, B.numpy()[0], atol=1e-5)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -719,7 +733,6 @@ def test_reduction_local_optimized_3input_maxmin(reduction_len, op_type, accum):
 @pytest.mark.parametrize("accum", [False, True])
 def test_reduction_local_optimized_packed_add_sum(reduction_len, accum):
     """Test thread-level sum reduction using packed add with add.f32x2 PTX instruction."""
-    dev = tvm.maca(0)
     dtype = "float32"
 
     # fmt: off
@@ -763,17 +776,20 @@ def test_reduction_local_optimized_packed_add_sum(reduction_len, accum):
         else:
             B_np = np.zeros(1, dtype=dtype)
 
-        A = tvm.runtime.tensor(A_np, dev)
-        B = tvm.runtime.tensor(B_np, dev)
-        mod(A, B)
-
         if accum:
             B_ref = A_np.sum() + 0.5
         else:
             B_ref = A_np.sum()
 
         # Use larger tolerance due to rounding differences from packed add (add.rz.ftz.f32x2)
-        tvm.testing.assert_allclose(B_ref, B.numpy()[0], atol=1e-4)
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_np, dev)
+            B = tvm.runtime.tensor(B_np, dev)
+            mod(A, B)
+            tvm.testing.assert_allclose(B_ref, B.numpy()[0], atol=1e-4)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -786,7 +802,6 @@ def test_reduction_op_warp_shuffle(op_type, dtype):
 
     Case A: full warp reduce (32 lanes → 1 value, replicated to all lanes).
     """
-    dev = tvm.maca(0)
     N = 32
     g_shape = (N,)
     g_layout = TileLayout(S[N])
@@ -826,10 +841,6 @@ def test_reduction_op_warp_shuffle(op_type, dtype):
         np.random.seed(0)
         A_np = np.random.rand(N).astype(dtype)
         B_np = np.zeros(N, dtype=dtype)
-        A = tvm.runtime.tensor(A_np, dev)
-        B = tvm.runtime.tensor(B_np, dev)
-        mod(A, B)
-
         if op_type == "sum":
             ref_val = A_np.astype("float64").sum()
         elif op_type == "max":
@@ -837,7 +848,15 @@ def test_reduction_op_warp_shuffle(op_type, dtype):
 
         B_ref = np.full(N, ref_val, dtype=dtype)
         atol = 1e-4 if dtype == "float32" else 1e-1
-        tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_np, dev)
+            B = tvm.runtime.tensor(B_np, dev)
+            mod(A, B)
+            tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -850,7 +869,6 @@ def test_reduction_op_warp_shuffle_multi_elem(op_type, dtype):
 
     Each thread holds 4 elements, reduce across 32 lanes for each element group.
     """
-    dev = tvm.maca(0)
     ELEMS_PER_THREAD = 4
     N_LANES = 32
     TOTAL = ELEMS_PER_THREAD * N_LANES  # 128
@@ -896,10 +914,6 @@ def test_reduction_op_warp_shuffle_multi_elem(op_type, dtype):
         np.random.seed(0)
         A_np = np.random.rand(TOTAL).astype(dtype)
         B_np = np.zeros(ELEMS_PER_THREAD, dtype=dtype)
-        A = tvm.runtime.tensor(A_np, dev)
-        B = tvm.runtime.tensor(B_np, dev)
-        mod(A, B)
-
         # Each group of 4 elements: element j is sum/max of A[j], A[j+4], A[j+8], ..., A[j+124]
         A_reshaped = A_np.reshape(N_LANES, ELEMS_PER_THREAD)
         if op_type == "sum":
@@ -908,7 +922,15 @@ def test_reduction_op_warp_shuffle_multi_elem(op_type, dtype):
             B_ref = A_reshaped.max(axis=0)
 
         atol = 1e-4 if dtype == "float32" else 1e-1
-        tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A = tvm.runtime.tensor(A_np, dev)
+            B = tvm.runtime.tensor(B_np, dev)
+            mod(A, B)
+            tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -920,7 +942,6 @@ def test_reduction_warp_shuffle_multi_warp_loop():
     Validates the scope alternation pattern (thread → warp → thread) inside a loop,
     which is needed for replacing manual warp shuffle reductions in tirx-kernels.
     """
-    dev = tvm.maca(0)
     BDX = 32
     BDY = 4
     N = BDX * BDY  # 128
@@ -981,13 +1002,17 @@ def test_reduction_warp_shuffle_multi_warp_loop():
         np.random.seed(42)
         A_np = np.random.rand(N_ITER, N).astype("float32")
         B_np = np.zeros(N_ITER, dtype="float32")
-        A_dev = tvm.runtime.tensor(A_np, dev)
-        B_dev = tvm.runtime.tensor(B_np, dev)
-        mod(A_dev, B_dev)
-
         # Each iteration: sum across all N threads
         B_ref = A_np.astype("float64").sum(axis=1).astype("float32")
-        tvm.testing.assert_allclose(B_ref, B_dev.numpy(), atol=1e-3)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A_dev = tvm.runtime.tensor(A_np, dev)
+            B_dev = tvm.runtime.tensor(B_np, dev)
+            mod(A_dev, B_dev)
+            tvm.testing.assert_allclose(B_ref, B_dev.numpy(), atol=1e-3)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -997,7 +1022,6 @@ def test_reduction_warp_shuffle_multi_warp_loop():
 def test_reduction_warpgroup_wg_local_layout(op_name):
     rows, cols = 128, 16
     dtype = "float32"
-    dev = tvm.maca(0)
     target = tvm.target.Target("maca")
 
     @T.prim_func
@@ -1023,21 +1047,26 @@ def test_reduction_warpgroup_wg_local_layout(op_name):
         B[tid, 0] = dst_local[0]
 
     with target:
+        mod = tvm.IRModule({"main": test_func})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
         np.random.seed(0)
         A_np = np.random.rand(rows, cols).astype(dtype)
         B_np = np.zeros((rows, 1), dtype=dtype)
-        A_dev = tvm.runtime.tensor(A_np, dev)
-        B_dev = tvm.runtime.tensor(B_np, dev)
-
-        mod = tvm.IRModule({"main": test_func})
-        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
-        mod(A_dev, B_dev)
 
         if op_name == "sum":
             B_ref = A_np.sum(axis=1, keepdims=True)
         else:
             B_ref = A_np.max(axis=1, keepdims=True)
-        tvm.testing.assert_allclose(B_ref, B_dev.numpy(), atol=1e-5)
+
+        def run_and_check():
+            dev = tvm.maca(0)
+            A_dev = tvm.runtime.tensor(A_np, dev)
+            B_dev = tvm.runtime.tensor(B_np, dev)
+            mod(A_dev, B_dev)
+            tvm.testing.assert_allclose(B_ref, B_dev.numpy(), atol=1e-5)
+
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 if __name__ == "__main__":
