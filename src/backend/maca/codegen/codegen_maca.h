@@ -25,6 +25,7 @@
 #define TVM_BACKEND_MACA_CODEGEN_CODEGEN_MACA_H_
 
 #include <tvm/ffi/error.h>
+#include <tvm/s_tir/stmt.h>
 #include <tvm/target/codegen.h>
 #include <tvm/tirx/expr.h>
 #include <tvm/tirx/op.h>
@@ -49,7 +50,7 @@ class VisitPipelineCommitQueueScope : public StmtExprVisitor {
   void VisitExpr_(const CallNode* op) final { StmtExprVisitor::VisitExpr_(op); }
   void VisitStmt_(const AttrStmtNode* op) final {
     mxc_cp_async_calls.clear();
-    if (op->attr_key == tirx::attr::async_commit_queue_scope) {
+    if (op->attr_key == s_tir::attr::async_commit_queue_scope) {
       this->VisitStmt(op->body);
     }
     if (!mxc_cp_async_calls.empty()) {
@@ -95,6 +96,7 @@ class CodeGenMACA final : public CodeGenC {
   void PrintVecElemLoadExpr(const PrimType& t, int i, const std::string& value,
                             std::ostream& os) final;
   std::string CastFromTo(std::string value, const PrimType& from, const PrimType& target) final;
+  void AddUtilFunction(const std::string& name, const std::string& code);
   // overload visitor
   void VisitExpr_(const RampNode* op, std::ostream& os) final;       // NOLINT(*)
   void VisitExpr_(const SelectNode* op, std::ostream& os) final;     // NOLINT(*)
@@ -108,7 +110,7 @@ class CodeGenMACA final : public CodeGenC {
   void VisitStmt_(const DeclBufferNode* op) final;
 
  protected:
-  void PrintCallExtern(Type ret_type, ffi::String global_symbol, const ffi::Array<PrimExpr>& args,
+  void PrintCallExtern(Type ret_type, ffi::String global_symbol, const ffi::Array<Expr>& args,
                        bool skip_first_arg, std::ostream& os) final;  // NOLINT(*)
 
  private:
@@ -151,6 +153,8 @@ class CodeGenMACA final : public CodeGenC {
   // The alignment of the barrier array in shared memory
   // Set to 16 to maintain minimum alignment requirements for async bulk copy
   const int barrier_alignment_bytes_ = 16;
+  // Functions to be added to the util functions during codegen
+  std::unordered_map<std::string, std::string> util_funcs_;
 
   std::unordered_map<const VarNode*, std::string> fragment_shapes;
   std::unordered_map<const VarNode*, std::string> fragment_layouts;

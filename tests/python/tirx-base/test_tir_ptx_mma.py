@@ -82,18 +82,18 @@ def test_gemm_mma_m8n8k4_row_col_fp64pf64fp64():
     B_np = np.random.uniform(-1, 1, [8, 4]).astype("float64")
     C_np = np.zeros([8, 8]).astype("float64")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.tensor(A_np, ctx)
-    B_tvm = tvm.runtime.tensor(B_np, ctx)
-    C_tvm = tvm.runtime.tensor(C_np, ctx)
-
-    cuda_mod(A_tvm, B_tvm, C_tvm)
-
     golden = np.matmul(A_np.astype("float64"), B_np.astype("float64").T)
 
-    C_numpy = C_tvm.numpy()
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.tensor(A_np, ctx)
+        B_tvm = tvm.runtime.tensor(B_np, ctx)
+        C_tvm = tvm.runtime.tensor(C_np, ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
+        C_numpy = C_tvm.numpy()
+        tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
 
-    tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @T.prim_func(s_tir=True)
@@ -159,18 +159,18 @@ def test_gemm_mma_m8n8k4_row_row_fp16fp16fp16():
     B_np = np.random.uniform(-1, 1, [4, 16]).astype("float16")
     C_np = np.zeros([16, 16]).astype("float16")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.tensor(A_np, ctx)
-    B_tvm = tvm.runtime.tensor(B_np, ctx)
-    C_tvm = tvm.runtime.tensor(C_np, ctx)
-
-    cuda_mod(A_tvm, B_tvm, C_tvm)
-
     golden = np.matmul(A_np.astype("float16"), B_np.astype("float16"))
 
-    C_numpy = C_tvm.numpy()
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.tensor(A_np, ctx)
+        B_tvm = tvm.runtime.tensor(B_np, ctx)
+        C_tvm = tvm.runtime.tensor(C_np, ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
+        C_numpy = C_tvm.numpy()
+        tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
 
-    tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @T.prim_func(s_tir=True)
@@ -243,18 +243,18 @@ def test_gemm_mma_m8n8k4_row_row_fp16fp16fp32():
     B_np = np.random.uniform(-1, 1, [4, 16]).astype("float16")
     C_np = np.zeros([16, 16]).astype("float32")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.tensor(A_np, ctx)
-    B_tvm = tvm.runtime.tensor(B_np, ctx)
-    C_tvm = tvm.runtime.tensor(C_np, ctx)
-
-    cuda_mod(A_tvm, B_tvm, C_tvm)
-
     golden = np.matmul(A_np.astype("float32"), B_np.astype("float32"))
 
-    C_numpy = C_tvm.numpy()
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.tensor(A_np, ctx)
+        B_tvm = tvm.runtime.tensor(B_np, ctx)
+        C_tvm = tvm.runtime.tensor(C_np, ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
+        C_numpy = C_tvm.numpy()
+        tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
 
-    tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @T.prim_func(s_tir=True)
@@ -306,7 +306,6 @@ def gemm_mma_m8n8k16_row_col_s8s8s32(a: T.handle, b: T.handle, c: T.handle):
 # generate the .fatbin file.
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_gemm_mma_m8n8k16_row_col_s8s8s32():
     sch = tvm.s_tir.Schedule(gemm_mma_m8n8k16_row_col_s8s8s32)
     cuda_mod = tvm.compile(sch.mod, target="maca")
@@ -315,18 +314,18 @@ def test_gemm_mma_m8n8k16_row_col_s8s8s32():
     B_np = np.random.uniform(-10, 10, [8, 16]).astype("int8")
     C_np = np.zeros([8, 8]).astype("int32")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.tensor(A_np, ctx)
-    B_tvm = tvm.runtime.tensor(B_np, ctx)
-    C_tvm = tvm.runtime.tensor(C_np, ctx)
-
-    cuda_mod(A_tvm, B_tvm, C_tvm)
-
     golden = np.matmul(A_np.astype("int32"), B_np.astype("int32").T)
 
-    C_numpy = C_tvm.numpy()
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.tensor(A_np, ctx)
+        B_tvm = tvm.runtime.tensor(B_np, ctx)
+        C_tvm = tvm.runtime.tensor(C_np, ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
+        C_numpy = C_tvm.numpy()
+        tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
 
-    tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @T.prim_func(s_tir=True)
@@ -378,7 +377,6 @@ def gemm_mma_m8n8k16_row_col_s8u8s32(a: T.handle, b: T.handle, c: T.handle):
 # generate the .fatbin file.
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_gemm_mma_m8n8k16_row_col_s8u8s32():
     sch = tvm.s_tir.Schedule(gemm_mma_m8n8k16_row_col_s8u8s32)
     cuda_mod = tvm.compile(sch.mod, target="maca")
@@ -387,18 +385,18 @@ def test_gemm_mma_m8n8k16_row_col_s8u8s32():
     B_np = np.random.uniform(-10, 10, [8, 16]).astype("uint8")
     C_np = np.zeros([8, 8]).astype("int32")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.tensor(A_np, ctx)
-    B_tvm = tvm.runtime.tensor(B_np, ctx)
-    C_tvm = tvm.runtime.tensor(C_np, ctx)
-
-    cuda_mod(A_tvm, B_tvm, C_tvm)
-
     golden = np.matmul(A_np.astype("int32"), B_np.astype("int32").T)
 
-    C_numpy = C_tvm.numpy()
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.tensor(A_np, ctx)
+        B_tvm = tvm.runtime.tensor(B_np, ctx)
+        C_tvm = tvm.runtime.tensor(C_np, ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
+        C_numpy = C_tvm.numpy()
+        tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
 
-    tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @T.prim_func(s_tir=True)
@@ -450,17 +448,18 @@ def gemm_mma_m8n8k32_row_col_s4s4s32(a: T.handle, b: T.handle, c: T.handle):
 # generate the .fatbin file.
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_gemm_mma_m8n8k32_row_col_s4s4s32():
     sch = tvm.s_tir.Schedule(gemm_mma_m8n8k32_row_col_s4s4s32)
     cuda_mod = tvm.compile(sch.mod, target="maca")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.empty([8, 32], "int4", ctx)
-    B_tvm = tvm.runtime.empty([8, 32], "int4", ctx)
-    C_tvm = tvm.runtime.empty([8, 8], "int32", ctx)
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.empty([8, 32], "int4", ctx)
+        B_tvm = tvm.runtime.empty([8, 32], "int4", ctx)
+        C_tvm = tvm.runtime.empty([8, 8], "int32", ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
 
-    cuda_mod(A_tvm, B_tvm, C_tvm)
+    tvm.testing.run_with_gpu_lock(run_and_check)
     # Currently the correctness is not checked.
     # TODO: add correctness checking here.
 
@@ -514,17 +513,18 @@ def gemm_mma_m8n8k32_row_col_s4u4s32(a: T.handle, b: T.handle, c: T.handle):
 # generate the .fatbin file.
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_gemm_mma_m8n8k32_row_col_s4u4s32():
     sch = tvm.s_tir.Schedule(gemm_mma_m8n8k32_row_col_s4u4s32)
     cuda_mod = tvm.compile(sch.mod, target="maca")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.empty([8, 32], "int4", ctx)
-    B_tvm = tvm.runtime.empty([8, 32], "uint4", ctx)
-    C_tvm = tvm.runtime.empty([8, 8], "int32", ctx)
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.empty([8, 32], "int4", ctx)
+        B_tvm = tvm.runtime.empty([8, 32], "uint4", ctx)
+        C_tvm = tvm.runtime.empty([8, 8], "int32", ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
 
-    cuda_mod(A_tvm, B_tvm, C_tvm)
+    tvm.testing.run_with_gpu_lock(run_and_check)
     # Currently the correctness is not checked.
     # TODO: add correctness checking here.
 
@@ -589,18 +589,18 @@ def test_gemm_mma_m16n8k8_row_col_fp16fp16fp32():
     B_np = np.random.uniform(-1, 1, [8, 8]).astype("float16")
     C_np = np.zeros([16, 8]).astype("float32")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.tensor(A_np, ctx)
-    B_tvm = tvm.runtime.tensor(B_np, ctx)
-    C_tvm = tvm.runtime.tensor(C_np, ctx)
-
-    cuda_mod(A_tvm, B_tvm, C_tvm)
-
     golden = np.matmul(A_np.astype("float32"), B_np.astype("float32").T)
 
-    C_numpy = C_tvm.numpy()
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.tensor(A_np, ctx)
+        B_tvm = tvm.runtime.tensor(B_np, ctx)
+        C_tvm = tvm.runtime.tensor(C_np, ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
+        C_numpy = C_tvm.numpy()
+        tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
 
-    tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @T.prim_func(s_tir=True)
@@ -666,18 +666,18 @@ def test_gemm_mma_m16n8k16_row_col_fp16fp16fp16():
     B_np = np.random.uniform(-1, 1, [8, 16]).astype("float16")
     C_np = np.zeros([16, 8]).astype("float16")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.tensor(A_np, ctx)
-    B_tvm = tvm.runtime.tensor(B_np, ctx)
-    C_tvm = tvm.runtime.tensor(C_np, ctx)
-
-    cuda_mod(A_tvm, B_tvm, C_tvm)
-
     golden = np.matmul(A_np.astype("float16"), B_np.astype("float16").T)
 
-    C_numpy = C_tvm.numpy()
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.tensor(A_np, ctx)
+        B_tvm = tvm.runtime.tensor(B_np, ctx)
+        C_tvm = tvm.runtime.tensor(C_np, ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
+        C_numpy = C_tvm.numpy()
+        tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
 
-    tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @T.prim_func(s_tir=True)
@@ -743,18 +743,18 @@ def test_gemm_mma_m16n8k16_row_col_fp16fp16fp32():
     B_np = np.random.uniform(-1, 1, [8, 16]).astype("float16")
     C_np = np.zeros([16, 8]).astype("float32")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.tensor(A_np, ctx)
-    B_tvm = tvm.runtime.tensor(B_np, ctx)
-    C_tvm = tvm.runtime.tensor(C_np, ctx)
-
-    cuda_mod(A_tvm, B_tvm, C_tvm)
-
     golden = np.matmul(A_np.astype("float32"), B_np.astype("float32").T)
 
-    C_numpy = C_tvm.numpy()
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.tensor(A_np, ctx)
+        B_tvm = tvm.runtime.tensor(B_np, ctx)
+        C_tvm = tvm.runtime.tensor(C_np, ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
+        C_numpy = C_tvm.numpy()
+        tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
 
-    tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @T.prim_func(s_tir=True)
@@ -820,18 +820,18 @@ def test_gemm_mma_m16n8k16_row_col_s8s8s32():
     B_np = np.random.uniform(-10, 10, [8, 16]).astype("int8")
     C_np = np.zeros([16, 8]).astype("int32")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.tensor(A_np, ctx)
-    B_tvm = tvm.runtime.tensor(B_np, ctx)
-    C_tvm = tvm.runtime.tensor(C_np, ctx)
-
-    cuda_mod(A_tvm, B_tvm, C_tvm)
-
     golden = np.matmul(A_np.astype("int32"), B_np.astype("int32").T)
 
-    C_numpy = C_tvm.numpy()
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.tensor(A_np, ctx)
+        B_tvm = tvm.runtime.tensor(B_np, ctx)
+        C_tvm = tvm.runtime.tensor(C_np, ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
+        C_numpy = C_tvm.numpy()
+        tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
 
-    tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @T.prim_func(s_tir=True)
@@ -897,18 +897,18 @@ def test_gemm_mma_m16n8k16_row_col_s8u8s32():
     B_np = np.random.uniform(-10, 10, [8, 16]).astype("uint8")
     C_np = np.zeros([16, 8]).astype("int32")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.tensor(A_np, ctx)
-    B_tvm = tvm.runtime.tensor(B_np, ctx)
-    C_tvm = tvm.runtime.tensor(C_np, ctx)
-
-    cuda_mod(A_tvm, B_tvm, C_tvm)
-
     golden = np.matmul(A_np.astype("int32"), B_np.astype("int32").T)
 
-    C_numpy = C_tvm.numpy()
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.tensor(A_np, ctx)
+        B_tvm = tvm.runtime.tensor(B_np, ctx)
+        C_tvm = tvm.runtime.tensor(C_np, ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
+        C_numpy = C_tvm.numpy()
+        tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
 
-    tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @T.prim_func(s_tir=True)
@@ -974,18 +974,18 @@ def test_gemm_mma_m16n8k32_row_col_s8s8s32():
     B_np = np.random.uniform(-10, 10, [8, 32]).astype("int8")
     C_np = np.zeros([16, 8]).astype("int32")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.tensor(A_np, ctx)
-    B_tvm = tvm.runtime.tensor(B_np, ctx)
-    C_tvm = tvm.runtime.tensor(C_np, ctx)
-
-    cuda_mod(A_tvm, B_tvm, C_tvm)
-
     golden = np.matmul(A_np.astype("int32"), B_np.astype("int32").T)
 
-    C_numpy = C_tvm.numpy()
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.tensor(A_np, ctx)
+        B_tvm = tvm.runtime.tensor(B_np, ctx)
+        C_tvm = tvm.runtime.tensor(C_np, ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
+        C_numpy = C_tvm.numpy()
+        tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
 
-    tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @T.prim_func(s_tir=True)
@@ -1051,18 +1051,18 @@ def test_gemm_mma_m16n8k32_row_col_s8u8s32():
     B_np = np.random.uniform(-10, 10, [8, 32]).astype("uint8")
     C_np = np.zeros([16, 8]).astype("int32")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.tensor(A_np, ctx)
-    B_tvm = tvm.runtime.tensor(B_np, ctx)
-    C_tvm = tvm.runtime.tensor(C_np, ctx)
-
-    cuda_mod(A_tvm, B_tvm, C_tvm)
-
     golden = np.matmul(A_np.astype("int32"), B_np.astype("int32").T)
 
-    C_numpy = C_tvm.numpy()
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.tensor(A_np, ctx)
+        B_tvm = tvm.runtime.tensor(B_np, ctx)
+        C_tvm = tvm.runtime.tensor(C_np, ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
+        C_numpy = C_tvm.numpy()
+        tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
 
-    tvm.testing.assert_allclose(golden, C_numpy, atol=1e-3, rtol=1e-3)
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @T.prim_func(s_tir=True)
@@ -1124,12 +1124,14 @@ def test_gemm_mma_m16n8k64_row_col_s4s4s32():
     sch = tvm.s_tir.Schedule(gemm_mma_m16n8k64_row_col_s4s4s32)
     cuda_mod = tvm.compile(sch.mod, target="maca")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.empty([16, 64], "int4", ctx)
-    B_tvm = tvm.runtime.empty([8, 64], "int4", ctx)
-    C_tvm = tvm.runtime.empty([16, 8], "int32", ctx)
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.empty([16, 64], "int4", ctx)
+        B_tvm = tvm.runtime.empty([8, 64], "int4", ctx)
+        C_tvm = tvm.runtime.empty([16, 8], "int32", ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
 
-    cuda_mod(A_tvm, B_tvm, C_tvm)
+    tvm.testing.run_with_gpu_lock(run_and_check)
     # Currently the correctness is not checked.
     # TODO: add correctness checking here.
 
@@ -1193,12 +1195,14 @@ def test_gemm_mma_m16n8k64_row_col_s4u4s32():
     sch = tvm.s_tir.Schedule(gemm_mma_m16n8k64_row_col_s4u4s32)
     cuda_mod = tvm.compile(sch.mod, target="maca")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.empty([16, 64], "int4", ctx)
-    B_tvm = tvm.runtime.empty([8, 64], "uint4", ctx)
-    C_tvm = tvm.runtime.empty([16, 8], "int32", ctx)
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.empty([16, 64], "int4", ctx)
+        B_tvm = tvm.runtime.empty([8, 64], "uint4", ctx)
+        C_tvm = tvm.runtime.empty([16, 8], "int32", ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
 
-    cuda_mod(A_tvm, B_tvm, C_tvm)
+    tvm.testing.run_with_gpu_lock(run_and_check)
     # Currently the correctness is not checked.
     # TODO: add correctness checking here.
 
@@ -1263,12 +1267,14 @@ def test_gemm_mma_m16n8k256_row_col_b1b1s32():
     sch = tvm.s_tir.Schedule(gemm_mma_m16n8k256_row_col_b1b1s32)
     cuda_mod = tvm.compile(sch.mod, target="maca")
 
-    ctx = tvm.maca()
-    A_tvm = tvm.runtime.empty([16, 256], "int1", ctx)
-    B_tvm = tvm.runtime.empty([8, 256], "int1", ctx)
-    C_tvm = tvm.runtime.empty([16, 8], "int32", ctx)
+    def run_and_check():
+        ctx = tvm.maca()
+        A_tvm = tvm.runtime.empty([16, 256], "int1", ctx)
+        B_tvm = tvm.runtime.empty([8, 256], "int1", ctx)
+        C_tvm = tvm.runtime.empty([16, 8], "int32", ctx)
+        cuda_mod(A_tvm, B_tvm, C_tvm)
 
-    cuda_mod(A_tvm, B_tvm, C_tvm)
+    tvm.testing.run_with_gpu_lock(run_and_check)
     # Currently the correctness is not checked.
     # TODO: add correctness checking here.
 

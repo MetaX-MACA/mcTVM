@@ -292,14 +292,16 @@ def test_mma_sp_m16n8k16_f16():
         C_np = np.matmul(A_dense_np, B_np).astype(out_dtype)
         meta = get_meta_m16n8k16_half(mask)
 
-        ctx = tvm.maca()
-        A_tvm = tvm.runtime.tensor(A_np, ctx)
-        B_tvm = tvm.runtime.tensor(B_np, ctx)
-        C_tvm = tvm.runtime.tensor(np.zeros_like(C_np), ctx)
-        meta_tvm = tvm.runtime.tensor(meta, ctx)
-        cuda_mod(A_tvm, B_tvm, C_tvm, meta_tvm)
+        def run_and_check():
+            ctx = tvm.maca()
+            A_tvm = tvm.runtime.tensor(A_np, ctx)
+            B_tvm = tvm.runtime.tensor(B_np, ctx)
+            C_tvm = tvm.runtime.tensor(np.zeros_like(C_np), ctx)
+            meta_tvm = tvm.runtime.tensor(meta, ctx)
+            cuda_mod(A_tvm, B_tvm, C_tvm, meta_tvm)
+            tvm.testing.assert_allclose(C_tvm.numpy(), C_np, atol=1e-3, rtol=1e-3)
 
-        tvm.testing.assert_allclose(C_tvm.numpy(), C_np, atol=1e-3, rtol=1e-3)
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
@@ -332,14 +334,16 @@ def test_mma_sp_m16n8k32_f16():
         C_np = np.matmul(A_dense_np, B_np).astype(out_dtype)
         meta = get_meta_m16n8k32_half(mask)
 
-        ctx = tvm.maca()
-        A_tvm = tvm.runtime.tensor(A_np, ctx)
-        B_tvm = tvm.runtime.tensor(B_np, ctx)
-        C_tvm = tvm.runtime.tensor(np.zeros_like(C_np), ctx)
-        meta_tvm = tvm.runtime.tensor(meta, ctx)
-        cuda_mod(A_tvm, B_tvm, C_tvm, meta_tvm)
+        def run_and_check():
+            ctx = tvm.maca()
+            A_tvm = tvm.runtime.tensor(A_np, ctx)
+            B_tvm = tvm.runtime.tensor(B_np, ctx)
+            C_tvm = tvm.runtime.tensor(np.zeros_like(C_np), ctx)
+            meta_tvm = tvm.runtime.tensor(meta, ctx)
+            cuda_mod(A_tvm, B_tvm, C_tvm, meta_tvm)
+            tvm.testing.assert_allclose(C_tvm.numpy(), C_np, atol=1e-3, rtol=1e-3)
 
-    tvm.testing.assert_allclose(C_tvm.numpy(), C_np, atol=1e-3, rtol=1e-3)
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 if __name__ == "__main__":

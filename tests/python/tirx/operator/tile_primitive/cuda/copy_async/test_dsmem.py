@@ -41,7 +41,7 @@ from tvm.tirx.operator.tile_primitive.ops import CopyAsync
 from tvm.tirx.stmt_functor import StmtExprVisitor
 
 MACA_XFAIL = pytest.mark.xfail(
-    reason=("TODO(maca): [tile-primitive-copy-async-dsmem] support DSMEM async copy dispatch"),
+    reason="TODO(maca): [tile-primitive-copy-async-dsmem] support DSMEM async copy dispatch",
     strict=False,
 )
 
@@ -75,7 +75,7 @@ class _S2CCounter(StmtExprVisitor):
         self._loop_extents.pop()
 
     def visit_evaluate_(self, op):
-        if isinstance(op.value, tvm.tirx.Call):
+        if isinstance(op.value, tvm.ir.Call):
             if op.value.op.name == "tirx.ptx.cp_async_bulk_shared_to_cluster":
                 n = 1
                 for e in self._loop_extents:
@@ -214,7 +214,6 @@ def test_dsmem(shape, dtype, src_spec, dst_spec, expected):
         # fmt: on
 
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
-    dev = tvm.maca(0)
     target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": dsmem_copy})
@@ -227,10 +226,14 @@ def test_dsmem(shape, dtype, src_spec, dst_spec, expected):
         A_np = tvm.testing.generate_random_array(dtype, shape)
         B_np = np.zeros(shape, dtype=np_dtype)
 
+    def run_and_check():
+        dev = tvm.maca(0)
         A_tvm = tvm.runtime.tensor(A_np, dev)
         B_tvm = tvm.runtime.tensor(B_np, dev)
         mod(A_tvm, B_tvm)
         np.testing.assert_allclose(A_np, B_tvm.numpy())
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @MACA_XFAIL

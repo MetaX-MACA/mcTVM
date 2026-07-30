@@ -676,7 +676,6 @@ def test_lower_runtime_builtin_view_with_multiple_updated_fields():
 def test_execute_no_op_view(target):
     if not tvm.testing.device_enabled(target):
         pytest.skip(f"{target} not enabled")
-    dev = tvm.device(target)
 
     @I.ir_module
     class Module:
@@ -686,14 +685,20 @@ def test_execute_no_op_view(target):
             return B
 
     built = tvm.compile(Module, target=target)
-    vm = tvm.relax.VirtualMachine(built, device=dev)
-
     np_input = np.random.random([4096]).astype("float32")
-    tvm_input = tvm.runtime.tensor(np_input, dev)
-    tvm_output = vm["main"](tvm_input)
     np_expected = np_input
 
-    tvm.testing.assert_allclose(tvm_output.numpy(), np_expected)
+    def run_and_check():
+        dev = tvm.device_from_target(target)
+        vm = tvm.relax.VirtualMachine(built, device=dev)
+        tvm_input = tvm.runtime.tensor(np_input, dev)
+        tvm_output = vm["main"](tvm_input)
+        tvm.testing.assert_allclose(tvm_output.numpy(), np_expected)
+
+    if target == "llvm":
+        run_and_check()
+    else:
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.parametrize(
@@ -707,7 +712,6 @@ def test_execute_no_op_view(target):
 def test_execute_view_with_new_shape(target):
     if not tvm.testing.device_enabled(target):
         pytest.skip(f"{target} not enabled")
-    dev = tvm.device(target)
 
     @I.ir_module
     class Module:
@@ -717,14 +721,20 @@ def test_execute_view_with_new_shape(target):
             return B
 
     built = tvm.compile(Module, target=target)
-    vm = tvm.relax.VirtualMachine(built, device=dev)
-
     np_input = np.random.random([4096]).astype("float32")
-    tvm_input = tvm.runtime.tensor(np_input, dev)
-    tvm_output = vm["main"](tvm_input)
     np_expected = np_input.reshape(64, 64)
 
-    tvm.testing.assert_allclose(tvm_output.numpy(), np_expected)
+    def run_and_check():
+        dev = tvm.device_from_target(target)
+        vm = tvm.relax.VirtualMachine(built, device=dev)
+        tvm_input = tvm.runtime.tensor(np_input, dev)
+        tvm_output = vm["main"](tvm_input)
+        tvm.testing.assert_allclose(tvm_output.numpy(), np_expected)
+
+    if target == "llvm":
+        run_and_check()
+    else:
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.parametrize(
@@ -738,7 +748,6 @@ def test_execute_view_with_new_shape(target):
 def test_execute_view_with_new_byte_offset(target):
     if not tvm.testing.device_enabled(target):
         pytest.skip(f"{target} not enabled")
-    dev = tvm.device(target)
 
     @I.ir_module
     class Module:
@@ -752,14 +761,20 @@ def test_execute_view_with_new_byte_offset(target):
             return B
 
     built = tvm.compile(Module, target=target)
-    vm = tvm.relax.VirtualMachine(built, device=dev)
-
     np_input = np.random.random([4096]).astype("float32")
-    tvm_input = tvm.runtime.tensor(np_input, dev)
-    tvm_output = vm["main"](tvm_input)
     np_expected = np_input.reshape(64, 64)[32:48, :]
 
-    tvm.testing.assert_allclose(tvm_output.numpy(), np_expected)
+    def run_and_check():
+        dev = tvm.device_from_target(target)
+        vm = tvm.relax.VirtualMachine(built, device=dev)
+        tvm_input = tvm.runtime.tensor(np_input, dev)
+        tvm_output = vm["main"](tvm_input)
+        tvm.testing.assert_allclose(tvm_output.numpy(), np_expected)
+
+    if target == "llvm":
+        run_and_check()
+    else:
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.parametrize(
@@ -773,7 +788,6 @@ def test_execute_view_with_new_byte_offset(target):
 def test_execute_view_with_new_dtype(target):
     if not tvm.testing.device_enabled(target):
         pytest.skip(f"{target} not enabled")
-    dev = tvm.device(target)
 
     @I.ir_module
     class Module:
@@ -783,14 +797,20 @@ def test_execute_view_with_new_dtype(target):
             return B
 
     built = tvm.compile(Module, target=target)
-    vm = tvm.relax.VirtualMachine(built, device=dev)
-
     np_input = np.random.random([4096]).astype("float32")
-    tvm_input = tvm.runtime.tensor(np_input, dev)
-    tvm_output = vm["main"](tvm_input)
     np_expected = np_input.view("uint32")
 
-    tvm.testing.assert_allclose(tvm_output.numpy(), np_expected)
+    def run_and_check():
+        dev = tvm.device_from_target(target)
+        vm = tvm.relax.VirtualMachine(built, device=dev)
+        tvm_input = tvm.runtime.tensor(np_input, dev)
+        tvm_output = vm["main"](tvm_input)
+        tvm.testing.assert_allclose(tvm_output.numpy(), np_expected)
+
+    if target == "llvm":
+        run_and_check()
+    else:
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.parametrize(
@@ -804,7 +824,6 @@ def test_execute_view_with_new_dtype(target):
 def test_execute_view_with_multiple_updated_fields(target):
     if not tvm.testing.device_enabled(target):
         pytest.skip(f"{target} not enabled")
-    dev = tvm.device(target)
 
     @I.ir_module
     class Module:
@@ -824,18 +843,24 @@ def test_execute_view_with_multiple_updated_fields(target):
             return (B, C)
 
     built = tvm.compile(Module, target=target)
-    vm = tvm.relax.VirtualMachine(built, device=dev)
-
     np_input = np.random.randint(0, 255, size=[4096]).astype("uint8")
-    tvm_input = tvm.runtime.tensor(np_input, dev)
-    tvm_output = vm["main"](tvm_input)
     np_expected = [
         np_input[:2048].view("int32"),
         np_input[2048:].view("float16").reshape(16, 64),
     ]
 
-    tvm.testing.assert_allclose(tvm_output[0].numpy(), np_expected[0])
-    tvm.testing.assert_allclose(tvm_output[1].numpy(), np_expected[1])
+    def run_and_check():
+        dev = tvm.device_from_target(target)
+        vm = tvm.relax.VirtualMachine(built, device=dev)
+        tvm_input = tvm.runtime.tensor(np_input, dev)
+        tvm_output = vm["main"](tvm_input)
+        tvm.testing.assert_allclose(tvm_output[0].numpy(), np_expected[0])
+        tvm.testing.assert_allclose(tvm_output[1].numpy(), np_expected[1])
+
+    if target == "llvm":
+        run_and_check()
+    else:
+        tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 if __name__ == "__main__":

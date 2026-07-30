@@ -22,7 +22,7 @@ import tvm.testing
 
 
 def test_make_virtual_device_for_device():
-    device = tvm.device("maca")
+    device = tvm.maca()
     virtual_device = tvm.target.VirtualDevice(device)
     assert virtual_device.dlpack_device_type() == device.dlpack_device_type()
     assert virtual_device.virtual_device_id == 0
@@ -31,7 +31,7 @@ def test_make_virtual_device_for_device():
 
 
 def test_make_virtual_device_for_device_and_target():
-    device = tvm.device("maca")
+    device = tvm.maca()
     target = tvm.target.Target("maca")
     virtual_device = tvm.target.VirtualDevice(device, target)
     assert virtual_device.dlpack_device_type() == device.dlpack_device_type()
@@ -40,7 +40,7 @@ def test_make_virtual_device_for_device_and_target():
 
 
 def test_make_virtual_device_for_device_target_and_memory_scope():
-    device = tvm.device("maca")
+    device = tvm.maca()
     target = tvm.target.Target("maca")
     scope = "local"
     virtual_device = tvm.target.VirtualDevice(device, target, scope)

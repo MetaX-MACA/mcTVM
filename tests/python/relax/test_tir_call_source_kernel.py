@@ -35,15 +35,9 @@ extern "C" __global__ void add_kernel(float* x, float* y, float* output, int n_e
 }
 """
 
-MACA_SOURCE_KERNEL_XFAIL_REASON = (
-    "TODO(maca): [source-kernel] support T.call_kernel external source compilation and runtime "
-    "registration through the MACA toolchain"
-)
-
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(reason=MACA_SOURCE_KERNEL_XFAIL_REASON, strict=False)
 def test_tir_call_source_kernel():
     @I.ir_module(s_tir=True)
     class Module:
@@ -100,12 +94,15 @@ def test_tir_call_source_kernel():
     tvm.ir.assert_structural_equal(Module["add"], Parsed["add"])
     assert len(Module.get_attr("external_mods")) == 1
 
-    device = tvm.maca(0)
-    x_nd = tvm.runtime.tensor(np.random.rand(256).astype(np.float32), device)
-    y_nd = tvm.runtime.tensor(np.random.rand(256).astype(np.float32), device)
-    output_np = x_nd.numpy() + y_nd.numpy()
-
     with tvm.target.Target("maca"):
         lib = tvm.compile(Module)
+
+    def run_and_check():
+        device = tvm.maca(0)
+        x_nd = tvm.runtime.tensor(np.random.rand(256).astype(np.float32), device)
+        y_nd = tvm.runtime.tensor(np.random.rand(256).astype(np.float32), device)
+        output_np = x_nd.numpy() + y_nd.numpy()
         output_nd = tvm.runtime.vm.VirtualMachine(lib, device)["main"](x_nd, y_nd)
         tvm.testing.assert_allclose(output_nd.numpy(), output_np, rtol=1e-5)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)

@@ -41,24 +41,8 @@ def _detect_cpu(dev: Device) -> Target:  # pylint: disable=unused-argument
     )
 
 
-def _detect_maca(dev: Device) -> Target:
-    """Detect the current MACA device architecture."""
-    return Target(
-        {
-            "kind": "maca",
-            "max_num_threads": 1024,
-            "max_shared_memory_per_block": dev.max_shared_memory_per_block,
-            "max_threads_per_block": dev.max_threads_per_block,
-            "mcpu": "xcore1000",
-            "mtriple": "mxc-metax-macahca",
-            "thread_warp_size": dev.warp_size,
-        }
-    )
-
-
 SUPPORTED_DEVICE: dict[str, Callable[[Device], Target]] = {
     "cpu": _detect_cpu,
-    "maca": _detect_maca,
 }
 
 # Backward-compatible alias for the previous private module-level map.

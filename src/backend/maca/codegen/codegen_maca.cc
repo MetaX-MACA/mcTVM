@@ -219,13 +219,13 @@ class ThreadIdxExtractor : public tirx::StmtVisitor {
   void VisitStmt_(const AttrStmtNode* op) final {
     if (op->attr_key == tirx::attr::thread_extent) {
       IterVar iv = op->node.as_or_throw<IterVar>();
-      if (iv->var->name_hint == "threadIdx.x" || iv->thread_tag == "threadIdx.x") {
+      if (iv->var->name == "threadIdx.x" || iv->thread_tag == "threadIdx.x") {
         threadIdx_x_ext = op->value;
       }
-      if (iv->var->name_hint == "threadIdx.y" || iv->thread_tag == "threadIdx.y") {
+      if (iv->var->name == "threadIdx.y" || iv->thread_tag == "threadIdx.y") {
         threadIdx_y_ext = op->value;
       }
-      if (iv->var->name_hint == "threadIdx.z" || iv->thread_tag == "threadIdx.z") {
+      if (iv->var->name == "threadIdx.z" || iv->thread_tag == "threadIdx.z") {
         threadIdx_z_ext = op->value;
       }
     }
@@ -481,6 +481,10 @@ std::string CodeGenMACA::Finish() {
   decl_stream << "\n#ifndef b16vectype\n";
   decl_stream << "  typedef __NATIVE_VECTOR__(1, short) b16vectype;\n";
   decl_stream << "#endif\n";
+  // Generate util functions
+  for (const auto& [name, code] : util_funcs_) {
+    decl_stream << code;
+  }
   return CodeGenC::Finish();
 }
 
@@ -495,9 +499,9 @@ void CodeGenMACA::VisitStmt_(const tirx::ForNode* op) {
 
 void CodeGenMACA::VisitStmt_(const DeclBufferNode* op) {
   auto data = op->buffer->data;
-  ffi::String data_scope = data->type_annotation.as_or_throw<PointerType>()->storage_scope.c_str();
+  ffi::String data_scope = op->buffer.scope();
   if (data_scope == "shared.dyn") {
-    ffi::String data_name = data->name_hint;
+    ffi::String data_name = data->name;
     uint32_t buffer_alignment = std::max<size_t>(op->buffer->dtype.StorageBytes(), 1);
     auto it = shd_aligns.find(data_name);
     if (it != shd_aligns.end()) {
@@ -516,12 +520,6 @@ void CodeGenMACA::BindThreadIndex(const IterVar& iv) {
 
 void CodeGenMACA::PrintType(const PrimType& t, std::ostream& os) {  // NOLINT(*)
   int lanes = t.lanes();
-  if (t.IsHandle()) {
-    TVM_FFI_ICHECK(t.IsScalar()) << "do not yet support vector types";
-    os << "void*";
-    return;
-  }
-
   if (t.IsVoid()) {
     os << "void";
     return;
@@ -979,9 +977,19 @@ std::string CodeGenMACA::CastFromTo(std::string value, const PrimType& from,
   return os.str();
 }
 
+void CodeGenMACA::AddUtilFunction(const std::string& func_name, const std::string& code) {
+  auto it = this->util_funcs_.find(func_name);
+  if (it != this->util_funcs_.end()) {
+    TVM_FFI_ICHECK_EQ(it->second, code)
+        << "Function " << func_name << " already exists with different code";
+    return;
+  }
+  this->util_funcs_.insert({func_name, code});
+}
+
 void CodeGenMACA::VisitExpr_(const CastNode* op, std::ostream& os) {
   PrimType from_ty = op->value.ty();
-  PrimType target_ty = op->ty();
+  PrimType target_ty = op->ty.as_or_throw<PrimType>();
   TVM_FFI_ICHECK_EQ(target_ty.lanes(), from_ty.lanes());
 
   // Emit simple C-style type conversion.
@@ -1022,11 +1030,11 @@ void CodeGenMACA::VisitExpr_(const CastNode* op, std::ostream& os) {
 }
 
 void CodeGenMACA::PrintCallExtern(Type ret_type, ffi::String global_symbol,
-                                  const ffi::Array<PrimExpr>& args, bool skip_first_arg,
+                                  const ffi::Array<Expr>& args, bool skip_first_arg,
                                   std::ostream& os) {  // NOLINT(*)
-  DLDataType ret_dtype = GetRuntimeDataType(ret_type);
-  PrimType ret_ty(ret_dtype);
-  if (ret_ty.IsFixedLengthVector()) {
+  auto ret_prim_type = ret_type.as<PrimType>();
+  if (ret_prim_type && ret_prim_type.value().IsFixedLengthVector()) {
+    PrimType ret_ty = ret_prim_type.value();
     //
     // Emit an unsupported vector call
     //
@@ -1055,7 +1063,8 @@ void CodeGenMACA::PrintCallExtern(Type ret_type, ffi::String global_symbol,
       std::vector<std::string> sargs;
       size_t arg_begin = static_cast<size_t>(skip_first_arg);
       for (size_t i = arg_begin; i < args.size(); ++i) {
-        std::string val = SSAGetID(PrintExpr(args[i]), args[i].ty());
+        Expr arg = args[i];
+        std::string val = SSAGetID(PrintExpr(arg), arg->ty);
         sargs.push_back(std::move(val));
       }
 
@@ -1065,7 +1074,13 @@ void CodeGenMACA::PrintCallExtern(Type ret_type, ffi::String global_symbol,
         scall << global_symbol << "(";
         for (size_t j = 0; j < sargs.size(); ++j) {
           if (j > 0) scall << ", ";
-          PrintVecElemLoad(sargs[j], args[arg_begin + j].ty(), i, scall);
+          Type arg_type = args[arg_begin + j]->ty;
+          if (auto prim_type = arg_type.as<PrimType>()) {
+            PrintVecElemLoad(sargs[j], prim_type.value(), i, scall);
+          } else {
+            TVM_FFI_ICHECK(arg_type.as<PointerTypeNode>());
+            scall << sargs[j];
+          }
         }
         scall << ")";
         PrintVecElemStore(sret, ret_ty, i, scall.str());
@@ -1077,11 +1092,52 @@ void CodeGenMACA::PrintCallExtern(Type ret_type, ffi::String global_symbol,
   }
 }
 void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
+  auto print_maca_func_call = [&](const CallNode* op, std::ostream& os) {
+    TVM_FFI_ICHECK_GE(op->args.size(), 2U);
+    size_t num_args = op->args.size() - 2;
+    std::vector<std::string> args;
+    for (size_t i = 1; i < num_args + 1; i++) {
+      args.push_back(this->PrintExpr(op->args[i]));
+    }
+    std::string source_code = op->args[num_args + 1].as<StringImmNode>()->value;
+    std::string func_name = op->args[0].as<StringImmNode>()->value;
+    os << func_name << "(";
+    for (size_t i = 0; i < num_args; i++) {
+      const auto& arg = args[i];
+      os << arg;
+      if (i < num_args - 1) {
+        os << ", ";
+      }
+    }
+    os << ")";
+    AddUtilFunction(func_name, source_code);
+  };
+
+  if (auto opt_call_opt = op->op.as<Op>()) {
+    Op call_op = opt_call_opt.value();
+    auto codegen_getter = tvm::ffi::Function::GetGlobal("tirx.intrinsics.maca.get_codegen");
+    TVM_FFI_ICHECK(codegen_getter.has_value())
+        << "tirx.intrinsics.maca.get_codegen is not registered";
+    // either codegen is registered or not
+    auto codegen = codegen_getter.value()(call_op->name).cast<ffi::Optional<tvm::ffi::Function>>();
+    if (codegen.has_value()) {
+      // codegen is registered, it should return a Call to maca_func_call
+      auto func_call = codegen.value()(op->args);
+      auto res = func_call.cast<ffi::Tuple<Call, ffi::Array<ffi::String>>>();
+      print_maca_func_call(res.get<0>().get(), os);
+      // for (const auto& tag : res.get<1>()) {
+      //   codegen_tags_.insert(tag.operator std::string());
+      // }
+      return;
+    }
+  }
   static const Op& tvm_fill_fragment_op = Op::Get("tirx.tvm_fill_fragment");
   static const Op& tvm_load_matrix_sync_op = Op::Get("tirx.tvm_load_matrix_sync");
   static const Op& tvm_store_matrix_sync_op = Op::Get("tirx.tvm_store_matrix_sync");
   static const Op& tvm_mma_sync_op = Op::Get("tirx.tvm_mma_sync");
   static const Op& tvm_bmma_sync_op = Op::Get("tirx.tvm_bmma_sync");
+  static const Op& maca_func_call_op = Op::Get("tirx.maca.func_call");
+
   if (auto opt_call_opt = op->op.as<Op>()) {
     Op call_op = opt_call_opt.value();
     // This is only for backward compatibility with __shfl_{up/down}.
@@ -1150,27 +1206,30 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
       this->PrintExpr(op->args[i * 2 + 1], os);
       os << "]" << ((i < 3) ? ", " : ")");
     }
+  } else if (op->op.same_as(maca_func_call_op) ||
+             (op->op.as<Op>() && op->op.as<Op>().value()->name == "tirx.maca.func_call")) {
+    print_maca_func_call(op, os);
   } else {
     CodeGenC::VisitExpr_(op, os);
   }
 }
 
 void CodeGenMACA::VisitStmt_(const AttrStmtNode* op) {
-  if (op->attr_key == tirx::attr::fragment_shape) {
+  if (op->attr_key == s_tir::attr::fragment_shape) {
     const VarNode* buffer = op->node.as<VarNode>();
     const StringImmNode* shape_str = op->value.as<StringImmNode>();
     fragment_shapes[buffer] = shape_str->value;
-  } else if (op->attr_key == tirx::attr::fragment_layout) {
+  } else if (op->attr_key == s_tir::attr::fragment_layout) {
     const VarNode* buffer = op->node.as<VarNode>();
     const StringImmNode* layout_str = op->value.as<StringImmNode>();
     fragment_layouts[buffer] = layout_str->value;
-  } else if (op->attr_key == tirx::attr::async_commit_queue_scope) {
+  } else if (op->attr_key == s_tir::attr::async_commit_queue_scope) {
     const IntImmNode* queue_id = op->value.as<IntImmNode>();
     TVM_FFI_ICHECK(queue_id && queue_id->value == 0)
         << "For MACA, the index of an async queue must be 0.";
     this->VisitStmt(op->body);
     return;
-  } else if (op->attr_key == tirx::attr::async_wait_queue_scope) {
+  } else if (op->attr_key == s_tir::attr::async_wait_queue_scope) {
     auto wait_attrs = GetAsyncWaitAttributes(op);
     auto queue_id = wait_attrs.first.as<IntImmNode>();
     TVM_FFI_ICHECK(queue_id && queue_id->value == 0)
@@ -1287,7 +1346,7 @@ void CodeGenMACA::VisitStmt_(const AllocBufferNode* op) {
 }
 
 void CodeGenMACA::VisitStmt_(const EvaluateNode* op) {
-  if (is_const_int(op->value)) return;
+  if (auto value = op->value.as<PrimExpr>(); value && is_const_int(value.value())) return;
   const CallNode* call = op->value.as<CallNode>();
   if (call && call->op.same_as(builtin::tvm_global_barrier_kinit())) {
     PrintIndent();
@@ -1304,7 +1363,7 @@ void CodeGenMACA::VisitStmt_(const EvaluateNode* op) {
 }
 
 void CodeGenMACA::VisitExpr_(const RampNode* op, std::ostream& os) {
-  PrimType op_ty = op->ty();
+  PrimType op_ty = op->ty.as_or_throw<PrimType>();
   int lanes = op_ty.lanes();
   TVM_FFI_ICHECK_LE(lanes, 4) << "ValueError: Ramp of more than 4 lanes is not allowed.";
   PrintVecConstructor(op_ty, os);
@@ -1318,7 +1377,7 @@ void CodeGenMACA::VisitExpr_(const RampNode* op, std::ostream& os) {
 }
 
 void CodeGenMACA::VisitExpr_(const BroadcastNode* op, std::ostream& os) {  // NOLINT(*)
-  PrimType op_ty = op->ty();
+  PrimType op_ty = op->ty.as_or_throw<PrimType>();
   int lanes = op_ty.lanes();
   if (IsIntOrUInt(op_ty) && op_ty.bits() == 8) {
     bool fail = false;
@@ -1495,7 +1554,7 @@ void CodeGenMACA::VisitExpr_(const BroadcastNode* op, std::ostream& os) {  // NO
 }
 
 void CodeGenMACA::VisitExpr_(const SelectNode* op, std::ostream& os) {
-  PrimType op_ty = op->ty();
+  PrimType op_ty = op->ty.as_or_throw<PrimType>();
   // Non-vector cases.
   if (!op_ty.IsFixedLengthVector()) {
     CodeGenC::VisitExpr_(op, os);
@@ -1535,7 +1594,7 @@ void CodeGenMACA::VisitExpr_(const SelectNode* op, std::ostream& os) {
 }
 
 inline void PrintConst(const FloatImmNode* op, std::ostream& os, CodeGenMACA* p) {  // NOLINT(*)
-  PrimType op_ty = op->ty();
+  PrimType op_ty = op->ty.as_or_throw<PrimType>();
   // Type code is kBFloat
   if (IsBFloat16(op_ty)) {
     os << "__float2bfloat16_rn";
@@ -1591,7 +1650,7 @@ void CodeGenMACA::PrintWmmaScope(const std::string& scope, const PrimType& t,
   std::stringstream type;
   PrintType(t, type);
   TVM_FFI_ICHECK(fragment_shapes.count(variable))
-      << "Cannot find shape of the wmma fragment " << variable->name_hint;
+      << "Cannot find shape of the wmma fragment " << variable->name;
   std::string shape_str = fragment_shapes.at(variable);
   if (IsIntOrUInt(t) && t.bits() < 8 && t.lanes() == 1) {
     type.str(std::string());
@@ -1633,7 +1692,7 @@ void CodeGenMACA::PrintWmmaScope(const std::string& scope, const PrimType& t,
 int32_t CodeGenMACA::GetWmmaFragmentSize(const std::string& scope, const VarNode* variable,
                                          int32_t size) {
   TVM_FFI_ICHECK(fragment_shapes.count(variable))
-      << "Cannot find shape of the wmma fragment " << variable->name_hint;
+      << "Cannot find shape of the wmma fragment " << variable->name;
   std::string shape_str = fragment_shapes.at(variable);
   std::pair<int32_t, int32_t> dim = GetWmmaFragmentDimSize(shape_str, scope);
   if (dim.first * dim.second != 0)
@@ -1647,7 +1706,7 @@ void CodeGenMACA::HandleVolatileLoads(const std::string& value, const BufferLoad
   // Cast away volatile qualifier for fp16 types. That is, only loads and
   // stores are volatile. The loaded objects are not marked as volatile.
   //
-  PrimType op_ty = op->ty();
+  PrimType op_ty = op->ty.as_or_throw<PrimType>();
   if ((IsFloat16(op_ty) || IsBFloat16(op_ty)) && IsVolatile(op->buffer->data.get())) {
     os << "(";
     PrintType(op_ty, os);

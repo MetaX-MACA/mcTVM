@@ -28,9 +28,9 @@ import tvm_ffi
 
 from tvm import __version__ as tvm_version
 from tvm import tirx
-from tvm.ir import PrimExpr
+from tvm.ir import Expr, PointerType, is_prim_expr
 from tvm.runtime import Module, const
-from tvm.support import nvcc
+from tvm.support import mxcc, nvcc
 
 
 class BaseKernel:  # pylint: disable=too-few-public-methods
@@ -107,6 +107,47 @@ class BaseKernel:  # pylint: disable=too-few-public-methods
         kernel_module = create_cuda(binary_bytes, fmt, fmap, {})
         return kernel_module
 
+    def _create_maca_module(
+        self, binary_data, kernel_arg_types, launch_param_tags, kernel_name, fmt="mcbin"
+    ):
+        """
+        Create a MACA module from compiled binary mcbin and metadata.
+
+        Parameters
+        ----------
+        binary_data : str or bytes
+            The compiled binary data, mcbin as bytes.
+
+        kernel_arg_types : List[str]
+            The types of the kernel arguments.
+
+        launch_param_tags : List[str]
+            The tags of the launch parameters.
+
+        kernel_name : str
+            The name of the kernel.
+
+        fmt : str
+            The format of the binary data: "mcbin".
+
+        Returns
+        -------
+        kernel_module : Module
+            The MACA module.
+        """
+        tvm_metadata = self._format_tvm_module_metadata(
+            kernel_name, kernel_arg_types, launch_param_tags
+        )
+        binary_bytes = bytes(binary_data)
+        load_meta = tvm_ffi.get_global_func("runtime.LoadMetaDataFromJSON")
+        fmap = load_meta(tvm_metadata)
+        create_maca = tvm_ffi.get_global_func("ffi.Module.create.maca")
+        kernel_module = create_maca(binary_bytes, fmt, fmap, "")
+        maca_func = kernel_module.get_function(kernel_name)
+        if maca_func:
+            tvm_ffi.registry.register_global_func(kernel_name, maca_func, override=True)
+        return kernel_module
+
 
 class SourceKernel(BaseKernel):  # pylint: disable=too-few-public-methods
     """A kernel from source code."""
@@ -116,7 +157,7 @@ class SourceKernel(BaseKernel):  # pylint: disable=too-few-public-methods
 
     def compile_to_device_module(  # pylint: disable=arguments-differ
         self,
-        grid: list[list[int | tirx.PrimExpr]],
+        grid: list[list[int | tirx.Expr]],
         *args: list[Any],
         **kwargs: dict[str, Any],
     ) -> tuple[str, Module, list[Any]]:
@@ -137,10 +178,14 @@ class SourceKernel(BaseKernel):  # pylint: disable=too-few-public-methods
             "threadIdx.y",
             "threadIdx.z",
         ][: len(grid[1])]
-        runtime_args = [arg if isinstance(arg, PrimExpr) else const(arg) for arg in args]
-        kernel_arg_types = [
-            str(arg.ty.dtype) if isinstance(arg, PrimExpr) else arg.dtype for arg in runtime_args
-        ]
+        runtime_args = [arg if isinstance(arg, Expr) else const(arg) for arg in args]
+        kernel_arg_types = []
+        for arg in runtime_args:
+            if isinstance(arg.ty, PointerType):
+                kernel_arg_types.append("handle")
+            else:
+                assert is_prim_expr(arg)
+                kernel_arg_types.append(str(arg.ty.dtype))
         runtime_args = runtime_args + list(grid[0]) + list(grid[1])
 
         # Reuse compilation path from SourceModule
@@ -184,10 +229,74 @@ class SourceKernel(BaseKernel):  # pylint: disable=too-few-public-methods
 
         return kernel_name, kernel_module, runtime_args
 
+    def compile_to_device_module_maca(  # pylint: disable=arguments-differ
+        self,
+        grid: list[list[int | tirx.Expr]],
+        *args: list[Any],
+        **kwargs: dict[str, Any],
+    ) -> tuple[str, Module, list[Any]]:
+        """Compile the kernel to a device module."""
+        from tvm.relax.frontend.nn import (  # pylint: disable=import-outside-toplevel
+            SourceModule,
+        )
+
+        kernel_name = kwargs["kernel_name"]
+        assert len(grid) == 2, (
+            "grid should be two list of integers, representing the dimension of "
+            "['blockIdx.x', 'blockIdx.y', 'blockIdx.z'] and "
+            "['threadIdx.x', 'threadIdx.y', 'threadIdx.z']"
+        )
+        assert isinstance(grid[0], list | tuple) and isinstance(grid[1], list | tuple)
+        launch_param_tags = ["blockIdx.x", "blockIdx.y", "blockIdx.z"][: len(grid[0])] + [
+            "threadIdx.x",
+            "threadIdx.y",
+            "threadIdx.z",
+        ][: len(grid[1])]
+        runtime_args = [arg if isinstance(arg, Expr) else const(arg) for arg in args]
+        kernel_arg_types = []
+        for arg in runtime_args:
+            if isinstance(arg.ty, PointerType):
+                kernel_arg_types.append("handle")
+            else:
+                assert is_prim_expr(arg)
+                kernel_arg_types.append(str(arg.ty.dtype))
+        runtime_args = runtime_args + list(grid[0]) + list(grid[1])
+
+        # Reuse compilation path from SourceModule
+        compile_options = SourceModule.get_compile_options("maca")
+        source_code = self.source_code
+        try:
+            source_path = Path(source_code)
+            if source_path.is_file():
+                with open(source_path) as f:
+                    source_code = f.read()
+        except:  # pylint: disable=bare-except
+            pass
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_format = "mcbin"
+            output_path = f"{temp_dir}/{kernel_name}.{target_format}"
+
+            mxcc.compile_maca(
+                source_code,
+                target_format=target_format,
+                options=compile_options,
+                path_target=output_path,
+            )
+
+            with open(output_path, "rb") as f:
+                binary_data = f.read()
+
+            kernel_module = self._create_maca_module(
+                binary_data, kernel_arg_types, launch_param_tags, kernel_name, fmt=target_format
+            )
+
+        return kernel_name, kernel_module, runtime_args
+
 
 def call_kernel(
     kernel,
-    launch_args: list[int | tirx.PrimExpr | list[int | tirx.PrimExpr]],
+    launch_args: list[int | tirx.Expr | list[int | tirx.Expr]],
     *args: list[Any],
     **kwargs: dict[str, Any],
 ):
@@ -199,11 +308,11 @@ def call_kernel(
     kernel : Any
         The external kernel to call.
 
-    launch_args : List[Union[int, tirx.PrimExpr, List[Union[int, tirx.PrimExpr]]]]
+    launch_args : List[Union[int, tirx.Expr, List[Union[int, tirx.Expr]]]]
         The launch arguments. A list of integers for grid size, block size, and shared memory size.
         The actual requirements depend on the kernel.
 
-    args : List[tirx.PrimExpr]
+    args : List[tirx.Expr]
         The arguments to pass to the kernel.
 
     kwargs : Dict[str, Any]
@@ -226,7 +335,7 @@ def call_kernel(
     else:
         raise ValueError(f"Unsupported kernel type {kernel_type}")
 
-    kernel_name, kernel_module, runtime_args = kernel.compile_to_device_module(
+    kernel_name, kernel_module, runtime_args = kernel.compile_to_device_module_maca(
         launch_args, *args, **kwargs
     )
 

@@ -32,9 +32,10 @@ pytestmark = pytest.mark.xfail(reason=MACA_DSMEM_BULK_COPY_XFAIL_REASON, strict=
 
 
 def _get_source(func: tvm.tirx.PrimFunc) -> str:
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target({"kind": "maca"})
     mod = tvm.IRModule({"main": func})
-    mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+    with target:
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
     src = mod.mod.imports[0].inspect_source()
     return src
 
