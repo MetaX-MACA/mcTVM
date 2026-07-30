@@ -1045,10 +1045,6 @@ def test_cuda_device_func_call():
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason="TODO(maca): [float-literal] preserve hexadecimal float literal formatting in generated source",
-    strict=False,
-)
 def test_cuda_float_const_hex_format():
     """Test that float constants are emitted in hexadecimal format for precision"""
 
@@ -1118,10 +1114,6 @@ def test_device_host_call_same_func():
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason="TODO(maca): [thread-return] lower tirx.thread_return to device-kernel return statements",
-    strict=False,
-)
 def test_thread_return():
     @I.ir_module(s_tir=True)
     class Module:
@@ -1140,10 +1132,6 @@ def test_thread_return():
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason="TODO(maca): [thread-bound-loop] support thread-bound serial loops with non-zero minimum values",
-    strict=False,
-)
 def test_cuda_loop_step():
     @T.prim_func(s_tir=True)
     def cuda_loop_step(

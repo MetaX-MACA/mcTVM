@@ -489,8 +489,10 @@ std::string CodeGenMACA::Finish() {
 }
 
 void CodeGenMACA::VisitStmt_(const tirx::ForNode* op) {
-  TVM_FFI_ICHECK(is_const_int(op->min, 0));
-  if (op->kind == tirx::ForKind::kUnrolled) {
+  if (op->annotations.count("disable_unroll")) {
+    PrintIndent();
+    stream << "#pragma unroll 1\n";
+  } else if (op->kind == tirx::ForKind::kUnrolled || op->annotations.count("pragma_unroll")) {
     PrintIndent();
     stream << "#pragma unroll\n";
   }
@@ -1209,6 +1211,8 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
   } else if (op->op.same_as(maca_func_call_op) ||
              (op->op.as<Op>() && op->op.as<Op>().value()->name == "tirx.maca.func_call")) {
     print_maca_func_call(op, os);
+  } else if (op->op.same_as(builtin::thread_return())) {
+    os << "return";
   } else {
     CodeGenC::VisitExpr_(op, os);
   }
@@ -1598,13 +1602,17 @@ inline void PrintConst(const FloatImmNode* op, std::ostream& os, CodeGenMACA* p)
   // Type code is kBFloat
   if (IsBFloat16(op_ty)) {
     os << "__float2bfloat16_rn";
-    os << '(' << std::scientific << op->value << 'f' << ')';
+    os << '(' << std::hexfloat << op->value << 'f';
+    os << "/*" << std::scientific << op->value << "*/";
+    os << ')';
     return;
   }
   // Type code is kFloat8_e5m2 or kE4M4Float
   if (IsFloat8(op_ty)) {
     p->PrintType(op_ty, os);
-    os << '(' << std::scientific << op->value << 'f' << ')';
+    os << '(' << std::hexfloat << op->value << 'f';
+    os << "/*" << std::scientific << op->value << "*/";
+    os << ')';
     return;
   }
   // Type code is kFloat
@@ -1622,8 +1630,9 @@ inline void PrintConst(const FloatImmNode* op, std::ostream& os, CodeGenMACA* p)
         temp << ((op_ty.bits() == 32) ? "MACART_NAN_F" : "MACART_NAN");
         p->need_math_constants_h_ = true;
       } else {
-        temp << std::scientific << op->value;
+        temp << std::hexfloat << op->value;
         if (op_ty.bits() == 32) temp << 'f';
+        temp << "/*" << std::scientific << op->value << "*/";
       }
       p->MarkConst(temp.str());
       os << temp.str();
