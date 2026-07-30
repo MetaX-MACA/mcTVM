@@ -97,3 +97,8 @@ Use `python -m tirx_kernels.bench_suite` in the **tirx-kernels** repo
   `[DOCS]` as appropriate.
 - Preserve Apache license headers in new source, script, and documentation
   files when the surrounding tree uses them.
+
+## Commit Messages
+
+When creating a commit, follow the mcTVM commit message convention in
+`docs/contribute/pull_request.rst`.
