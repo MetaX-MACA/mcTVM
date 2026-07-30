@@ -196,7 +196,7 @@ TVM_REGISTER_OP("tirx.log")
 
 TVM_REGISTER_OP("tirx.log2")
     .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
-    .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<Math>);
+    .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
 TVM_REGISTER_OP("tirx.log10")
     .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
