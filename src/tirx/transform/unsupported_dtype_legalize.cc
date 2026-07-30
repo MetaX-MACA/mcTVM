@@ -826,7 +826,8 @@ Pass BF16ComputeLegalize() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
     auto opt_target = f->GetAttr<Target>(tvm::attr::kTarget);
     if (opt_target.has_value() &&
-        CheckDataTypeSupport(opt_target.value(), "tvm.support.nvcc.supports_bf16")) {
+        (CheckDataTypeSupport(opt_target.value(), "tvm.support.nvcc.supports_bf16") ||
+         CheckDataTypeSupport(opt_target.value(), "tvm.support.mxcc.supports_bf16"))) {
       return f;
     }
     return BF16ComputeLegalizer().Legalize(f);
@@ -843,7 +844,8 @@ Pass BF16StorageLegalize() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
     auto opt_target = f->GetAttr<Target>(tvm::attr::kTarget);
     if (opt_target.has_value() &&
-        CheckDataTypeSupport(opt_target.value(), "tvm.support.nvcc.supports_bf16")) {
+        (CheckDataTypeSupport(opt_target.value(), "tvm.support.nvcc.supports_bf16") ||
+         CheckDataTypeSupport(opt_target.value(), "tvm.support.mxcc.supports_bf16"))) {
       return f;
     }
     return BF16StorageLegalizer().Legalize(f);

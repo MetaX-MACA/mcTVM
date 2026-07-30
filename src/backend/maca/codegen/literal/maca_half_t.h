@@ -358,7 +358,6 @@ static inline __device__ __host__ maca_bfloat16 HALF_MATH_NAME(maca_bfloat16 x) 
 }
 
 MACA_UNSUPPORTED_HALF_MATH_BINARY(hpow, powf)
-MACA_UNSUPPORTED_HALF_MATH_UNARY(htanh, tanhf)
 MACA_UNSUPPORTED_HALF_MATH_UNARY(htan, tanf)
 MACA_UNSUPPORTED_HALF_MATH_UNARY(hatan, atanf)
 MACA_UNSUPPORTED_HALF_MATH_UNARY(herf, erf)

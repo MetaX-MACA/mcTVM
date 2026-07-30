@@ -29,7 +29,6 @@ import tvm.tirx as tirx
 from tvm.ir.module import IRModule
 from tvm.runtime.executable import Executable
 from tvm.script import tirx as T
-from tvm.support.mxcc import have_fp16
 from tvm.testing import env
 
 VECTOR_N_INPUTS = 8
@@ -283,13 +282,6 @@ def check_runtime(dtype: str, case: MathCase, executable: Executable):
 
 
 @pytest.mark.parametrize("enable_fast_math", [False, True], ids=["default", "fast_math"])
-@pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [fast-math] define fast-math intrinsic name compatibility or "
-        "MACA-specific expectations"
-    ),
-    strict=False,
-)
 def test_cuda_math_intrinsic_lowering_pass_context(enable_fast_math):
     check_lowered_ir("float32", MATH_CASES[0], enable_fast_math)
 
@@ -302,19 +294,9 @@ def test_cuda_math_intrinsic_lowering_pass_context(enable_fast_math):
 )
 @pytest.mark.parametrize("case", MATH_CASES, ids=lambda case: f"{case.name}")
 @pytest.mark.parametrize("enable_fast_math", [False, True], ids=["default", "fast_math"])
-@pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [fast-math] support fast-math intrinsic source checks with MACA equivalents"
-    ),
-    strict=False,
-)
 def test_cuda_math_intrinsic_lowering_source_and_runtime(dtype, case, enable_fast_math):
-    if dtype == "float16" and not have_fp16(tvm.maca(0).compute_version):
-        pytest.xfail("TODO(maca): [fast-math] support float16 fast-math intrinsic for this case")
     if dtype == "bfloat16" and case.name.startswith("pow_"):
-        pytest.xfail(
-            "TODO(maca): [fast-math] support bfloat16 pow intrinsic lowering for this case"
-        )
+        pytest.skip("pow_argnames=case is only supported for float")
 
     target, lowered_mod = check_lowered_ir(dtype, case, enable_fast_math)
     executable = check_cuda_source(target, lowered_mod, dtype, case, enable_fast_math)
