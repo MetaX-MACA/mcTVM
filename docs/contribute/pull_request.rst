@@ -171,6 +171,71 @@ encourage them to follow them in future. Also, they retain the right to ask to
 the author to update the PR title and/or body when they are not correctly
 updated or fixed.
 
+.. _mctvm-commit-message:
+
+mcTVM Commit Message Convention
+-------------------------------
+
+mcTVM follows the Apache TVM guidelines above. In addition, commit messages
+must make platform-specific behavior, compatibility work, and validation easy
+to find in ``git log``. Use Upper Camel Case for word tags and preserve the
+established spelling of acronyms and component names. Common examples include
+``[TIRx][MACA]``, ``[MetaXGPU]``, ``[CI]``, and ``[Fix][LLVM]``. Follow nearby
+history when selecting component tags; do not introduce a separate fixed tag
+taxonomy for mcTVM.
+
+For a normal change, use an imperative, tagged title followed by explanatory
+prose and a validation record::
+
+  [TIRx][MACA] Preserve pointer types in register-copy lowering
+
+  main represents pointer-returning calls as Expr values. Preserve the
+  PointerType and bind the result with T.let so register-copy lowering does
+  not incorrectly take the scalar fallback path.
+
+  Tests:
+  - python -m pytest tests/python/tirx/operator/tile_primitive/cuda/copy/ (34 passed)
+
+The explanation must state why the change is needed, rather than only restate
+the changed files. The ``Tests:`` section may be concise, but it must state
+what was run and the result. If validation was not run, write ``Not run`` and
+give the reason. Test bullets complement the prose; they do not replace it.
+For readability, wrap commit-message prose at approximately 72 columns. This
+is a convention rather than a hard limit; do not split commands, URLs, or other
+unbreakable identifiers solely to meet it.
+
+For a merge that required manual conflict resolution, backend adaptation, CI
+changes, or dependency alignment, add the following body sections::
+
+  Merge inputs:
+  - dev: <commit>
+  - main: <commit>
+  - merge-base: <commit>
+
+  mcTVM adjustments:
+  - <platform, API, CI, or dependency adaptation>
+
+  Conflict resolution:
+  - <path>: <chosen behavior and reason>
+
+  Validation:
+  - <build or test command and result>
+
+The ``Conflict resolution:`` section is required whenever conflicts were
+resolved manually. A clean, history-only merge may omit these additional
+sections.
+
+Automated Commit Creation
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Documentation alone cannot change Git's behavior. Agent tools working in this
+repository are required by ``AGENTS.md`` to read this section before running
+``git commit``. They must inspect the staged diff, select the normal or merge
+format above, write a message whose claims are supported by the staged change
+and completed validation, and verify the recorded message after committing.
+This requirement applies only when an agent has been asked to create a commit;
+it does not authorize an agent to commit or push on its own.
+
 CI Environment
 --------------
 We use Docker images to create stable CI environments that can be deployed to multiple machines.
