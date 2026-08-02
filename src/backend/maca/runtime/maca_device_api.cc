@@ -73,7 +73,7 @@ class MACADeviceAPI final : public DeviceAPI {
         os << value << ".";
         MACA_CALL(mcDeviceGetAttribute(&value, mcDeviceAttributeComputeCapabilityMinor,
                                        device.device_id));
-        os << value;
+        os << std::setfill('0') << std::setw(2) << value;
         *rv = os.str();
         return;
       }
