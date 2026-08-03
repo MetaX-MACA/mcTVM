@@ -36,7 +36,7 @@ dependencies:
   - zlib
   - zstd-static
   - pytest
-  - numpy
+  - numpy >=2.0
   - scipy
   - cython
   - libxml2-devel
