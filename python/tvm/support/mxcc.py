@@ -303,4 +303,7 @@ def have_fp8(compute_version):  # pylint: disable=unused-argument
     compute_version : str
         GPU capability
     """
-    return False
+    # MACA exposes native FP8 storage types and conversions from
+    # ``maca_fp8.h``.  Keep FP8 values in the TIR so the MACA code generator
+    # can emit those native types instead of lowering their storage to bytes.
+    return True

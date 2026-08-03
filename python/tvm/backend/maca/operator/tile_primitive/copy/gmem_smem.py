@@ -19,10 +19,10 @@
 
 There's no per-thread register side to inherit a partition from — both sides
 are cross-thread storage. The partition is synthesized from the surrounding
-scope context (warp / warpgroup / cta / thread): ``thread_cnt`` is derived
-from ``sctx.intra`` and each thread takes ``n_elements / thread_cnt``
-consecutive fused-index slots. Layout / partition algorithm lives in
-``_common.py`` and is shared with ``ldgsts.py``.
+scope context (warp / cta / thread; warpgroup is currently unsupported):
+``thread_cnt`` is derived from ``sctx.intra`` and each thread takes
+``n_elements / thread_cnt`` consecutive fused-index slots. Layout / partition
+algorithm lives in ``_common.py`` and is shared with ``ldgsts.py``.
 """
 
 import tvm
@@ -282,8 +282,11 @@ def _emit_gmem_smem(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFu
             s_lin = s_p.apply(f, tid, v0, shape=apply_shape)["m"]
             g_lin = g_p.apply(f, tid, v0, shape=apply_shape)["m"]
             s_off = _s_off(f, s_lin)
-            s_ptr = _ptr_off(s_buf.ptr_to(s_zero), s_off)
-            g_ptr = _ptr_off(g_buf.ptr_to(g_zero), g_lin)
+            # Pointer-valued calls are general Exprs after the IR type
+            # migration.  Bind them explicitly so the TIRx parser does not
+            # try to infer a scalar constant type for the call result.
+            s_ptr: T.let = _ptr_off(s_buf.ptr_to(s_zero), s_off)
+            g_ptr: T.let = _ptr_off(g_buf.ptr_to(g_zero), g_lin)
             if g_is_src:
                 copy_op(s_ptr, g_ptr)
             else:
