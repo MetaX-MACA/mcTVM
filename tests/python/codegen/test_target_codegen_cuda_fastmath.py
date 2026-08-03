@@ -276,7 +276,9 @@ def check_runtime(dtype: str, case: MathCase, executable: Executable):
         executable(*tvm_inputs, output)
 
         actual = output.numpy()
-        np.testing.assert_allclose(actual, expected, rtol=case.rtol, atol=case.atol)
+        np.testing.assert_allclose(
+            actual.astype("float32"), expected.astype("float32"), rtol=case.rtol, atol=case.atol
+        )
 
     tvm.testing.run_with_gpu_lock(run_and_check)
 
