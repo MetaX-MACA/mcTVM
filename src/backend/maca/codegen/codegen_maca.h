@@ -143,6 +143,8 @@ class CodeGenMACA final : public CodeGenC {
   bool need_mma_h_{false};
   // whether need cast_smem_ptr_to_int helper function
   bool need_cast_smem_ptr_to_int_{false};
+  // Codegen tags
+  std::unordered_set<std::string> codegen_tags_;
   // Op attribute map
   OpAttrMap<bool> op_need_warp_shuffle_ = Op::GetAttrMap<bool>("maca.need_warp_shuffle");
 
