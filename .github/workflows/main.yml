@@ -131,7 +131,7 @@ jobs:
       - name: Install test dependencies
         shell: cmd /C call {0}
         run: |
-          pip install psutil cloudpickle ml_dtypes numpy packaging scipy tornado typing_extensions
+          pip install psutil cloudpickle ml_dtypes "numpy>=2.0" packaging scipy tornado typing_extensions
       - name: Test
         shell: cmd /C call {0}
         run: >-
