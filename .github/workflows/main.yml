@@ -205,6 +205,24 @@ jobs:
           --junit-prefix=cython
           tests/python/codegen || test $? -eq 5
 
+      - name: Run 'contrib' unittests
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-contrib"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-contrib.xml"
+          --junit-prefix=cython
+          tests/python/contrib || test $? -eq 5
+
+      - name: Run 'disco' unittests
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-disco"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-disco.xml"
+          --junit-prefix=cython
+          tests/python/disco || test $? -eq 5
+
       - name: Run 'driver' unittests
         if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
         run: >-
@@ -312,6 +330,24 @@ jobs:
           --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-s-tir-transform.xml"
           --junit-prefix=cython
           tests/python/s_tir/transform || test $? -eq 5
+
+      - name: Run 's_tir/root' unittests
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-s-tir-root"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-s-tir-root.xml"
+          --junit-prefix=cython
+          tests/python/s_tir/test_s_tir_renew_defs.py || test $? -eq 5
+
+      - name: Run 'support' unittests
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-support"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-support.xml"
+          --junit-prefix=cython
+          tests/python/support || test $? -eq 5
 
       - name: Run 'tirx-analysis' unittests
         if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}

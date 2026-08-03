@@ -100,6 +100,56 @@ class TritonKernel(BaseKernel):
 
         return triton_kernel.name, kernel_module, kernel_args + launch_args
 
+    def compile_to_device_module_maca(
+        self,
+        launch_args: list[int | tirx.Expr],
+        *args: list[Any],
+        **kwargs: dict[str, Any],
+    ) -> tuple[str, Module, list[Any]]:
+        """Compile a Triton kernel for MACA and adapt its launcher ABI."""
+        triton_kernel, all_kernel_args = self._generate_triton_kernel(self.func, *args, **kwargs)
+        kernel_metadata = triton_kernel.metadata
+        if getattr(kernel_metadata, "global_scratch_size", 0) or getattr(
+            kernel_metadata, "profile_scratch_size", 0
+        ):
+            raise NotImplementedError(
+                "MACA Triton kernels requiring global or profile scratch are not supported"
+            )
+        assert kernel_metadata.num_ctas == 1, "Cluster is not supported"
+
+        # MetaX Triton elides constexpr parameters and appends two scratch pointers.
+        kernel_args = [
+            arg
+            for kernel_param, arg in zip(self.func.params, all_kernel_args)
+            if not kernel_param.is_constexpr
+        ]
+        kernel_arg_types = []
+        for arg in kernel_args:
+            if isinstance(arg.ty, PointerType):
+                kernel_arg_types.append("handle")
+            else:
+                assert is_prim_expr(arg)
+                kernel_arg_types.append(str(arg.ty.dtype))
+        kernel_arg_types.extend(["handle", "handle"])
+
+        grid = launch_args
+        launch_param_tags = ["threadIdx.x"] + ["blockIdx.x", "blockIdx.y", "blockIdx.z"][
+            : len(grid)
+        ]
+        launch_args = [kernel_metadata.target.warp_size * kernel_metadata.num_warps] + list(grid)
+        if kernel_metadata.shared > 0:
+            launch_param_tags.append("tirx.use_dyn_shared_memory")
+            launch_args.append(kernel_metadata.shared)
+
+        kernel_module = self._create_maca_module(
+            triton_kernel.asm["mcfatbin"],
+            kernel_arg_types,
+            launch_param_tags,
+            triton_kernel.name,
+            fmt="mcfatbin",
+        )
+        return triton_kernel.name, kernel_module, kernel_args + [0, 0] + launch_args
+
     def _generate_triton_kernel(
         self, func, *args, **kwargs
     ) -> tuple["triton.compiler.CompiledKernel", list[tirx.Expr]]:
