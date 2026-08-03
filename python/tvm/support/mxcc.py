@@ -28,6 +28,50 @@ import tvm
 from tvm.support import utils
 
 
+def _normalize_maca_arch(arch):
+    """Normalize MACA architecture names to mxcc offload-arch form."""
+    if arch is None:
+        return None
+    arch = str(arch).strip().lower()
+    if not arch:
+        return None
+    if arch.startswith("xcore"):
+        return arch
+    if re.fullmatch(r"\d+[a-zA-Z]*", arch):
+        return "xcore" + arch
+    raise ValueError(f"Invalid MACA architecture: {arch}")
+
+
+def _maca_compute_version_from_arch(arch):
+    """Convert xcore architecture names to compute version strings."""
+    arch = _normalize_maca_arch(arch)
+    if arch is None:
+        return None
+    match = re.match(r"xcore(\d+)", arch)
+    if not match:
+        raise ValueError(f"Invalid MACA architecture: {arch}")
+    digits = match.group(1)
+    if len(digits) >= 4:
+        major = int(digits[:-2])
+        minor = int(digits[-2:])
+    elif len(digits) == 3:
+        major = int(digits[:1])
+        minor = int(digits[1:])
+    else:
+        major = int(digits)
+        minor = 0
+    return f"{major}.{minor}"
+
+
+def _target_maca_arch(target):
+    """Extract a normalized MACA architecture from a Target object."""
+    target = target or tvm.target.Target.current()
+    if target is None:
+        return None
+    mcpu = getattr(target, "mcpu", None)
+    return _normalize_maca_arch(mcpu)
+
+
 def compile_maca(code, target_format="mcbin", arch=None, options=None, path_target=None):  # pylint: disable=unused-argument
     """Compile maca code with MXCC from env.
 
@@ -83,6 +127,9 @@ def compile_maca(code, target_format="mcbin", arch=None, options=None, path_targ
         cmd.extend(["-emit-llvm", "-maca-device-only"])
     else:
         cmd.append("-fatbin")
+    arch = _normalize_maca_arch(arch)
+    if arch:
+        cmd.append(f"-offload-arch={arch}")
     cmd.append("-O3")
     if kernels_output_dir is not None:
         cmd += ["-lineinfo"]
@@ -183,7 +230,6 @@ def have_bf16(compute_version):  # pylint: disable=unused-argument
     return True
 
 
-@tvm_ffi.register_global_func("tvm_callback_maca_get_arch")
 def get_maca_arch(maca_path="/opt/maca"):
     """Utility function to get the MetaX GPU architecture
 
@@ -227,6 +273,9 @@ def get_maca_arch(maca_path="/opt/maca"):
         return gpu_arch
 
 
+tvm_ffi.register_global_func("tvm_callback_maca_get_arch", get_maca_arch)
+
+
 def find_maca_path():
     """Utility function to find MACA path
 
@@ -250,9 +299,9 @@ def find_maca_path():
 
 
 @tvm_ffi.register_global_func
-def tvm_callback_maca_compile(code, target):  # pylint: disable=unused-argument
+def tvm_callback_maca_compile(code, target):
     """use mxcc to generate fatbin code for better optimization"""
-    dev_obj = compile_maca(code, target_format="mcbin")
+    dev_obj = compile_maca(code, target_format="mcbin", arch=_target_maca_arch(target))
     return dev_obj
 
 
@@ -277,12 +326,7 @@ def get_target_compute_version(target=None):
     # 2. Target.current()
     target = target or tvm.target.Target.current()
     if target and target.mcpu:
-        arch = target.mcpu[5:]
-        major = arch[:2]
-        minor = arch[2:]
-        if minor == "00":
-            minor = "0"
-        return major + "." + minor
+        return _maca_compute_version_from_arch(target.mcpu)
 
     # 3. GPU compute version
     if tvm.maca(0).exist:

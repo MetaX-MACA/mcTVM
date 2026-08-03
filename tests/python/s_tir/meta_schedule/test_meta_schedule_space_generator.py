@@ -20,6 +20,7 @@
 import math
 
 import pytest
+import tvm_ffi
 
 import tvm
 import tvm.testing
@@ -69,6 +70,14 @@ def _check_correct(schedule: Schedule):
     trace = schedule.trace
     for inst in trace.decisions:
         assert math.prod(trace.decisions[inst]) == 1024
+
+
+def test_meta_schedule_maca_rule_kind_gates_wmma_by_mcpu():
+    get_rule_kind = tvm_ffi.get_global_func("s_tir.meta_schedule.GetRuleKindFromTarget")
+
+    assert get_rule_kind(tvm.target.Target({"kind": "maca", "mcpu": "xcore700"})) == "maca"
+    assert get_rule_kind(tvm.target.Target({"kind": "maca", "mcpu": "xcore800"})) == "maca"
+    assert get_rule_kind(tvm.target.Target({"kind": "maca", "mcpu": "xcore1000"})) == "maca-wmma"
 
 
 def test_meta_schedule_space_generator_schedule_fn():
