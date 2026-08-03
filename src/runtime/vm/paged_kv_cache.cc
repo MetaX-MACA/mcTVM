@@ -498,7 +498,8 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     // If the device is CUDA/ROCm, we create a standalone copy stream, in
     // purpose to hide the latency of auxiliary stream copy.
     if (device.device_type == DLDeviceType::kDLCUDA ||
-        device.device_type == DLDeviceType::kDLROCM) {
+        device.device_type == DLDeviceType::kDLROCM ||
+        device.device_type == DLDeviceType::kDLMACA) {
       // The compute stream is the default stream.
       compute_stream_ = DeviceAPI::Get(device)->GetCurrentStream(device);
       copy_stream_ = DeviceAPI::Get(device)->CreateStream(device);
@@ -509,7 +510,8 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     // We only use the merged aux data for CUDA, since direct pointer
     // operations may have issues on other platforms.
     if (device_.device_type == DLDeviceType::kDLCUDA ||
-        device_.device_type == DLDeviceType::kDLCPU) {
+        device_.device_type == DLDeviceType::kDLCPU ||
+        device_.device_type == DLDeviceType::kDLMACA) {
       aux_data_manager_ = std::make_unique<CachedPagedKVCacheAuxDataManager>(
           reserved_num_seqs, num_total_pages, prefill_chunk_size, dtype_aux_, device,
           preferred_host_device, copy_stream_);
