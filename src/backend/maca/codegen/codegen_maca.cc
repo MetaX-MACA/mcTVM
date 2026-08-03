@@ -489,8 +489,10 @@ std::string CodeGenMACA::Finish() {
 }
 
 void CodeGenMACA::VisitStmt_(const tirx::ForNode* op) {
-  TVM_FFI_ICHECK(is_const_int(op->min, 0));
-  if (op->kind == tirx::ForKind::kUnrolled) {
+  if (op->annotations.count("disable_unroll")) {
+    PrintIndent();
+    stream << "#pragma unroll 1\n";
+  } else if (op->kind == tirx::ForKind::kUnrolled || op->annotations.count("pragma_unroll")) {
     PrintIndent();
     stream << "#pragma unroll\n";
   }
@@ -1209,6 +1211,8 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
   } else if (op->op.same_as(maca_func_call_op) ||
              (op->op.as<Op>() && op->op.as<Op>().value()->name == "tirx.maca.func_call")) {
     print_maca_func_call(op, os);
+  } else if (op->op.same_as(builtin::thread_return())) {
+    os << "return";
   } else {
     CodeGenC::VisitExpr_(op, os);
   }
@@ -1596,48 +1600,73 @@ void CodeGenMACA::VisitExpr_(const SelectNode* op, std::ostream& os) {
 inline void PrintConst(const FloatImmNode* op, std::ostream& os, CodeGenMACA* p) {  // NOLINT(*)
   PrimType op_ty = op->ty.as_or_throw<PrimType>();
   // Type code is kBFloat
-  if (IsBFloat16(op_ty)) {
+  if (op_ty.MatchesElementType(DLDataTypeCode::kDLBfloat, 16)) {
     os << "__float2bfloat16_rn";
-    os << '(' << std::scientific << op->value << 'f' << ')';
+    os << '(' << std::hexfloat << op->value << 'f';
+    os << "/*" << std::scientific << op->value << "*/";
+    os << ')';
     return;
   }
   // Type code is kFloat8_e5m2 or kE4M4Float
   if (IsFloat8(op_ty)) {
     p->PrintType(op_ty, os);
-    os << '(' << std::scientific << op->value << 'f' << ')';
+    os << '(' << std::hexfloat << op->value << 'f';
+    os << "/*" << std::scientific << op->value << "*/";
+    os << ')';
     return;
   }
   // Type code is kFloat
   switch (op_ty.bits()) {
-    case 64:
+    case 64: {
+      std::ostringstream temp;
+      if (std::isinf(op->value)) {
+        if (op->value < 0) {
+          temp << "-";
+        }
+        temp << "MACART_INF";
+        p->codegen_tags_.insert("math_constants");
+        p->need_math_constants_h_ = true;
+      } else if (std::isnan(op->value)) {
+        temp << "MACART_NAN";
+        p->codegen_tags_.insert("math_constants");
+        p->need_math_constants_h_ = true;
+      } else {
+        temp << std::fixed << std::setprecision(15) << op->value;
+      }
+      p->MarkConst(temp.str());
+      os << temp.str();
+      break;
+    }
     case 32: {
       std::ostringstream temp;
       if (std::isinf(op->value)) {
         if (op->value < 0) {
           temp << "-";
         }
-        temp << ((op_ty.bits() == 32) ? "MACART_INF_F" : "MACART_INF");
+        temp << "MACART_INF_F";
+        p->codegen_tags_.insert("math_constants");
         p->need_math_constants_h_ = true;
       } else if (std::isnan(op->value)) {
-        temp << ((op_ty.bits() == 32) ? "MACART_NAN_F" : "MACART_NAN");
+        temp << "MACART_NAN_F";
+        p->codegen_tags_.insert("math_constants");
         p->need_math_constants_h_ = true;
       } else {
-        temp << std::scientific << op->value;
-        if (op_ty.bits() == 32) temp << 'f';
+        temp << std::hexfloat << op->value << 'f';
+        temp << "/*" << std::scientific << op->value << "*/";
       }
       p->MarkConst(temp.str());
       os << temp.str();
       break;
     }
     case 16: {
-      os << "__float2half" << '(';
+      os << "__float2half_rn" << '(';
       FloatImm const_f32 = FloatImm(PrimType::Float(32), op->value);
       PrintConst(const_f32.get(), os, p);
       os << ')';
       break;
     }
     default:
-      LOG(FATAL) << "Bad bit-width for float: " << op_ty << "\n";
+      TVM_FFI_THROW(InternalError) << "Bad bit-width for float: " << op_ty << "\n";
   }
 }
 
