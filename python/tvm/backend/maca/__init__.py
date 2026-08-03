@@ -35,7 +35,7 @@ def _detect_target_from_device(dev):
             "max_shared_memory_per_block": dev.max_shared_memory_per_block,
             "max_threads_per_block": dev.max_threads_per_block,
             "thread_warp_size": dev.warp_size,
-            "mcpu": "xcore" + dev.compute_version.replace(".", "") + "0",
+            "mcpu": "xcore" + dev.compute_version.replace(".", ""),
             "mtriple": "mxc-metax-macahca",
         }
     )

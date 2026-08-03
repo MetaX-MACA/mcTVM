@@ -28,7 +28,7 @@ import tvm
 from tvm.support import utils
 
 
-def compile_maca(code, target_format="mcbin", arch=None, options=None, path_target=None):  # pylint: disable=unused-argument
+def compile_maca(code, target_format="mcbin", arch="xcore1000", options=None, path_target=None):  # pylint: disable=unused-argument
     """Compile maca code with MXCC from env.
 
     Parameters
@@ -76,7 +76,7 @@ def compile_maca(code, target_format="mcbin", arch=None, options=None, path_targ
         out_file.write(code)
 
     file_target = path_target if path_target else temp_target
-    cmd = ["mxcc"]
+    cmd = ["mxcc", f"-offload-arch={arch}"]
     if target_format == "mcbin":
         cmd.append("-device-obj")
     elif target_format == "mcir":
@@ -252,7 +252,7 @@ def find_maca_path():
 @tvm_ffi.register_global_func
 def tvm_callback_maca_compile(code, target):  # pylint: disable=unused-argument
     """use mxcc to generate fatbin code for better optimization"""
-    dev_obj = compile_maca(code, target_format="mcbin")
+    dev_obj = compile_maca(code, target_format="mcbin", arch=target.mcpu)
     return dev_obj
 
 
