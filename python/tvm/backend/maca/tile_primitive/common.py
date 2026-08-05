@@ -242,6 +242,8 @@ def get_thread_cnt(sctx: DispatchContext) -> int | None:
     scope_name = sctx.scope_kind
     if scope_name == "cta":
         return sctx.launch_params["threadIdx.x"].dom.extent
+    if scope_name == "warpgroup":
+        return 256
     if scope_name == "warp":
         return 64
     if scope_name == "thread":

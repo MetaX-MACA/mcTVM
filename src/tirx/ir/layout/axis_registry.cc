@@ -206,6 +206,15 @@ TVM_REGISTER_AXIS("tx")
           return SplitterGen(iter, Axis::Get("wgid"), Axis::Get("tid_in_wg"), 128);
         }
         LOG(FATAL) << "Cannot split cta->thread axis into cta->" << scope << "->thread";
+      } else if (target->kind->default_device_type == kDLMACA) {
+        if (scope == "warp") {
+          // tx -> warpid, laneid
+          return SplitterGen(iter, Axis::Get("warpid"), Axis::Get("laneid"), 64);
+        } else if (scope == "warpgroup") {
+          // tx -> wgid, tid_in_wg
+          return SplitterGen(iter, Axis::Get("wgid"), Axis::Get("tid_in_wg"), 256);
+        }
+        LOG(FATAL) << "Cannot split cta->thread axis into cta->" << scope << "->thread";
       }
       return {};
     });
@@ -220,13 +229,18 @@ TVM_REGISTER_AXIS("warpid")
         if (subscope == "thread" && scope == "cta") {
           return Iter(iter->extent, 32 * iter->stride, Axis::Get("tx"));
         }
-        return std::nullopt;
+      } else if (target->kind->default_device_type == kDLMACA) {
+        // cta->warp ===> cta->thread (tx)
+        if (subscope == "thread" && scope == "cta") {
+          return Iter(iter->extent, 64 * iter->stride, Axis::Get("tx"));
+        }
       }
       return std::nullopt;
     })
     .set_splitter([](Target target, ffi::String scope, Iter iter) -> ffi::Array<Iter> {
       arith::Analyzer analyzer;
-      if (target->kind->default_device_type == kDLCUDA) {
+      if (target->kind->default_device_type == kDLCUDA ||
+          target->kind->default_device_type == kDLMACA) {
         if (scope == "warp") {
           // warpid -> wgid, wid_in_wg
           return SplitterGen(iter, Axis::Get("wgid"), Axis::Get("wid_in_wg"), 4);
@@ -241,7 +255,8 @@ TVM_REGISTER_AXIS("laneid")
     .set_subscope("thread")
     .set_fuser([](Target target, ffi::String subscope, ffi::String scope,
                   Iter iter) -> ffi::Optional<Iter> {
-      if (target->kind->default_device_type == kDLCUDA) {
+      if (target->kind->default_device_type == kDLCUDA ||
+          target->kind->default_device_type == kDLMACA) {
         if (subscope == "thread" && scope == "warpgroup") {
           // warp->thread ===> warpgroup->thread (tid_in_wg)
           return Iter(iter->extent, iter->stride, Axis::Get("tid_in_wg"));
@@ -255,7 +270,8 @@ TVM_REGISTER_AXIS("laneid")
     })
     .set_splitter([](Target target, ffi::String scope, Iter iter) -> ffi::Array<Iter> {
       arith::Analyzer analyzer;
-      if (target->kind->default_device_type == kDLCUDA) {
+      if (target->kind->default_device_type == kDLCUDA ||
+          target->kind->default_device_type == kDLMACA) {
         LOG(FATAL) << "laneid can not be split any more";
       }
       return {};
@@ -272,14 +288,23 @@ TVM_REGISTER_AXIS("wgid")
           return Iter(iter->extent, iter->stride * 128, Axis::Get("tx"));
         } else if (subscope == "warp" && scope == "cta") {
           // cta->warpgroup ===> cta->warp (warpid)
-          return Iter(iter->extent, iter->stride * 4, Axis::Get("wgid"));
+          return Iter(iter->extent, iter->stride * 4, Axis::Get("warpid"));
+        }
+      } else if (target->kind->default_device_type == kDLMACA) {
+        if (subscope == "thread" && scope == "cta") {
+          // cta->warpgroup ===> cta->thread (tx)
+          return Iter(iter->extent, iter->stride * 256, Axis::Get("tx"));
+        } else if (subscope == "warp" && scope == "cta") {
+          // cta->warpgroup ===> cta->warp (warpid)
+          return Iter(iter->extent, iter->stride * 4, Axis::Get("warpid"));
         }
       }
       return std::nullopt;
     })
     .set_splitter([](Target target, ffi::String scope, Iter iter) -> ffi::Array<Iter> {
       arith::Analyzer analyzer;
-      if (target->kind->default_device_type == kDLCUDA) {
+      if (target->kind->default_device_type == kDLCUDA ||
+          target->kind->default_device_type == kDLMACA) {
         LOG(FATAL) << "wgid can not be split any more";
       }
       return {};
@@ -290,7 +315,8 @@ TVM_REGISTER_AXIS("tid_in_wg")
     .set_subscope("thread")
     .set_fuser([](Target target, ffi::String subscope, ffi::String scope,
                   Iter iter) -> ffi::Optional<Iter> {
-      if (target->kind->default_device_type == kDLCUDA) {
+      if (target->kind->default_device_type == kDLCUDA ||
+          target->kind->default_device_type == kDLMACA) {
         if (subscope == "thread" && scope == "cta") {
           // warpgroup->thread ===> cta->thread (tx)
           return Iter(iter->extent, iter->stride, Axis::Get("tx"));
@@ -305,6 +331,12 @@ TVM_REGISTER_AXIS("tid_in_wg")
         if (scope == "warp") {
           // tid_in_wg -> wid_in_wg, laneid
           return SplitterGen(iter, Axis::Get("wid_in_wg"), Axis::Get("laneid"), 32);
+        }
+        LOG(FATAL) << "Cannot split warpgroup->thread axis into warpgroup->" << scope << "->thread";
+      } else if (target->kind->default_device_type == kDLMACA) {
+        if (scope == "warp") {
+          // tid_in_wg -> wid_in_wg, laneid
+          return SplitterGen(iter, Axis::Get("wid_in_wg"), Axis::Get("laneid"), 64);
         }
         LOG(FATAL) << "Cannot split warpgroup->thread axis into warpgroup->" << scope << "->thread";
       }
@@ -327,13 +359,24 @@ TVM_REGISTER_AXIS("wid_in_wg")
           // warpgroup->warp ===> cta->warp (warpid)
           return Iter(iter->extent, iter->stride, Axis::Get("warpid"));
         }
-        return std::nullopt;
+      } else if (target->kind->default_device_type == kDLMACA) {
+        if (subscope == "thread" && scope == "warpgroup") {
+          // warpgroup->warp ===> warpgroup->thread (tid_in_wg)
+          return Iter(iter->extent, iter->stride * 64, Axis::Get("tid_in_wg"));
+        } else if (subscope == "thread" && scope == "cta") {
+          // warpgroup->warp ===> cta->thread (tx)
+          return Iter(iter->extent, iter->stride * 64, Axis::Get("tx"));
+        } else if (subscope == "warp" && scope == "cta") {
+          // warpgroup->warp ===> cta->warp (warpid)
+          return Iter(iter->extent, iter->stride, Axis::Get("warpid"));
+        }
       }
       return std::nullopt;
     })
     .set_splitter([](Target target, ffi::String scope, Iter iter) -> ffi::Array<Iter> {
       arith::Analyzer analyzer;
-      if (target->kind->default_device_type == kDLCUDA) {
+      if (target->kind->default_device_type == kDLCUDA ||
+          target->kind->default_device_type == kDLMACA) {
         LOG(FATAL) << "wid_in_wg can not be split any more";
       }
       return {};

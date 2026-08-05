@@ -15,5 +15,4 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from .copy import *
-from .elementwise import *
+"""MACA-native vector emitters for elementwise operations."""

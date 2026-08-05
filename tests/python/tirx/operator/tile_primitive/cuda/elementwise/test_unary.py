@@ -65,7 +65,6 @@ MACA_XFAIL = pytest.mark.xfail(
 )
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["zero", "sqrt"])
 @pytest.mark.parametrize(
     "src_dtype,dst_dtype", [("float16", "float16"), ("float32", "float16"), ("float32", "bfloat16")]
@@ -91,12 +90,12 @@ def test_unary_op_shared(input, op_type, src_dtype, dst_dtype):
             _tx = T.thread_id([thread_cnt])
             A_smem = T.alloc_buffer(s_shape, src_dtype, scope="shared", layout=s_layout)
             Tx.cta.copy(A_smem[tuple(copy_slice)], A[tuple(copy_slice)])
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             if op_type == "zero":
                 Tx.cta.zero(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)])
             elif op_type == "sqrt":
                 Tx.cta.sqrt(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)])
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             Tx.cta.copy(A[tuple(copy_slice)], A_smem[tuple(copy_slice)])
             # fmt: on
     else:
@@ -112,12 +111,12 @@ def test_unary_op_shared(input, op_type, src_dtype, dst_dtype):
             A_smem = T.alloc_buffer(s_shape, src_dtype, scope="shared", layout=s_layout)
             B_smem = T.alloc_buffer(s_shape, dst_dtype, scope="shared", layout=s_layout)
             Tx.cta.copy(A_smem[tuple(copy_slice)], A[tuple(copy_slice)])
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             if op_type == "zero":
                 Tx.cta.zero(B_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)])
             elif op_type == "sqrt":
                 Tx.cta.sqrt(B_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)])
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             Tx.cta.copy(B[tuple(map_slice_res)], B_smem[tuple(map_slice_res)])
             # fmt: on
 
@@ -155,39 +154,43 @@ def test_unary_op_shared(input, op_type, src_dtype, dst_dtype):
                 B = tvm.runtime.tensor(np.zeros(g_shape, dtype=dst_dtype), dev)
                 mod(A, B)
                 B_ref = get_ref(A_np)
-                tvm.testing.assert_allclose(B_ref, B.numpy(), atol=1e-2, rtol=1e-2)
+                tvm.testing.assert_allclose(
+                    np.asarray(B_ref, dtype="float32"),
+                    np.asarray(B.numpy(), dtype="float32"),
+                    atol=1e-2,
+                    rtol=1e-2,
+                )
 
         tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("exec_scope", ["warp", "warpgroup"])
 def test_unary_op_shared_subcta_scope(exec_scope):
     dtype = "float16"
     n_warps = 4 if exec_scope == "warpgroup" else 1
-    g_shape = (n_warps * 32, 8)
+    g_shape = (n_warps * 64, 8)
 
     @T.prim_func
     def unary_op_subcta(A_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, g_shape, dtype, layout=TileLayout(S[g_shape]))
 
         T.device_entry()
-        warp_id = T.warp_id([(256) // 32])
-        wg_id = T.warpgroup_id([(256) // 128])
+        warp_id = T.warp_id([(256) // 64])
+        wg_id = T.warpgroup_id([(256) // 256])
         _bx = T.cta_id([1])
         _tid = T.thread_id([256])
         A_smem = T.alloc_buffer(g_shape, dtype, scope="shared", layout=TileLayout(S[g_shape]))
         Tx.cta.copy(A_smem, A)
-        T.cuda.cta_sync()
+        T.maca.cta_sync()
         if exec_scope == "warp":
-            if warp_id == 5:
+            if warp_id == 2:
                 Tx.warp.zero(A_smem, A_smem)
         elif exec_scope == "warpgroup":
-            if wg_id == 1:
+            if wg_id == 0:
                 Tx.wg.zero(A_smem, A_smem)
-        T.cuda.cta_sync()
+        T.maca.cta_sync()
         Tx.cta.copy(A, A_smem)
 
     target = tvm.target.Target("maca")
@@ -233,7 +236,6 @@ def test_unary_op_shared_subcta_scope(exec_scope):
 )
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["sqrt", "exp"])
 @pytest.mark.parametrize("bias_type", ["const", "region"])
 @pytest.mark.parametrize(
@@ -273,7 +275,7 @@ def test_unary_op_shared_with_bias_scale(input, op_type, bias_type, src_dtype, d
             bias_smem = T.alloc_buffer(s_shape, src_dtype, scope="shared", layout=s_layout)
             Tx.cta.copy(A_smem[tuple(copy_slice)], A[tuple(copy_slice)])
             Tx.cta.copy(bias_smem[tuple(copy_slice)], bias[tuple(copy_slice)])
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             if bias_type == "const":
                 if op_type == "sqrt":
                     Tx.cta.sqrt(
@@ -304,7 +306,7 @@ def test_unary_op_shared_with_bias_scale(input, op_type, bias_type, src_dtype, d
                         bias_smem[tuple(map_slice_a)],
                         scale,
                     )
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             Tx.cta.copy(A[tuple(copy_slice)], A_smem[tuple(copy_slice)])
     else:
 
@@ -322,7 +324,7 @@ def test_unary_op_shared_with_bias_scale(input, op_type, bias_type, src_dtype, d
             bias_smem = T.alloc_buffer(s_shape, src_dtype, scope="shared", layout=s_layout)
             Tx.cta.copy(A_smem[tuple(copy_slice)], A[tuple(copy_slice)])
             Tx.cta.copy(bias_smem[tuple(copy_slice)], bias[tuple(copy_slice)])
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             if bias_type == "const":
                 if op_type == "sqrt":
                     Tx.cta.sqrt(
@@ -353,7 +355,7 @@ def test_unary_op_shared_with_bias_scale(input, op_type, bias_type, src_dtype, d
                         bias_smem[tuple(map_slice_a)],
                         scale,
                     )
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             Tx.cta.copy(B[tuple(map_slice_res)], B_smem[tuple(map_slice_res)])
 
     def get_ref(A_np, bias_np):
@@ -429,7 +431,15 @@ def test_unary_op_shared_with_bias_scale(input, op_type, bias_type, src_dtype, d
                 B = tvm.runtime.tensor(np.zeros(g_shape, dtype=dst_dtype), dev)
                 mod(A, B, bias)
                 B_ref = get_ref(A_np, bias_np)
-                tvm.testing.assert_allclose(B_ref, B.numpy(), atol=1e-1, rtol=1e-2)
+                if dst_dtype == "bfloat16":
+                    tvm.testing.assert_allclose(
+                        np.asarray(B_ref, dtype="float32"),
+                        np.asarray(B.numpy(), dtype="float32"),
+                        atol=1e-1,
+                        rtol=1e-2,
+                    )
+                else:
+                    tvm.testing.assert_allclose(B_ref, B.numpy(), atol=1e-1, rtol=1e-2)
 
         tvm.testing.run_with_gpu_lock(run_and_check)
 
@@ -441,28 +451,27 @@ def test_unary_op_shared_with_bias_scale(input, op_type, bias_type, src_dtype, d
             "wgmma",  # layout
             1,  # N_GROUPS
             1,  # N_WARPS
-            32,  # thread_cnt
+            64,  # thread_cnt
             0,  # device_id
         ),
         (
             "wgmma",  # layout
             1,  # N_GROUPS
             4,  # N_WARPS
-            32,  # thread_cnt
+            64,  # thread_cnt
             0,  # device_id
         ),
         (
             "wgmma",  # layout
             2,  # N_GROUPS
             8,  # N_WARPS
-            32,  # thread_cnt
+            64,  # thread_cnt
             0,  # device_id
         ),
     ],
 )
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["reciprocal", "exp", "exp2", "log2"])
 @pytest.mark.parametrize(
     "src_dtype,dst_dtype", [("float16", "float16"), ("float32", "float16"), ("float32", "bfloat16")]
@@ -489,28 +498,28 @@ def test_unary_op_local(input, op_type, src_dtype, dst_dtype):
         lane_id = T.lane_id([thread_cnt])
         # acc layout
         atom = T.TileLayout(T.S[(1, 2) : (2, 1)])
-        warp_layout = T.TileLayout(T.S[(8, 4) : (4 @ laneid, 1 @ laneid)])
-        warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
-        tile = T.TileLayout(T.S[(2, NUM_COL // 8) : (1, 2)])
-        acc_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
+        warp_layout = T.TileLayout(T.S[(8, 8) : (8 @ laneid, 1 @ laneid)])
+        warp_atom = atom.tile(warp_layout, (8, 8), (1, 2))
+        tile = T.TileLayout(T.S[(2, NUM_COL // 16) : (1, 2)])
+        acc_layout = warp_atom.tile(tile, (2, NUM_COL // 16), (8, 16))
         acc = T.alloc_buffer(
-            [2, NUM_COL // 4],
+            [2, NUM_COL // 8],
             dtype=src_dtype,
             scope="local",
-            layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)),
+            layout=atom.tile(tile, (2, NUM_COL // 16), (1, 2)),
         )
         res = T.alloc_buffer(
-            [2, NUM_COL // 4],
+            [2, NUM_COL // 8],
             dtype=dst_dtype,
             scope="local",
-            layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)),
+            layout=atom.tile(tile, (2, NUM_COL // 16), (1, 2)),
         )
-        for i in T.serial(NUM_COL // 8):
+        for i in T.serial(NUM_COL // 16):
             for j in T.unroll(2):
                 for vec in T.vectorized(2):
                     acc[j, i * 2 + vec] = A[
-                        wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
-                        i * 8 + lane_id % 4 * 2 + vec,
+                        wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 8,
+                        i * 16 + lane_id % 8 * 2 + vec,
                     ]
 
             # unary op
@@ -526,12 +535,12 @@ def test_unary_op_local(input, op_type, src_dtype, dst_dtype):
             Tx.warp.log2(res_view, acc_view)
 
             # write res into B
-        for i in T.serial(NUM_COL // 8):
+        for i in T.serial(NUM_COL // 16):
             for j in T.unroll(2):
                 for vec in T.vectorized(2):
                     B[
-                        wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
-                        i * 8 + lane_id % 4 * 2 + vec,
+                        wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 8,
+                        i * 16 + lane_id % 8 * 2 + vec,
                     ] = res[j, i * 2 + vec]
 
         # fmt: on
@@ -563,7 +572,9 @@ def test_unary_op_local(input, op_type, src_dtype, dst_dtype):
             A = tvm.runtime.tensor(A_np, dev)
             B = tvm.runtime.tensor(B_np, dev)
             mod(A, B)
-            tvm.testing.assert_allclose(B_ref, B.numpy(), atol=1e-2, rtol=1e-2)
+            tvm.testing.assert_allclose(
+                B_ref.astype("float32"), B.numpy().astype("float32"), atol=1e-2, rtol=1e-2
+            )
 
         tvm.testing.run_with_gpu_lock(run_and_check)
 
@@ -575,28 +586,27 @@ def test_unary_op_local(input, op_type, src_dtype, dst_dtype):
             "wgmma",  # layout
             1,  # N_GROUPS
             1,  # N_WARPS
-            32,  # thread_cnt
+            64,  # thread_cnt
             0,  # device_id
         ),
         (
             "wgmma",  # layout
             1,  # N_GROUPS
             4,  # N_WARPS
-            32,  # thread_cnt
+            64,  # thread_cnt
             0,  # device_id
         ),
         (
             "wgmma",  # layout
             2,  # N_GROUPS
             8,  # N_WARPS
-            32,  # thread_cnt
+            64,  # thread_cnt
             0,  # device_id
         ),
     ],
 )
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["sqrt", "exp"])
 @pytest.mark.parametrize("bias_type", ["const", "region"])
 @pytest.mark.parametrize(
@@ -628,42 +638,42 @@ def test_unary_op_local_with_bias_scale(input, op_type, bias_type, src_dtype, ds
         lane_id = T.lane_id([thread_cnt])
         # acc layout
         atom = T.TileLayout(T.S[(1, 2) : (2, 1)])
-        warp_layout = T.TileLayout(T.S[(8, 4) : (4 @ laneid, 1 @ laneid)])
-        warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
-        tile = T.TileLayout(T.S[(2, NUM_COL // 8) : (1, 2)])
-        acc_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
+        warp_layout = T.TileLayout(T.S[(8, 8) : (8 @ laneid, 1 @ laneid)])
+        warp_atom = atom.tile(warp_layout, (8, 8), (1, 2))
+        tile = T.TileLayout(T.S[(2, NUM_COL // 16) : (1, 2)])
+        acc_layout = warp_atom.tile(tile, (2, NUM_COL // 16), (8, 16))
         acc = T.alloc_buffer(
-            [2, NUM_COL // 4],
+            [2, NUM_COL // 8],
             dtype=src_dtype,
             scope="local",
-            layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)),
+            layout=atom.tile(tile, (2, NUM_COL // 16), (1, 2)),
         )
         bias_local = T.alloc_buffer(
-            [2, NUM_COL // 4],
+            [2, NUM_COL // 8],
             dtype=src_dtype,
             scope="local",
-            layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)),
+            layout=atom.tile(tile, (2, NUM_COL // 16), (1, 2)),
         )
         res = T.alloc_buffer(
-            [2, NUM_COL // 4],
+            [2, NUM_COL // 8],
             dtype=dst_dtype,
             scope="local",
-            layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)),
+            layout=atom.tile(tile, (2, NUM_COL // 16), (1, 2)),
         )
-        for i in T.serial(NUM_COL // 8):
+        for i in T.serial(NUM_COL // 16):
             for j in T.unroll(2):
                 for vec in T.vectorized(2):
                     acc[j, i * 2 + vec] = A[
-                        wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
-                        i * 8 + lane_id % 4 * 2 + vec,
+                        wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 8,
+                        i * 16 + lane_id % 8 * 2 + vec,
                     ]
             # load bias into bias_local
-        for i in T.serial(NUM_COL // 8):
+        for i in T.serial(NUM_COL // 16):
             for j in T.unroll(2):
                 for vec in T.vectorized(2):
                     bias_local[j, i * 2 + vec] = bias[
-                        wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
-                        i * 8 + lane_id % 4 * 2 + vec,
+                        wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 8,
+                        i * 16 + lane_id % 8 * 2 + vec,
                     ]
 
             # unary op
@@ -682,12 +692,12 @@ def test_unary_op_local_with_bias_scale(input, op_type, bias_type, src_dtype, ds
                 Tx.warp.exp(res_view, acc_view, bias_view, scale)
 
             # write res into B
-        for i in T.serial(NUM_COL // 8):
+        for i in T.serial(NUM_COL // 16):
             for j in T.unroll(2):
                 for vec in T.vectorized(2):
                     B[
-                        wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
-                        i * 8 + lane_id % 4 * 2 + vec,
+                        wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 8,
+                        i * 16 + lane_id % 8 * 2 + vec,
                     ] = res[j, i * 2 + vec]
 
     def get_ref(A_np, bias_np):
@@ -723,14 +733,15 @@ def test_unary_op_local_with_bias_scale(input, op_type, bias_type, src_dtype, ds
             bias = tvm.runtime.tensor(bias_np, dev)
             B = tvm.runtime.tensor(B_np, dev)
             mod(A, B, bias)
-            tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
+            tvm.testing.assert_allclose(
+                B_ref.astype("float32"), B.numpy().astype("float32"), atol=atol
+            )
 
         tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("shape", [(128, 8), (128, 4, 16), (128, 5, 5)])
 @pytest.mark.parametrize("op_type", ["fill"])
 @pytest.mark.parametrize("exec_scope", ["thread", "cta"])
@@ -794,7 +805,6 @@ def test_unary_op_vectorized(shape, op_type, exec_scope, storage_scope):
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["zero", "sqrt", "reciprocal", "exp", "silu"])
 @pytest.mark.parametrize("dtype", ["float16"])
 def test_unary_op_local_thread_wise(op_type, dtype):
@@ -852,7 +862,6 @@ def test_unary_op_local_thread_wise(op_type, dtype):
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("shape", [(8,), (16, 16), (5, 5)])
 @pytest.mark.parametrize("A_dtype", ["float16", "float32"])
 @pytest.mark.parametrize("B_dtype", ["float16", "float32"])
@@ -898,11 +907,10 @@ def test_cast_thread_local(shape, A_dtype, B_dtype):
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("A_dtype,B_dtype", [("float32", "float16"), ("float32", "bfloat16")])
 def test_cast_warpgroup_local_view(A_dtype, B_dtype):
     """T.cast in warpgroup scope with offset (tid_in_wg + layout offset). Covers offset/tid_in_wg/warpgroup scope."""  # noqa: E501
-    N_THREADS, LOCAL_LEN = 128, 8
+    N_THREADS, LOCAL_LEN = 256, 8
     g_shape = (N_THREADS, LOCAL_LEN)
     g_layout = TileLayout(S[g_shape])
     use_offset = True
@@ -951,17 +959,21 @@ def test_cast_warpgroup_local_view(A_dtype, B_dtype):
             A = tvm.runtime.tensor(A_ref, dev)
             B = tvm.runtime.tensor(np.zeros(g_shape, dtype=B_dtype), dev)
             mod(A, B)
-            tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
+            if B_dtype == "bfloat16":
+                tvm.testing.assert_allclose(
+                    B.numpy().astype("float32"), B_ref.astype("float32"), atol=1e-2
+                )
+            else:
+                tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
 
         tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("A_dtype,B_dtype", [("float32", "float16"), ("float32", "bfloat16")])
 def test_cast_warpgroup_src_layout_to_flat_uses_vec2_intrinsic(A_dtype, B_dtype):
-    """Regression: GEMM-epilogue cast pattern must emit the packed vec2 cuda intrinsic.
+    """Regression: GEMM-epilogue cast pattern must emit the packed vec2 MACA intrinsic.
 
     Pattern: both sides have ``wg_local_layout`` (per-thread 1xK row). dst is
     allocated per-chunk to keep both operands wg-distributed — the dispatch
@@ -969,7 +981,7 @@ def test_cast_warpgroup_src_layout_to_flat_uses_vec2_intrinsic(A_dtype, B_dtype)
     """
     from tvm.tirx.layout import wg_local_layout
 
-    N_THREADS, LOCAL_LEN, N_CHUNKS = 128, 8, 4
+    N_THREADS, LOCAL_LEN, N_CHUNKS = 256, 8, 4
     g_shape = (N_THREADS, LOCAL_LEN * N_CHUNKS)
     g_layout = TileLayout(S[g_shape])
 
@@ -993,10 +1005,10 @@ def test_cast_warpgroup_src_layout_to_flat_uses_vec2_intrinsic(A_dtype, B_dtype)
             for i in T.serial(LOCAL_LEN):
                 reg_src[i] = A[tid, no * LOCAL_LEN + i]
             reg_src_view = reg_src.view(
-                N_THREADS, LOCAL_LEN, layout=wg_local_layout(LOCAL_LEN)
+                N_THREADS, LOCAL_LEN, layout=wg_local_layout(LOCAL_LEN, rows=N_THREADS)
             )
             Dreg_chunk_view = Dreg_chunk.view(
-                N_THREADS, LOCAL_LEN, layout=wg_local_layout(LOCAL_LEN)
+                N_THREADS, LOCAL_LEN, layout=wg_local_layout(LOCAL_LEN, rows=N_THREADS)
             )
             Tx.wg.cast(Dreg_chunk_view, reg_src_view)
             for i in T.serial(LOCAL_LEN):
@@ -1010,22 +1022,26 @@ def test_cast_warpgroup_src_layout_to_flat_uses_vec2_intrinsic(A_dtype, B_dtype)
         src = mod.mod.imports[0].inspect_source()
         # The packed vec2 cast intrinsic must be present — guards against
         # falling back to scalar T.cast inside T.vectorized.
-        helper = f"tvm_builtin_cast_{A_dtype}x2_{B_dtype}x2"
-        assert helper in src, f"expected {helper!r} in generated CUDA, fell back to scalar cast"
+        helper = f"tvm_builtin_maca_cast_{A_dtype}x2_{B_dtype}x2"
+        assert helper in src, f"expected {helper!r} in generated MACA, fell back to scalar cast"
 
         def run_and_check():
             dev = tvm.maca(0)
             A = tvm.runtime.tensor(A_ref, dev)
             B = tvm.runtime.tensor(np.zeros(g_shape, dtype=B_dtype), dev)
             mod(A, B)
-            tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
+            if B_dtype == "bfloat16":
+                tvm.testing.assert_allclose(
+                    B.numpy().astype("float32"), B_ref.astype("float32"), atol=1e-2
+                )
+            else:
+                tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
 
         tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("A_dtype,B_dtype", [("float32", "float16"), ("float32", "bfloat16")])
 def test_cast_cta_local_view(A_dtype, B_dtype):
     """T.cast with view+layout in CTA scope (128 threads, register->register)."""
@@ -1069,14 +1085,14 @@ def test_cast_cta_local_view(A_dtype, B_dtype):
             A = tvm.runtime.tensor(A_ref, dev)
             B = tvm.runtime.tensor(np.zeros(g_shape, dtype=B_dtype), dev)
             mod(A, B)
-            tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
+            tvm.testing.assert_allclose(B.numpy().astype("float32"), B_ref.astype("float32"),
+                                        atol=1e-2)
 
         tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("A_dtype,B_dtype", [("float32", "float16"), ("float32", "bfloat16")])
 @pytest.mark.parametrize("slice_start,slice_end", [(0, 4), (2, 6), (4, 8)])
 def test_cast_local_view_sliced(A_dtype, B_dtype, slice_start, slice_end):
@@ -1123,7 +1139,9 @@ def test_cast_local_view_sliced(A_dtype, B_dtype, slice_start, slice_end):
         B = tvm.runtime.tensor(np.zeros(g_shape, dtype=B_dtype), dev)
         mod(A, B)
         tvm.testing.assert_allclose(
-            B.numpy()[:, slice_start:slice_end], B_ref[:, slice_start:slice_end], atol=1e-2
+            B.numpy()[:, slice_start:slice_end].astype("float32"),
+            B_ref[:, slice_start:slice_end].astype("float32"),
+            atol=1e-2
         )
 
     tvm.testing.run_with_gpu_lock(run_and_check)
@@ -1182,14 +1200,14 @@ def test_cast_layout_partition_and_validation():
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("slice_start,slice_end", [(0, 2), (2, 4)])
 def test_cast_mixed_axes_and_subregion(slice_start, slice_end):
     """Test cast with mixed axes and subregion."""
 
-    N_WARPS, LANES = 2, 32
+    N_WARPS, LANES = 2, 64
     LOCAL_LEN = 4
-    full_shape = (8, N_WARPS, 4, LOCAL_LEN)
+    # Each lane owns one (j, k) pair: j = lane_id // 4 and k = lane_id % 4.
+    full_shape = (LANES // 4, N_WARPS, 4, LOCAL_LEN)
     g_layout = TileLayout(S[full_shape])
     cast_layout = TileLayout(S[full_shape : (4 @ laneid, 1 @ warpid, 1 @ laneid, 1)])
 
@@ -1218,8 +1236,8 @@ def test_cast_mixed_axes_and_subregion(slice_start, slice_end):
         reg_src_view = reg_src.view(*full_shape, layout=cast_layout)
         reg_dst_view = reg_dst.view(*full_shape, layout=cast_layout)
         Tx.cta.cast(
-            reg_dst_view[0:8, 0:N_WARPS, 0:4, slice_start:slice_end],
-            reg_src_view[0:8, 0:N_WARPS, 0:4, slice_start:slice_end],
+            reg_dst_view[0 : full_shape[0], 0:N_WARPS, 0:4, slice_start:slice_end],
+            reg_src_view[0 : full_shape[0], 0:N_WARPS, 0:4, slice_start:slice_end],
         )
         j_1, k_1 = lane_id // 4, lane_id % 4
         for i in T.serial(LOCAL_LEN):
@@ -1273,16 +1291,13 @@ def test_cast_joint_decomposition_extents_order():
     assert joint_all_extents == [2, 32], joint_all_extents
 
 
-@MACA_XFAIL
 def test_cast_validate_extent_mismatch_rejected():
-    """Validation rejects when src and dst layouts have same thread positions but different extents."""  # noqa: E501
+    """Validation rejects source and destination layouts with mismatched thread partitions."""
 
     view_shape = (2, 8, 4, 8)
     g_layout = TileLayout(S[view_shape])
-    src_layout = TileLayout(S[view_shape : (2 @ warpid, 4 @ laneid, 1 @ laneid, 1)])
-    dst_layout = TileLayout(
-        S[view_shape : (2 @ warpid, 8 @ laneid, 1 @ laneid, 1)]
-    )  # dim1 extent 8 != 4
+    src_layout = TileLayout(S[view_shape : (2 @ tx, 4 @ tx, 8 @ tx, 1)])
+    dst_layout = TileLayout(S[view_shape : (32 @ tx, 1 @ tx, 8 @ tx, 1)])
 
     @T.prim_func
     def kernel(A_ptr: T.handle, B_ptr: T.handle) -> None:
@@ -1290,37 +1305,29 @@ def test_cast_validate_extent_mismatch_rejected():
         B = T.match_buffer(B_ptr, view_shape, "float16", layout=g_layout)
         T.device_entry()
         cta_id = T.cta_id([1])
-        warp_id = T.warp_id([2])
-        lane_id = T.lane_id([32])
+        tx_var = T.thread_id([64])
         reg_src = T.alloc_buffer((8,), "float32", scope="local")
         reg_dst = T.alloc_buffer((8,), "float16", scope="local")
-        j, k = lane_id // 4, lane_id % 4
+        warp_id, j, k = tx_var // 32, (tx_var % 32) // 4, tx_var % 4
         for i in T.serial(8):
             reg_src[i] = A[warp_id, j, k, i]
         reg_src_view = reg_src.view(*view_shape, layout=src_layout)
         reg_dst_view = reg_dst.view(*view_shape, layout=dst_layout)
         Tx.cta.cast(reg_dst_view, reg_src_view)
-        j_1, k_1 = lane_id // 4, lane_id % 4
+        warp_id_1, j_1, k_1 = tx_var // 32, (tx_var % 32) // 4, tx_var % 4
         for i in T.serial(8):
-            B[warp_id, j_1, k_1, i] = reg_dst[i]
+            B[warp_id_1, j_1, k_1, i] = reg_dst[i]
 
     target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
-        # The mismatched dst also fails the scope-level check (thread axes don't
-        # span the full CTA), which fires first — either rejection is fine.
-        with pytest.raises(
-            Exception,
-            match="tile_local_valid|layout signature mismatch|thread part mismatch"
-            "|do not tile a complete|not the full",
-        ):
+        with pytest.raises(Exception, match="thread part mismatch"):
             tvm.compile(mod, target=target, tir_pipeline="tirx")
 
 
 # -----------------------------------------------------------------------------
-# Dispatch codegen checks (no GPU runtime — explicit target arch).
+# Dispatch codegen checks (no GPU runtime).
 # -----------------------------------------------------------------------------
-@MACA_XFAIL
 def test_unary_exp_f16_shared_scalar_fallback_dispatch():
     """exp f16 + shared cta → smem.py + scalar (T.vectorized) — no exp packed."""
     shape = (64, 32)
@@ -1339,7 +1346,7 @@ def test_unary_exp_f16_shared_scalar_fallback_dispatch():
         Tx.cta.exp(sb, sa)
         Tx.copy(B, sb)
 
-    target = tvm.target.Target({"kind": "maca", "arch": "sm_80"})
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": k})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1352,11 +1359,12 @@ def test_unary_exp_f16_shared_scalar_fallback_dispatch():
     [
         ("float32", "float16", "__float22half2_rn"),
         ("float16", "float32", "__half22float2"),
+        ("bfloat16", "float32", "__bfloat1622float2"),
+        ("float32", "bfloat16", "__float22bfloat162_rn"),
     ],
 )
-@MACA_XFAIL
 def test_cast_vec2_packed_dispatch(src_dtype, dst_dtype, intrinsic):
-    """cast (f32↔f16) + all-local → reg.py + packed pair intrinsic."""
+    """Pair casts over local tiles select the MACA packed intrinsic."""
     shape = (64, 32)
     lay = TileLayout(S[shape])
 
@@ -1373,21 +1381,77 @@ def test_cast_vec2_packed_dispatch(src_dtype, dst_dtype, intrinsic):
         Tx.cast(rb, ra)
         Tx.copy(B[tx], rb)
 
-    target = tvm.target.Target({"kind": "maca", "arch": "sm_80"})
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": k})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
         src = mod.mod.imports[0].inspect_source()
     assert re.search(
-        rf"{re.escape(intrinsic)}|tvm_builtin_cast_{src_dtype}x2_{dst_dtype}x2", src
+        rf"{re.escape(intrinsic)}|tvm_builtin_maca_cast_{src_dtype}x2_{dst_dtype}x2", src
     ), f"expected packed vec2 cast {intrinsic}; got:\n{src[:2000]}"
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.parametrize(
+    "src_dtype,dst_dtype,intrinsic",
+    [
+        ("float32", "float16", "__float22half2_rn"),
+        ("float16", "float32", "__half22float2"),
+        ("bfloat16", "float32", "__bfloat1622float2"),
+        ("float32", "bfloat16", "__float22bfloat162_rn"),
+    ],
+)
+def test_cast_vec2_packed_runtime(src_dtype, dst_dtype, intrinsic):
+    """C500 runtime coverage for all packed pair conversions."""
+    shape = (64, 32)
+    lay = TileLayout(S[shape])
+    values = np.linspace(-2.75, 1.5, num=np.prod(shape), dtype="float32").reshape(shape)
+    a_np = values.astype(src_dtype)
+    expected = a_np.astype(dst_dtype)
+
+    @T.prim_func
+    def k(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, shape, src_dtype, layout=lay)
+        B = T.match_buffer(B_ptr, shape, dst_dtype, layout=lay)
+        T.device_entry()
+        _bx = T.cta_id([1])
+        tx = T.thread_id([64])
+        ra = T.alloc_buffer(shape[1:], src_dtype, scope="local", layout=TileLayout(S[shape[1:]]))
+        rb = T.alloc_buffer(shape[1:], dst_dtype, scope="local", layout=TileLayout(S[shape[1:]]))
+        Tx.copy(ra, A[tx])
+        Tx.cast(rb, ra)
+        Tx.copy(B[tx], rb)
+
+    target = tvm.target.Target("maca")
+    with target:
+        mod = tvm.compile(tvm.IRModule({"main": k}), target=target, tir_pipeline="tirx")
+        src = mod.mod.imports[0].inspect_source()
+    assert f"tvm_builtin_maca_cast_{src_dtype}x2_{dst_dtype}x2" in src
+    assert intrinsic in src
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        a = tvm.runtime.tensor(a_np, dev)
+        b = tvm.runtime.tensor(np.zeros(shape, dtype=dst_dtype), dev)
+        mod(a, b)
+        if dst_dtype == "bfloat16":
+            tvm.testing.assert_allclose(
+                np.asarray(b.numpy(), dtype="float32"),
+                np.asarray(expected, dtype="float32"),
+                atol=1e-2,
+            )
+        else:
+            tvm.testing.assert_allclose(b.numpy(), expected, atol=1e-2)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 # -----------------------------------------------------------------------------
 # Scope-level operand check: a warp/wg/cta reg op needs a scope-level layout
 # (thread axes spanning all the scope's threads), not a thread-local .local().
 # -----------------------------------------------------------------------------
-_SL_ROWS, _SL_COLS = 128, 8
+_SL_ROWS, _SL_COLS = 256, 8
 
 
 def _sl_compile(fn):
@@ -1396,7 +1460,6 @@ def _sl_compile(fn):
         tvm.compile(tvm.IRModule({"main": fn}), target=target, tir_pipeline="tirx")
 
 
-@MACA_XFAIL
 def test_cast_wg_rejects_thread_local_view():
     """Tx.wg.cast on a .local() (thread-axis-stripped) view is rejected."""
 
@@ -1436,7 +1499,6 @@ def test_cast_wg_rejects_thread_local_view():
         _sl_compile(kernel)
 
 
-@MACA_XFAIL
 def test_cast_cta_rejects_thread_local_view():
     """Tx.cta.cast on a .local() view is rejected (cta -> tx)."""
 
@@ -1475,10 +1537,9 @@ def test_cast_cta_rejects_thread_local_view():
         _sl_compile(kernel)
 
 
-@MACA_XFAIL
 def test_cast_wg_rejects_partial_thread_coverage():
-    """A tid_in_wg layout covering only 64 of the 128 wg threads is rejected."""
-    half = 64
+    """A tid_in_wg layout covering only 128 of the 256 wg threads is rejected."""
+    half = 128
 
     @T.prim_func
     def kernel(A_ptr: T.handle, B_ptr: T.handle) -> None:
@@ -1512,11 +1573,10 @@ def test_cast_wg_rejects_partial_thread_coverage():
         for i in T.serial(_SL_COLS):
             B[tid, i] = dst_row[i]
 
-    with pytest.raises(Exception, match="not the full 128"):
+    with pytest.raises(Exception, match="not the full 256"):
         _sl_compile(kernel)
 
 
-@MACA_XFAIL
 def test_cast_wg_accepts_wg_level_layout():
     """Tx.wg.cast on a wg-level (tid_in_wg-distributed) layout compiles."""
 
@@ -1555,7 +1615,6 @@ def test_cast_wg_accepts_wg_level_layout():
     _sl_compile(kernel)
 
 
-@MACA_XFAIL
 def test_cast_thread_accepts_local_view():
     """thread scope is exempt: a thread-axis-free local tile still compiles."""
 

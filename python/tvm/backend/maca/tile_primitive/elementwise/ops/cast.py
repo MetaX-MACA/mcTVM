@@ -15,5 +15,30 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from .copy import *
-from .elementwise import *
+"""MACA cast operation description."""
+
+from __future__ import annotations
+
+from tvm.tirx import BufferRegion, TilePrimitiveCall
+
+from ..vec_emit.cast_vec2 import CAST_VEC2_IMPL
+from . import OpSpec, Plan, SrcSpec
+
+
+def _parse_cast(op: TilePrimitiveCall) -> tuple[Plan | None, str | None]:
+    dst: BufferRegion = op.args[0]
+    src = op.args[1]
+    if not isinstance(src, BufferRegion):
+        return None, "cast src must be a buffer region"
+    return Plan(dst=dst, srcs=[SrcSpec(buf_region=src)]), None
+
+
+def _compute_cast(src_vals, extras, dtype):
+    return src_vals[0]
+
+
+CAST_OPS: dict[str, OpSpec] = {
+    "cast": OpSpec("cast", _parse_cast, _compute_cast, vec_impls=[CAST_VEC2_IMPL])
+}
+
+__all__ = ["CAST_OPS"]

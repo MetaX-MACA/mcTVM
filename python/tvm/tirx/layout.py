@@ -873,7 +873,7 @@ def tmem_mma_operand_layout(
     return layout.canonicalize()
 
 
-def wg_local_layout(cols, rows=128):
+def wg_local_layout(cols, rows=256):
     """Return a warpgroup-local register layout.
 
     The logical ``(rows, cols)`` tile is distributed on ``tid_in_wg`` along rows,

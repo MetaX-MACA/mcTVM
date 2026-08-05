@@ -872,13 +872,14 @@ def test_reg_synthetic_tile_matches_thread_base_plus_outer_delta(case):
     from tvm.tirx.operator.tile_primitive import DispatchContext
 
     if case in ("wg", "wg_slice"):
-        shape = [128, 64]
-        region = [(0, 128), (0, 64) if case == "wg" else (8, 40)]
+        shape = [256, 64]
+        region = [(0, 256), (0, 64) if case == "wg" else (8, 40)]
         r_layout = wg_local_layout(64)
         s_layout = ComposeLayout(3, 3, 3, TileLayout(S[(512,)]))
         elem_bits = 16
-        expected_thread_extents = [128]
+        expected_thread_extents = [256]
     else:
+        pytest.skip("MACA does not support TCGEN05")
         from tvm.tirx.cuda.tile_primitive.tma_utils import mma_shared_layout
         from tvm.tirx.layout import tcgen05_atom_layout
 
@@ -889,7 +890,7 @@ def test_reg_synthetic_tile_matches_thread_base_plus_outer_delta(case):
         elem_bits = 32
         expected_thread_extents = [4, 8, 4]
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         r_p, s_p, s_seps, r_perm = align_layouts_raw(
             r_layout.slice(shape, region), s_layout.slice(shape, region), region
@@ -900,7 +901,16 @@ def test_reg_synthetic_tile_matches_thread_base_plus_outer_delta(case):
     vec_len = _choose_vec_len(elem_bits, atoms, r_p, s_p, max_vec_len)
     outer = _split_atoms_for_vec(atoms, vec_len)
     placeholders = _make_thread_placeholders(r_p)
-    sctx = DispatchContext(target, ExecScope("warpgroup"), {}, {}, scope_kind="warpgroup")
+    # The synthetic builder is shared with CUDA; provide MACA's full
+    # 256-thread warpgroup range explicitly.
+    sctx = DispatchContext(
+        target,
+        ExecScope("warpgroup"),
+        {},
+        {},
+        intra={"tid_in_wg": [256, 0]},
+        scope_kind="warpgroup",
+    )
     s_apply_layout, thread_coords, apply_shape = _build_s_apply_layout(
         s_layout, r_p, s_p, outer, placeholders, sctx
     )
@@ -926,7 +936,7 @@ def test_reg_synthetic_tile_matches_thread_base_plus_outer_delta(case):
     )
     placeholder = next(iter(placeholders.values()))
     analyzer = Analyzer()
-    for tid in range(128):
+    for tid in range(256):
         value_map = {placeholder: tvm.tirx.IntImm("int32", tid)}
         for f in range(int(apply_shape[-1])):
             ds, _dr = _outer_const_offsets(outer, f)

@@ -86,7 +86,6 @@ def _xfail_packed_f32x2(reason):
 )
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["add", "sub", "mul", "fdiv"])
 @pytest.mark.parametrize("operands_type", ["region_region", "region_const", "const_region"])
 @pytest.mark.parametrize("dtype", ["float16"])
@@ -119,7 +118,7 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
 
         Tx.cta.copy(A_smem[tuple(copy_slice)], A[tuple(copy_slice)])
         Tx.cta.copy(B_smem[tuple(copy_slice)], B[tuple(copy_slice)])
-        T.cuda.cta_sync()
+        T.maca.cta_sync()
         if op_type == "add":
             Tx.cta.add(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)], B_smem[tuple(map_slice_b)])  # noqa: E501
         elif op_type == "sub":
@@ -128,7 +127,7 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
             Tx.cta.mul(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)], B_smem[tuple(map_slice_b)])  # noqa: E501
         elif op_type == "fdiv":
             Tx.cta.fdiv(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)], B_smem[tuple(map_slice_b)])  # noqa: E501
-        T.cuda.cta_sync()
+        T.maca.cta_sync()
         Tx.cta.copy(A[tuple(copy_slice)], A_smem[tuple(copy_slice)])
 
     @T.prim_func
@@ -142,7 +141,7 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
         A_smem = T.alloc_buffer(g_shape, dtype, scope="shared", layout=s_layout)
 
         Tx.cta.copy(A_smem[tuple(copy_slice)], A[tuple(copy_slice)])
-        T.cuda.cta_sync()
+        T.maca.cta_sync()
         if op_type == "add":
             if operands_type == "const_region":
                 Tx.cta.add(A_smem[tuple(map_slice_res)], const, A_smem[tuple(map_slice_a)])
@@ -163,7 +162,7 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
                 Tx.cta.fdiv(A_smem[tuple(map_slice_res)], const, A_smem[tuple(map_slice_a)])
             elif operands_type == "region_const":
                 Tx.cta.fdiv(A_smem[tuple(map_slice_res)], A_smem[tuple(map_slice_a)], const)
-        T.cuda.cta_sync()
+        T.maca.cta_sync()
         Tx.cta.copy(A[tuple(copy_slice)], A_smem[tuple(copy_slice)])
         # fmt: on
 
@@ -248,14 +247,13 @@ def test_binary_non_commutative_const_lhs_rejected(op_type):
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("exec_scope", ["warp", "warpgroup"])
 @pytest.mark.parametrize("op_type", ["add", "mul"])
 def test_binary_op_shared_subcta_scope(exec_scope, op_type):
     """Test binary ops in warp/warpgroup scope with shared memory."""
     dtype = "float16"
     n_warps = 4 if exec_scope == "warpgroup" else 1
-    g_shape = (n_warps * 32, 8)
+    g_shape = (n_warps * 64, 8)
     tx_op = {
         ("warp", "add"): Tx.warp.add,
         ("warp", "mul"): Tx.warp.mul,
@@ -268,22 +266,22 @@ def test_binary_op_shared_subcta_scope(exec_scope, op_type):
         A = T.match_buffer(A_ptr, g_shape, dtype, layout=TileLayout(S[g_shape]))
         B = T.match_buffer(B_ptr, g_shape, dtype, layout=TileLayout(S[g_shape]))
         T.device_entry()
-        warp_id = T.warp_id([(256) // 32])
-        wg_id = T.warpgroup_id([(256) // 128])
+        warp_id = T.warp_id([(256) // 64])
+        wg_id = T.warpgroup_id([(256) // 256])
         _bx = T.cta_id([1])
         _tid = T.thread_id([256])
         A_smem = T.alloc_buffer(g_shape, dtype, scope="shared", layout=TileLayout(S[g_shape]))
         B_smem = T.alloc_buffer(g_shape, dtype, scope="shared", layout=TileLayout(S[g_shape]))
         Tx.cta.copy(A_smem, A)
         Tx.cta.copy(B_smem, B)
-        T.cuda.cta_sync()
+        T.maca.cta_sync()
         if exec_scope == "warp":
-            if warp_id == 5:
+            if warp_id == 2:
                 tx_op(A_smem, A_smem, B_smem)
         elif exec_scope == "warpgroup":
-            if wg_id == 1:
+            if wg_id == 0:
                 tx_op(A_smem, A_smem, B_smem)
-        T.cuda.cta_sync()
+        T.maca.cta_sync()
         Tx.cta.copy(A, A_smem)
 
     target = tvm.target.Target("maca")
@@ -308,16 +306,15 @@ def test_binary_op_shared_subcta_scope(exec_scope, op_type):
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("exec_scope", ["cta", "warpgroup", "warp"])
 @pytest.mark.parametrize("rhs_kind", ["region", "broadcast", "const"])
 @pytest.mark.parametrize("op_type", ["add", "sub", "mul", "fdiv"])
 def test_binary_op_local_subcta_trivial(exec_scope, rhs_kind, op_type):
     dtype = "float16"
     m, n = 4, 8
-    n_threads = 256 if exec_scope == "cta" else (128 if exec_scope == "warpgroup" else 32)
-    # in this test, use warp3/warpgroup1 to test
-    thr_str = 0 if exec_scope == "cta" else (128 if exec_scope == "warpgroup" else 32 * 3)
+    n_threads = 256 if exec_scope == "cta" else (256 if exec_scope == "warpgroup" else 64)
+    # Select warp3 for warp scope and the sole C500 warpgroup otherwise.
+    thr_str = 0 if exec_scope in ("cta", "warpgroup") else 64 * 3
     a_shape = (n_threads, m, n)
     b_shape = (n_threads, m, n if rhs_kind == "region" else 1)
     c_shape = a_shape
@@ -334,8 +331,8 @@ def test_binary_op_local_subcta_trivial(exec_scope, rhs_kind, op_type):
         C = T.match_buffer(C_ptr, c_shape, dtype, layout=TileLayout(S[c_shape]))
 
         T.device_entry()
-        wg_id = T.warpgroup_id([(256) // 128])
-        warp_id = T.warp_id([(256) // 32])
+        wg_id = T.warpgroup_id([(256) // 256])
+        warp_id = T.warp_id([(256) // 64])
         _bx = T.cta_id([1])
         _tid = T.thread_id([256])
         tid_in_scope = tid_in_scope_fn([n_threads])
@@ -359,7 +356,7 @@ def test_binary_op_local_subcta_trivial(exec_scope, rhs_kind, op_type):
             else:
                 tx_op(C_local, A_local, B_local)
         elif exec_scope == "warpgroup":
-            if wg_id == 1:
+            if wg_id == 0:
                 if rhs_kind == "const":
                     tx_op(C_local, A_local, const)
                 else:
@@ -370,7 +367,7 @@ def test_binary_op_local_subcta_trivial(exec_scope, rhs_kind, op_type):
                     tx_op(C_local, A_local, const)
                 else:
                     tx_op(C_local, A_local, B_local)
-                # T.cuda.cta_sync()
+                # T.maca.cta_sync()
 
         if thr_str <= _tid and _tid < thr_str + n_threads:
             for i in T.serial(m):
@@ -429,7 +426,6 @@ def test_binary_op_local_subcta_trivial(exec_scope, rhs_kind, op_type):
 )
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("storage_scope", ["shared", "local"])
 @pytest.mark.parametrize("exec_scope", ["cta", "thread"])
 @pytest.mark.parametrize("op_type", ["add", "sub", "mul", "fdiv"])
@@ -456,9 +452,9 @@ def test_binary_op_vectorized(input, storage_scope, exec_scope, op_type, dtype):
             )
             Tx.cta.copy(A_smem, A)
             Tx.cta.copy(B_smem, B)
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             tx_op(A_smem, A_smem, B_smem)
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             Tx.cta.copy(A, A_smem)
         if storage_scope == "local":
             A_local = T.alloc_buffer(
@@ -489,9 +485,9 @@ def test_binary_op_vectorized(input, storage_scope, exec_scope, op_type, dtype):
             )
             Tx.copy(A_smem, A)
             Tx.copy(B_smem, B)
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             tx_op(A_smem, A_smem, B_smem)
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             Tx.copy(A, A_smem)
         elif storage_scope == "local":
             A_local = T.alloc_buffer(
@@ -611,11 +607,10 @@ def test_binary_op_packed_f32x2_auto_dispatch(op_type):
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("op_name", ["add", "sub", "mul"])
 def test_binary_op_warpgroup_wg_local_layout(op_name):
     dtype = "float32"
-    rows, cols = 128, 16
+    rows, cols = 256, 16
     target = tvm.target.Target("maca")
 
     @T.prim_func
@@ -819,7 +814,6 @@ def test_binary_add_f32_sm100_packed_f32x2_dispatch():
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 def test_binary_maximum_reg():
     N = 128
 
@@ -857,7 +851,6 @@ def test_binary_maximum_reg():
     tvm.testing.run_with_gpu_lock(run_and_check)
 
 
-@MACA_XFAIL
 def test_binary_add_f16_scalar_fallback_dispatch():
     """add f16 has no packed VecImpl → reg.py scalar fallback (T.vectorized)."""
     shape = (64, 32)
@@ -877,7 +870,7 @@ def test_binary_add_f16_scalar_fallback_dispatch():
         Tx.add(ra, ra, rb)
         Tx.copy(A[tx], ra)
 
-    target = tvm.target.Target({"kind": "maca", "arch": "sm_80"})
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": k})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
