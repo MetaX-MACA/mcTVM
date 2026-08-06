@@ -83,6 +83,8 @@ def _all_threads_active(sctx: DispatchContext) -> tuple[bool, str | None]:
     required: dict[str, int] = {}
     if sctx.scope_kind in ("warp", "warpgroup", "cta"):
         required["laneid"] = 64
+    if sctx.scope_kind == "warpgroup":
+        required["wid_in_wg"] = 4
     if sctx.scope_kind == "cta":
         tx_iv = sctx.launch_params.get("threadIdx.x")
         if tx_iv is None:
@@ -177,7 +179,7 @@ def _s_side_slice_ok(op_call: TilePrimitiveCall) -> tuple[bool, str | None]:
 def _is_reg_copy(op_call: TilePrimitiveCall, sctx: DispatchContext) -> tuple[bool, str | None]:
     if not sctx.is_target("maca"):
         return False, "non-maca target"
-    if sctx.scope_kind not in ("thread", "warp", "cta"):
+    if sctx.scope_kind not in ("thread", "warp", "warpgroup", "cta"):
         return False, f"unsupported exec_scope {sctx.scope_kind}"
     for check in (
         lambda: _all_threads_active(sctx),

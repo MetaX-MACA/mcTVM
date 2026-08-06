@@ -445,11 +445,22 @@ ffi::Array<PrimExpr> ResolveMACA(ScopeBinding binding,
       return {ana->Simplify(FloorMod(GetLinearThreadIndex(params), 64))};
     }
     case ScopeBinding::kKernelCluster:
+      LOG(WARNING) << "kKernelCluster not supported in MACA";
+      break;
     case ScopeBinding::kClusterCta:
+      LOG(WARNING) << "kClusterCta not supported in MACA";
+      break;
     case ScopeBinding::kCtaWarpgroup:
+      TVM_FFI_ICHECK_EQ(out_dim, 1) << "ValueError: cta->warpgroup must be 1D";
+      return {ana->Simplify(FloorDiv(GetThread("warp_id_in_cta", params).first, 4))};
     case ScopeBinding::kWarpgroupWarp:
+      TVM_FFI_ICHECK_EQ(out_dim, 1) << "ValueError: warpgroup->warp must be 1D";
+      return {ana->Simplify(FloorMod(GetThread("warp_id_in_cta", params).first, 4))};
     case ScopeBinding::kWarpgroupThread:
+      TVM_FFI_ICHECK_EQ(out_dim, 1) << "ValueError: warpgroup->thread must be 1D";
+      return {ana->Simplify(FloorMod(GetLinearThreadIndex(params), 256))};
     case ScopeBinding::kClusterCtaPair:
+      LOG(WARNING) << "kClusterCtaPair not supported in MACA";
       break;
   }
   LOG(FATAL) << "Internal Error: unknown ScopeBinding " << static_cast<int>(binding);

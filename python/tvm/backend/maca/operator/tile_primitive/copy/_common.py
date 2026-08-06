@@ -54,6 +54,7 @@ def _alignment_ok(vec_len: int, terms) -> bool:
 # scope_kind → name of the scope_id that decomposes the scope into per-thread.
 _TID_AXIS_FOR_SCOPE = {
     "warp": "laneid",
+    "warpgroup": "tid_in_wg",
     "cta": "tx",
 }
 
