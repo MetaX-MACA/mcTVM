@@ -176,38 +176,48 @@ TVM_REGISTER_OP("tirx.round")
 TVM_REGISTER_OP("tirx.nearbyint")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.exp").set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic",
-                                                     DispatchPureExtern<MACAFastMath>);
+TVM_REGISTER_OP("tirx.exp")
+    .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
+    .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
 TVM_REGISTER_OP("tirx.exp2")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
 TVM_REGISTER_OP("tirx.exp10")
-    .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>);
+    .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
+    .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
 TVM_REGISTER_OP("tirx.erf").set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic",
                                                      DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.log").set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic",
-                                                     DispatchPureExtern<MACAFastMath>);
+TVM_REGISTER_OP("tirx.log")
+    .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
+    .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
 TVM_REGISTER_OP("tirx.log2")
-    .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>);
+    .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
+    .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
 TVM_REGISTER_OP("tirx.log10")
-    .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>);
+    .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
+    .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.tan").set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic",
-                                                     DispatchPureExtern<MACAFastMathTan>);
+TVM_REGISTER_OP("tirx.tan")
+    // Now the fast math version of tan and the default version of tan are same.
+    .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic",
+                               DispatchPureExtern<MACAFastMathTan>)
+    .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.cos").set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic",
-                                                     DispatchPureExtern<MACAFastMath>);
+TVM_REGISTER_OP("tirx.cos")
+    .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
+    .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
 TVM_REGISTER_OP("tirx.cosh")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.sin").set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic",
-                                                     DispatchPureExtern<MACAFastMath>);
+TVM_REGISTER_OP("tirx.sin")
+    .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
+    .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
 TVM_REGISTER_OP("tirx.sinh")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
@@ -216,13 +226,15 @@ TVM_REGISTER_OP("tirx.atan")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
 TVM_REGISTER_OP("tirx.tanh")
+    .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
 TVM_REGISTER_OP("tirx.sqrt")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.pow").set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic",
-                                                     DispatchPureExtern<MACAMath>);
+TVM_REGISTER_OP("tirx.pow")
+    .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
+    .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
 TVM_REGISTER_OP("tirx.popcount")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAPopcount>);

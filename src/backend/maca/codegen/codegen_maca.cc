@@ -36,7 +36,7 @@
 #include <vector>
 
 #include "../../../tirx/transform/ir_utils.h"
-#include "../../cuda/codegen/literal/maca_half_t.h"
+#include "../../maca/codegen/literal/maca_half_t.h"
 
 namespace tvm {
 namespace codegen {
@@ -477,6 +477,8 @@ std::string CodeGenMACA::Finish() {
   decl_stream << "  #define int64_t long long\n";
   decl_stream << "  #define uint64_t unsigned long long\n";
   decl_stream << "#endif\n";
+
+  decl_stream << "#define __tanhf tanhf\n";
 
   decl_stream << "\n#ifndef b16vectype\n";
   decl_stream << "  typedef __NATIVE_VECTOR__(1, short) b16vectype;\n";
