@@ -16,6 +16,7 @@
 # under the License.
 
 from .fallback import *
+from .gmem_smem import *
 from .reg import *
 from .utils import (
     _is_valid_copy,

@@ -815,13 +815,6 @@ bool CheckDataTypeSupport(const Target& target, const std::string& support_func_
   return has_native_support;
 }
 
-std::string FP8SupportFuncName(const Target& target) {
-  if (target->kind->name == "maca") {
-    return "tvm.support.mxcc.supports_fp8";
-  }
-  return "tvm.support.nvcc.supports_fp8";
-}
-
 Pass BF16ComputeLegalize() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
     auto opt_target = f->GetAttr<Target>(tvm::attr::kTarget);
@@ -862,7 +855,8 @@ Pass FP8ComputeLegalize(ffi::String promote_dtype) {
   auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
     auto opt_target = f->GetAttr<Target>(tvm::attr::kTarget);
     if (opt_target.has_value() &&
-        CheckDataTypeSupport(opt_target.value(), FP8SupportFuncName(opt_target.value()))) {
+            CheckDataTypeSupport(opt_target.value(), "tvm.support.nvcc.supports_fp8") ||
+        CheckDataTypeSupport(opt_target.value(), "tvm.support.mxcc.supports_fp8")) {
       return f;
     }
     return FP8ComputeLegalizer(PrimType(ffi::StringToDLDataType(promote_dtype))).Legalize(f);
@@ -879,7 +873,8 @@ Pass FP8StorageLegalize() {
   auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
     auto opt_target = f->GetAttr<Target>(tvm::attr::kTarget);
     if (opt_target.has_value() &&
-        CheckDataTypeSupport(opt_target.value(), FP8SupportFuncName(opt_target.value()))) {
+            CheckDataTypeSupport(opt_target.value(), "tvm.support.nvcc.supports_fp8") ||
+        CheckDataTypeSupport(opt_target.value(), "tvm.support.mxcc.supports_fp8")) {
       return f;
     }
     return FP8StorageLegalizer().Legalize(f);

@@ -33,8 +33,7 @@ from tvm.tirx.layout import ComposeLayout, S, SwizzleLayout, TileLayout
 
 MACA_XFAIL = pytest.mark.xfail(
     reason=(
-        "TODO(maca): [tile-primitive-copy-gmem-smem] support global/shared copy "
-        "dispatch and swizzled shared addressing"
+        "TODO(maca): [tile-primitive-copy-gmem-smem] warpgroup execution scope is not supported"
     ),
     strict=False,
 )
@@ -52,10 +51,10 @@ def _build_kernel(scope, n_threads, shape, dtype):
             B = T.match_buffer(B_ptr, shape, dtype)
             T.device_entry()
             T.cta_id([1])
-            T.warpgroup_id([n_threads // 128])
+            T.warpgroup_id([n_threads // 256])
             T.warp_id_in_wg([4])
-            T.lane_id([32])
-            T.thread_id_in_wg([128])
+            T.lane_id([64])
+            T.thread_id_in_wg([256])
             T.thread_id([n_threads])
             A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
             Tx.wg.copy(A_smem[full_slices], A[full_slices])
@@ -70,12 +69,12 @@ def _build_kernel(scope, n_threads, shape, dtype):
             B = T.match_buffer(B_ptr, shape, dtype)
             T.device_entry()
             T.cta_id([1])
-            T.lane_id([32])
+            T.lane_id([64])
             T.thread_id([n_threads])
             A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
-            Tx.warp.copy(A_smem[full_slices], A[full_slices])
+            Tx.warp.copy(A_smem[full_slices], A[full_slices], dispatch="gmem_smem")
             T.maca.cta_sync()
-            Tx.warp.copy(B[full_slices], A_smem[full_slices])
+            Tx.warp.copy(B[full_slices], A_smem[full_slices], dispatch="gmem_smem")
 
     elif scope == "cta":
 
@@ -85,13 +84,13 @@ def _build_kernel(scope, n_threads, shape, dtype):
             B = T.match_buffer(B_ptr, shape, dtype)
             T.device_entry()
             T.cta_id([1])
-            T.warp_id([n_threads // 32])
-            T.lane_id([32])
+            T.warp_id([n_threads // 64])
+            T.lane_id([64])
             T.thread_id([n_threads])
             A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
-            Tx.cta.copy(A_smem[full_slices], A[full_slices])
+            Tx.cta.copy(A_smem[full_slices], A[full_slices], dispatch="gmem_smem")
             T.maca.cta_sync()
-            Tx.cta.copy(B[full_slices], A_smem[full_slices])
+            Tx.cta.copy(B[full_slices], A_smem[full_slices], dispatch="gmem_smem")
     else:
         raise ValueError(f"unsupported scope {scope!r}")
 
@@ -101,11 +100,11 @@ def _build_kernel(scope, n_threads, shape, dtype):
 # (scope, n_threads, shape) — shape chosen so total / T / vec_len > 1 with at
 # least one outer round, and total is divisible by T*vec_len.
 TASKS = [
-    ("warp", 32, (32, 32)),  # 1024 total, T=32, vec 8 → outer 4
-    ("warp", 32, (32, 64)),  # 2048 total, outer 8
-    ("warpgroup", 128, (128, 32)),  # 4096, outer 4
-    ("warpgroup", 128, (128, 64)),  # 8192, outer 8
-    ("warpgroup", 128, (256, 16)),  # 4096, outer 4
+    ("warp", 64, (32, 32)),  # 1024 total, T=64, vec 8 → outer 2
+    ("warp", 64, (32, 64)),  # 2048 total, outer 4
+    ("warpgroup", 256, (128, 32)),  # 4096, outer 2 (4 MACA warps)
+    ("warpgroup", 256, (128, 64)),  # 8192, outer 4
+    ("warpgroup", 256, (256, 16)),  # 4096, outer 2
     ("cta", 256, (256, 32)),  # 8192, T=256, vec 8 → outer 4
     ("cta", 256, (512, 16)),  # 8192, outer 4
 ]
@@ -113,10 +112,16 @@ TASKS = [
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize(
     "scope,n_threads,shape",
-    [pytest.param(*t, id=f"{t[0]}-{t[1]}-{'x'.join(map(str, t[2]))}") for t in TASKS],
+    [
+        pytest.param(
+            *t,
+            id=f"{t[0]}-{t[1]}-{'x'.join(map(str, t[2]))}",
+            marks=MACA_XFAIL if t[0] == "warpgroup" else (),
+        )
+        for t in TASKS
+    ],
 )
 @pytest.mark.parametrize("dtype", ["float16", "float32", "uint8"])
 def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
@@ -155,7 +160,7 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
             (128, 32),
             (128, 32),
             ((0, 128), (0, 32)),
-            32,
+            64,
             TileLayout(S[128, 32]),
             TileLayout(S[128, 32]),
             TileLayout(S[128, 32]),
@@ -165,7 +170,7 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
             (64, 64),
             (32, 32),
             ((32, 64), (32, 64)),
-            32,
+            64,
             TileLayout(S[64, 64]),
             TileLayout(S[64, 64]),
             TileLayout(S[32, 32]),
@@ -175,7 +180,7 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
             (4, 32, 32),
             (32, 32),
             ((0, 1), (0, 32), (0, 32)),
-            32,
+            64,
             TileLayout(S[4, 32, 32]),
             TileLayout(S[4, 32, 32]),
             TileLayout(S[32, 32]),
@@ -185,7 +190,7 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
             (16, 16),
             (8, 8),
             ((0, 8), (0, 8)),
-            32,
+            64,
             TileLayout(S[16, 16]),
             TileLayout(S[16, 16]),
             TileLayout(S[8, 8]),
@@ -195,7 +200,7 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
             (96, 512),
             (32, 256),
             ((16, 48), (256, 512)),
-            32,
+            64,
             TileLayout(S[96, 512]),
             TileLayout(S[96, 512]),
             ComposeLayout(SwizzleLayout(3, 3, 3), TileLayout(S[8, 64]))
@@ -206,9 +211,16 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
 )
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize(
-    "dtype", ["int8", "float8_e4m3fn", "float8_e5m2", "float16", "bfloat16", "float32"]
+    "dtype",
+    [
+        "int8",
+        "float8_e4m3fn",
+        "float8_e5m2",
+        "float16",
+        "bfloat16",
+        "float32",
+    ],
 )
 @pytest.mark.parametrize("scope", ["cta", "thread"])
 def test_copy_g2s_s2g(task, dtype, scope):
@@ -232,9 +244,9 @@ def test_copy_g2s_s2g(task, dtype, scope):
         A_smem = T.alloc_buffer(s_shape, dtype, scope="shared", layout=layoutS)
         # `scope` is parametrized at runtime; select the scope namespace
         # dynamically (T.cta / T.thread) instead of a literal prefix.
-        getattr(Tx, scope).copy(A_smem[r_smem], A[r_gmem])
+        getattr(Tx, scope).copy(A_smem[r_smem], A[r_gmem], dispatch="gmem_smem")
         T.maca.cta_sync()
-        getattr(Tx, scope).copy(B[r_gmem], A_smem[r_smem])
+        getattr(Tx, scope).copy(B[r_gmem], A_smem[r_smem], dispatch="gmem_smem")
 
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
     target = tvm.target.Target("maca")
@@ -254,7 +266,10 @@ def test_copy_g2s_s2g(task, dtype, scope):
             A = tvm.runtime.tensor(A_np, dev)
             B = tvm.runtime.tensor(B_np, dev)
             mod(A, B)
-            np.testing.assert_allclose(B_ref, B.numpy())
+            # NumPy's float8/bfloat16 dtypes do not promote with the scalar
+            # literals used by ``assert_allclose``. Compare their numerical
+            # values in float32 instead.
+            np.testing.assert_allclose(B_ref.astype("float32"), B.numpy().astype("float32"))
 
         tvm.testing.run_with_gpu_lock(run_and_check)
 
@@ -271,7 +286,7 @@ def test_copy_g2s_s2g(task, dtype, scope):
 def _align(
     g_layout, g_shape, s_layout, s_shape, elem_bits, thread_cnt, g_region=None, s_region=None
 ):
-    from tvm.tirx.cuda.operator.tile_primitive.copy._common import align_layouts_gs
+    from tvm.backend.maca.operator.tile_primitive.copy._common import align_layouts_gs
 
     target = tvm.target.Target("maca")
     if g_region is None:
@@ -359,10 +374,11 @@ def test_unaligned_region_offset_must_clamp_vec_len():
 
 @MACA_XFAIL
 def test_swizzled_smem_emit_must_be_swizzle_aware():
-    """Codegen-level: emitted S address should go through the SwizzleLayout's
-    Apply so the XOR scrambling is honored. Currently emit uses
-    ``s_buf.ptr_to([0,..,0]) + linear_offset`` which only matches a
-    non-swizzled storage layout."""
+    """Codegen-level regression for swizzled shared-memory addressing.
+
+    The case remains xfailed until MACA supports the warpgroup execution
+    scope used by this CUDA-derived swizzle pattern.
+    """
     import tvm
     from tvm.script import tirx as T
     from tvm.tirx.layout import ComposeLayout, S, SwizzleLayout, TileLayout
@@ -377,23 +393,23 @@ def test_swizzled_smem_emit_must_be_swizzle_aware():
         T.cta_id([1])
         T.warpgroup_id([1])
         T.warp_id_in_wg([4])
-        T.lane_id([32])
-        T.thread_id_in_wg([128])
-        T.thread_id([128])
+        T.lane_id([64])
+        T.thread_id_in_wg([256])
+        T.thread_id([256])
         A_smem = T.alloc_buffer(shape, "float16", scope="shared", layout=s_layout)
         Tx.wg.copy(A_smem[0:128, 0:32], A[0:128, 0:32])
 
-    # NB: pin sm_90 explicitly — the default cuda target falls back to sm_50
-    # when no GPU is detected, which nvcc 13+ rejects. Codegen happens before
-    # nvcc; if the whole tvm.compile pipeline fails, we never see the source.
-    target = tvm.target.Target({"kind": "maca", "arch": "sm_90"})
+    # MACA uses ``mcpu`` rather than CUDA's ``arch`` target option.  Keep the
+    # target construction valid even though this warpgroup case is expected
+    # to remain unsupported on MACA.
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
         compiled = tvm.compile(mod, target=target, tir_pipeline="tirx")
     src = "".join(im.inspect_source() for im in compiled.mod.imports)
 
-    # If emit is swizzle-aware, two ways it shows up in the generated
-    # CUDA:
+    # If emit is swizzle-aware, two ways it shows up in the generated MACA
+    # source:
     #   1. fallback path emits ``swizzle.apply(linear)``, which lowers
     #      to a ``^`` (XOR) somewhere in the S-offset computation
     #      (typically on a separate ``s_off_ptr[0] = ...`` line, not on
@@ -519,26 +535,25 @@ def test_layout_permute_copy_preserves_smem_strides():
 # Fast-path firing test (positive). Pairs with the var_bounds wiring inside
 # ``gmem_smem._emit_gmem_smem``.
 #
-# Setup: warp-scope 32x64 fp16 G2S/S2G with 128b swizzled SMEM. The outer
-# iter stride is ``thread_cnt * vec_len = 32 * 8 = 256``, which puts the
-# binary-split bj's at {5, 6, 7} — well above the swizzle XOR region (so
+# Setup: warp-scope 64x64 fp16 G2S/S2G with 128b swizzled SMEM. The outer
+# iter stride is ``thread_cnt * vec_len = 64 * 8 = 512``, which puts the
+# binary-split bj's above the swizzle XOR region (so
 # Case 1.D, signed_stride = +T). The (C1) analyzer check
 # ``bit_bj(s_off // C) == 0`` needs the placeholder var bounded to
-# laneid ∈ [0, 32); the dispatch passes ``var_bounds`` so it can discharge,
+# laneid ∈ [0, 64); the dispatch passes ``var_bounds`` so it can discharge,
 # recognizer accepts, and emit lowers to the
 # ``base_off + sum_j bit_j(f) · signed_strides[j]`` precomputed form.
 # ----------------------------------------------------------------------------
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 def test_gmem_smem_swizzle_fast_path_fires_with_var_bounds():
-    """Warp-scope 32x64 fp16 G2S/S2G with 128b swizzled SMEM. Fast path
+    """Warp-scope 64x64 fp16 G2S/S2G with 128b swizzled SMEM. Fast path
     must fire: a 3-slot ``v_<n>[]`` signed_strides buffer + bit-select adds
     per outer iter, no per-iter ``swizzle.apply`` XOR splice in the hot path."""
     import re
 
     swizzle = SwizzleLayout(3, 3, 3)
-    shape = (32, 64)
+    shape = (64, 64)
     g_layout = TileLayout(S[shape])
     s_layout = ComposeLayout(swizzle, TileLayout(S[shape]))
 
@@ -548,12 +563,12 @@ def test_gmem_smem_swizzle_fast_path_fires_with_var_bounds():
         B = T.match_buffer(B_ptr, shape, "float16", layout=g_layout)
         T.device_entry()
         T.cta_id([1])
-        T.lane_id([32])
-        T.thread_id([32])
+        T.lane_id([64])
+        T.thread_id([64])
         smem = T.alloc_buffer(shape, "float16", scope="shared", layout=s_layout)
-        Tx.warp.copy(smem, A[:, :])
+        Tx.warp.copy(smem, A[:, :], dispatch="gmem_smem")
         T.maca.cta_sync()
-        Tx.warp.copy(B[:, :], smem)
+        Tx.warp.copy(B[:, :], smem, dispatch="gmem_smem")
 
     target = tvm.target.Target("maca")
     with target:
@@ -562,7 +577,11 @@ def test_gmem_smem_swizzle_fast_path_fires_with_var_bounds():
         src = ex.mod.imports[0].inspect_source()
 
     bitsel = re.findall(r"& 1\) \* v_\d+\[", src)
-    v_decls = re.findall(r"alignas\(\d+\) int v_\d+\[(\d+)\]", src)
+    v_decls = re.findall(
+        r"(?:alignas\(\d+\)|__attribute__\(\(aligned\(\d+\)\)\)) "
+        r"int v_\d+\[(\d+)\]",
+        src,
+    )
     assert bitsel, (
         "expected fast-path ``(bit & 1) * v_<n>[i]`` adds; if missing, "
         "var_bounds wiring may have regressed"
@@ -573,7 +592,7 @@ def test_gmem_smem_swizzle_fast_path_fires_with_var_bounds():
     )
 
     # Round-trip correctness.
-    A_np = np.arange(32 * 64, dtype="float16").reshape(shape)
+    A_np = np.arange(np.prod(shape), dtype="float16").reshape(shape)
     B_np = np.zeros(shape, dtype="float16")
 
     def run_and_check():
