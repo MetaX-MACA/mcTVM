@@ -42,19 +42,8 @@ def vector_add(A: T.Buffer((16), "float32"), B: T.Buffer((32), "float32")) -> No
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [ptx-ldg32] support PTX ldg32-style load injection or an equivalent MACA pass"
-    ),
-    strict=False,
-)
 def test_inject_ptx_intrin():
     f = vector_add
-    arch = tvm.support.nvcc.get_target_compute_version()
-    major, _ = tvm.support.nvcc.parse_compute_version(arch)
-    if major < 8:
-        # Require at least SM80
-        return
     with tvm.transform.PassContext(config={"tirx.ptx.ldg32": True}):
         mod = tvm.compile(f, target="maca")
     A_np = np.random.rand(16).astype("float32")
