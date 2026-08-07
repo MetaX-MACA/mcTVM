@@ -1264,6 +1264,16 @@ void CodeGenMACA::VisitStmt_(const AttrStmtNode* op) {
     TVM_FFI_ICHECK(inner);
     this->VisitStmt(inner->body);
     return;
+  } else if (op->attr_key == "disable_unroll") {
+    PrintIndent();
+    stream << "#pragma unroll 1\n";
+    this->VisitStmt(op->body);
+    return;
+  } else if (op->attr_key == "pragma_unroll") {
+    PrintIndent();
+    stream << "#pragma unroll\n";
+    this->VisitStmt(op->body);
+    return;
   }
   CodeGenC::VisitStmt_(op);
 }
