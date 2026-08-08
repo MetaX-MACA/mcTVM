@@ -20,6 +20,7 @@ from __future__ import absolute_import as _abs
 
 import os
 import re
+import shutil
 import subprocess
 
 import tvm_ffi
@@ -72,6 +73,16 @@ def _target_maca_arch(target):
     return _normalize_maca_arch(mcpu)
 
 
+def _find_mxcc():
+    """Find mxcc using the configured MACA SDK before PATH."""
+    if maca_path := os.environ.get("MACA_PATH"):
+        return os.path.join(maca_path, "mxgpu_llvm", "bin", "mxcc")
+    if mxcc_path := shutil.which("mxcc"):
+        return mxcc_path
+    default_mxcc = "/opt/maca/mxgpu_llvm/bin/mxcc"
+    return default_mxcc if os.path.isfile(default_mxcc) else "mxcc"
+
+
 def compile_maca(code, target_format="mcbin", arch=None, options=None, path_target=None):  # pylint: disable=unused-argument
     """Compile maca code with MXCC from env.
 
@@ -120,7 +131,7 @@ def compile_maca(code, target_format="mcbin", arch=None, options=None, path_targ
         out_file.write(code)
 
     file_target = path_target if path_target else temp_target
-    cmd = ["mxcc"]
+    cmd = [_find_mxcc()]
     if target_format == "mcbin":
         cmd.append("-device-obj")
     elif target_format == "mcir":
@@ -230,12 +241,12 @@ def have_bf16(compute_version):  # pylint: disable=unused-argument
     return True
 
 
-def get_maca_arch(maca_path="/opt/maca"):
+def get_maca_arch(maca_path=None):
     """Utility function to get the MetaX GPU architecture
 
     Parameters
     ----------
-    maca_path : str
+    maca_path : str, optional
         The path to maca installation directory
 
     Returns

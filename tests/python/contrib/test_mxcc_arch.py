@@ -57,9 +57,10 @@ class TestMacaArchDetection(unittest.TestCase):
                 with patch(
                     "subprocess.check_output",
                     return_value=b"Name: XCORE1800\n",
-                ):
+                ) as check_output:
                     arch = mxcc.get_maca_arch()
                     self.assertEqual(arch, "xcore1800")
+                    check_output.assert_called_once_with(["/custom/maca/bin/macainfo"])
 
     def test_oserror_is_caught(self):
         """Test OSError (e.g. missing binary) is caught gracefully"""
@@ -130,6 +131,33 @@ class TestMacaArchDetection(unittest.TestCase):
                 )
 
         self.assertIn("-offload-arch=xcore2000", seen["cmd"])
+
+    def test_compile_maca_uses_maca_path(self):
+        """Test compile_maca finds mxcc under the configured MACA SDK"""
+        seen = {}
+
+        class FakePopen:
+            def __init__(self, cmd, stdout=None, stderr=None):
+                seen["cmd"] = list(cmd)
+                out = cmd[cmd.index("-o") + 1]
+                with open(out, "wb") as f:
+                    f.write(b"fake-mcbin")
+                self.returncode = 0
+
+            def communicate(self):
+                return (b"", None)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path_target = os.path.join(temp_dir, "tvm_fake_maca.mcbin")
+            with patch.dict(os.environ, {"MACA_PATH": "/custom/maca"}, clear=True):
+                with patch("subprocess.Popen", FakePopen):
+                    mxcc.compile_maca(
+                        "__global__ void tvm_kernel() {}",
+                        path_target=path_target,
+                    )
+
+        expected_mxcc = "/custom/maca/mxgpu_llvm/bin/mxcc"
+        self.assertEqual(seen["cmd"][0], expected_mxcc)
 
     def test_callback_maca_compile_uses_target_mcpu(self):
         """Test tvm_callback_maca_compile forwards target mcpu to mxcc"""
