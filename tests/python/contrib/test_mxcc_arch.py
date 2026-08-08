@@ -23,7 +23,7 @@ import unittest
 from unittest.mock import patch
 
 import tvm
-from tvm.support import mxcc
+from tvm.contrib import mxcc
 
 
 class TestMacaArchDetection(unittest.TestCase):

@@ -20,10 +20,10 @@
 import math
 
 import pytest
+import tvm_ffi
 
 import tvm
 import tvm.testing
-import tvm_ffi
 from tvm.ir.utils import derived_object
 from tvm.s_tir.meta_schedule.space_generator import (
     PySpaceGenerator,

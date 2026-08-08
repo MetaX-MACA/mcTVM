@@ -230,7 +230,6 @@ def have_bf16(compute_version):  # pylint: disable=unused-argument
     return True
 
 
-@tvm_ffi.register_global_func("tvm_callback_maca_get_arch")
 def get_maca_arch(maca_path="/opt/maca"):
     """Utility function to get the MetaX GPU architecture
 
@@ -272,6 +271,9 @@ def get_maca_arch(maca_path="/opt/maca"):
                     using default {gpu_arch}."
         )
         return gpu_arch
+
+
+tvm_ffi.register_global_func("tvm_callback_maca_get_arch", get_maca_arch)
 
 
 def find_maca_path():
