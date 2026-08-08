@@ -22,6 +22,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import tvm_ffi
+
 import tvm
 from tvm.contrib import mxcc
 
@@ -149,6 +151,24 @@ class TestMacaArchDetection(unittest.TestCase):
             mxcc.tvm_callback_maca_compile("__global__ void tvm_kernel() {}", target)
 
         self.assertIn("-offload-arch=xcore1800", seen["cmd"])
+
+    def test_compile_failure_restores_target_scope(self):
+        """Test a failed MACA compile callback does not leak its target scope"""
+        callback_name = "tvm_callback_maca_compile"
+        original_callback = tvm_ffi.get_global_func(callback_name)
+
+        def failing_compile(code, target):  # pylint: disable=unused-argument
+            raise RuntimeError("intentional MACA compile failure")
+
+        tvm_ffi.register_global_func(callback_name, failing_compile, override=True)
+        try:
+            target = tvm.target.Target({"kind": "maca", "mcpu": "xcore1000"})
+            build_maca = tvm_ffi.get_global_func("target.build.maca")
+            with self.assertRaisesRegex(RuntimeError, "intentional MACA compile failure"):
+                build_maca(tvm.IRModule(), target)
+            self.assertIsNone(tvm.target.Target.current(allow_none=True))
+        finally:
+            tvm_ffi.register_global_func(callback_name, original_callback, override=True)
 
     def test_target_compute_version_parses_maca_arch(self):
         """Test xcore architecture is converted to MACA compute version"""

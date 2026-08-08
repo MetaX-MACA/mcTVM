@@ -186,18 +186,17 @@ ffi::Module BuildMACA(IRModule mod, Target target) {
   }
   std::string fmt = "mcir";
   std::string mcir;
-  auto f_enter = ffi::Function::GetGlobal("target.TargetEnterScope");
-  (*f_enter)(target);
-  if (auto f = ffi::Function::GetGlobal("tvm_callback_maca_compile")) {
-    mcir = (*f)(code, target).cast<std::string>();
-    // Dirty matching to check mcir vs mcbin.
-    // TODO(tqchen) more reliable checks
-    if (mcir[0] != '/') fmt = "mcbin";
-  } else {
-    mcir = MCRTCCompile(code, cg.need_include_path());
+  {
+    With<Target> target_scope(target);
+    if (auto f = ffi::Function::GetGlobal("tvm_callback_maca_compile")) {
+      mcir = (*f)(code, target).cast<std::string>();
+      // Dirty matching to check mcir vs mcbin.
+      // TODO(tqchen) more reliable checks
+      if (mcir[0] != '/') fmt = "mcbin";
+    } else {
+      mcir = MCRTCCompile(code, cg.need_include_path());
+    }
   }
-  auto f_exit = ffi::Function::GetGlobal("target.TargetExitScope");
-  (*f_exit)(target);
   return ::tvm::target::MACAModuleCreateWithFallback(ffi::Bytes(std::move(mcir)), ffi::String(fmt),
                                                      ExtractFuncInfo(mod), ffi::String(code));
 }
