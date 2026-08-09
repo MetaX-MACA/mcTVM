@@ -18,11 +18,14 @@
 # ruff: noqa: E501
 
 
+import numpy as np
+
 import tvm
 import tvm.script
 import tvm.testing
 from tvm.ir.base import assert_structural_equal
 from tvm.relax.backend import DispatchSampling
+from tvm.relax.backend.gpu_generic import gpu_multinomial_from_uniform
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tirx as T
@@ -35,6 +38,20 @@ class MultiFromUniformModule:
         prob: R.Tensor((3, 5), "float32"),
         uniform_sample: R.Tensor((6, 1), "float32"),
         sample_indices: R.Tensor((6, 1), "int64"),
+    ):
+        with R.dataflow():
+            gv = R.multinomial_from_uniform(prob, uniform_sample, sample_indices, dtype="int64")
+            R.output(gv)
+        return gv
+
+
+@I.ir_module(s_tir=True)
+class MultiFromUniformInt32IndicesModule:
+    @R.function
+    def foo(
+        prob: R.Tensor((3, 5), "float32"),
+        uniform_sample: R.Tensor((6, 1), "float32"),
+        sample_indices: R.Tensor((6, 1), "int32"),
     ):
         with R.dataflow():
             gv = R.multinomial_from_uniform(prob, uniform_sample, sample_indices, dtype="int64")
@@ -197,6 +214,54 @@ def test_dispatch_multinomial_from_uniform_gpu():
         mod = DispatchSampling()(MultiFromUniformModule)
 
     assert_structural_equal(mod, Expected)
+
+
+def test_dispatch_multinomial_from_uniform_maca_int32_indices():
+    with tvm.target.Target("maca"):
+        mod = DispatchSampling()(MultiFromUniformInt32IndicesModule)
+
+    kernel = mod["parallel_sampling_from_prob"]
+    assert kernel.buffer_map[kernel.params[2]].dtype == "int32"
+
+    row_idx_bindings = []
+
+    def collect_row_idx_binding(node):
+        if isinstance(node, tvm.tirx.Bind) and node.var.name == "row_idx":
+            row_idx_bindings.append(node)
+
+    tvm.tirx.stmt_functor.post_order_visit(kernel.body, collect_row_idx_binding)
+    assert len(row_idx_bindings) == 1
+    assert isinstance(row_idx_bindings[0].value, tvm.tirx.Cast)
+    assert row_idx_bindings[0].value.ty == tvm.ir.PrimType("int64")
+
+
+@tvm.testing.requires_gpu
+@tvm.testing.requires_maca
+def test_maca_multinomial_from_uniform_int32_indices():
+    with tvm.target.Target("maca"):
+        kernel = gpu_multinomial_from_uniform(sample_indices_dtype="int32")
+    func = tvm.compile(kernel, target="maca")
+
+    prob = np.array(
+        [
+            [0.10, 0.20, 0.30, 0.15, 0.25],
+            [0.00, 0.50, 0.00, 0.50, 0.00],
+            [0.40, 0.10, 0.10, 0.10, 0.30],
+        ],
+        dtype="float32",
+    )
+    uniform_sample = np.array([[0.05], [0.49], [0.55], [0.95], [0.70], [0.75]], dtype="float32")
+    sample_indices = np.array([[0], [1], [2], [2], [0], [1]], dtype="int32")
+    expected = np.array([[0], [1], [2], [4], [3], [3]], dtype="int64")
+
+    dev = tvm.maca(0)
+    prob_dev = tvm.runtime.tensor(prob, dev)
+    uniform_sample_dev = tvm.runtime.tensor(uniform_sample, dev)
+    sample_indices_dev = tvm.runtime.tensor(sample_indices, dev)
+    output_dev = tvm.runtime.empty(expected.shape, "int64", dev)
+    func(prob_dev, uniform_sample_dev, sample_indices_dev, output_dev)
+
+    tvm.testing.assert_allclose(output_dev.numpy(), expected)
 
 
 if __name__ == "__main__":
