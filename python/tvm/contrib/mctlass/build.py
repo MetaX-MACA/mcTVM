@@ -873,5 +873,5 @@ def finalize_modules(lib, lib_path="compile.so", tmp_dir="./tmp"):
 
     """
     lib_path = os.path.join(tmp_dir, lib_path)
-    lib.export_library(lib_path, workspace_dir=tmp_dir, cc="nvcc")
+    lib.export_library(lib_path, workspace_dir=tmp_dir, cc="mxcc")
     return runtime.load_module(lib_path)
