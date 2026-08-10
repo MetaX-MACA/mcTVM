@@ -28,7 +28,7 @@ import tvm.topi.testing
 from tvm import relax
 from tvm.contrib.cutlass.build import is_shape_valid_for_cutlass_matmul
 from tvm.contrib.pickle_memoize import memoize
-from tvm.relax.backend.cuda.cutlass import partition_for_cutlass
+from tvm.relax.backend.maca.mctlass import partition_for_mctlass as partition_for_cutlass
 from tvm.relax.testing import (
     get_relax_attention_module,
     get_relax_matmul_module,
@@ -85,18 +85,8 @@ class Conv2dx2:
 
 
 pytestmark = [
-    pytest.mark.xfail(
-        not env.build_flag_enabled("USE_CUTLASS"),
-        reason="TODO(maca): [cutlass-offload] support or enable CUTLASS-compatible Relax offload on MACA",
-        run=False,
-        strict=False,
-    ),
+    pytest.mark.skipif(not env.build_flag_enabled("USE_MCTLASS"), reason="need mctlass"),
 ]
-
-MACA_CUTLASS_CUDA_GRAPH_XFAIL_REASON = (
-    "TODO(maca): [cutlass-offload] support Relax CUDA graph capture and replay for MACA on the CUTLASS "
-    "offload path"
-)
 
 
 def build_and_run(mod, inputs_np, target, legalize=True, cuda_graph=False):
@@ -144,6 +134,7 @@ def get_result_with_relax_cutlass_offload(
     return build_and_run(mod, args, "maca")
 
 
+@pytest.mark.xfail(env.has_maca(), reason="has same issues with upstream")
 def test_kernel_sharing():
     low, high = -1, 1
     data_np = np.random.randint(low, high, size=(16, 32, 32, 8)).astype("float16")
@@ -247,6 +238,7 @@ _residual_block_table = {
 }
 
 
+@pytest.mark.xfail(env.has_maca(), reason="has same issues with upstream")
 @pytest.mark.parametrize(
     "data_shape, weight_shape, dtype, epilogue, residual_block",
     [
@@ -349,9 +341,10 @@ def test_cutlass_partition_conv2d_residual_blocked():
         func = mod[f_var]
         if "Composite" in func.attrs:
             # verify that the function is not fused as residual block
-            assert func.attrs["Composite"] == "cutlass.conv2d_bias_relu"
+            assert func.attrs["Composite"] == "mctlass.conv2d_bias_relu"
 
 
+@pytest.mark.xfail(env.has_maca(), reason="has same issues with upstream")
 @pytest.mark.parametrize(
     "x_shape, y_shape, transpose_y, epilogue, residual_block",
     [
@@ -441,6 +434,7 @@ def test_matmul_offload(
     tvm.testing.assert_allclose(out, ref, rtol=1e-2, atol=1e-2)
 
 
+@pytest.mark.xfail(env.has_maca(), reason="has same issues with upstream")
 def test_matmul_with_3d_bias_offload():
     x_shape = (1, 4, 8)
     y_shape = (1, 8, 16)
@@ -575,7 +569,7 @@ def test_cutlass_partition_matmul_tuple_return_blocked():
         func = mod[f_var]
         if "Composite" in func.attrs:
             # verify that the function is not fused as transposed matmul
-            assert func.attrs["Composite"] == "cutlass.matmul"
+            assert func.attrs["Composite"] == "mctlass.matmul"
 
 
 def test_cutlass_partition_matmul_cyclic_dependency_blocked():
@@ -595,7 +589,7 @@ def test_cutlass_partition_matmul_cyclic_dependency_blocked():
     for f_var in mod.functions:
         func = mod[f_var]
         if "Composite" in func.attrs:
-            assert func.attrs["Composite"] == "cutlass.matmul"
+            assert func.attrs["Composite"] == "mctlass.matmul"
 
 
 @pytest.fixture(params=["float16", "float32"])
@@ -648,6 +642,7 @@ def get_numpy_attention_ref(
     return q, k, v, bias, ref
 
 
+@pytest.mark.skipif(env.has_maca(), reason="attention offload with mctlass not supprot now")
 def test_attention_offload(attention_size, attention_dtype):
     b, (s, s_kv), n, (h, h_v) = attention_size
     concrete_s, concrete_s_kv = _to_concrete_shape((s, s_kv))
@@ -682,6 +677,7 @@ def attention_bias_size(request):
     return request.param
 
 
+@pytest.mark.skipif(env.has_maca(), reason="attention offload with mctlass not supprot now")
 def test_attention_bias_offload(attention_bias_size):
     b, (s, s_kv), n, (h, h_v), bias_shape = attention_bias_size
     concrete_s, concrete_s_kv, concrete_bias_shape = _to_concrete_shape((s, s_kv, bias_shape))
@@ -718,6 +714,7 @@ def attention_scale(request):
     return request.param
 
 
+@pytest.mark.skipif(env.has_maca(), reason="attention offload with mctlass not supprot now")
 def test_attention_scale_offload(attention_scale_size, attention_scale):
     b, (s, s_kv), n, (h, h_v), bias_shape = attention_scale_size
     q, k, v, bias, ref = get_numpy_attention_ref(
@@ -755,6 +752,7 @@ def attention_causal(request):
     return request.param
 
 
+@pytest.mark.skipif(env.has_maca(), reason="attention offload with mctlass not supprot now")
 def test_attention_causal_offload(attention_causal_size, attention_causal):
     b, (s, s_kv), n, (h, h_v), bias_shape = attention_causal_size
     q, k, v, bias, ref = get_numpy_attention_ref(
@@ -810,6 +808,7 @@ def stacked_attention_size(request):
     return request.param
 
 
+@pytest.mark.skipif(env.has_maca(), reason="attention offload with mctlass not supprot now")
 def test_stacked_attention_split_offload(stacked_attention_size):
     b, s, n, (h, h_v), bias_shape, scale, single_shape = stacked_attention_size
     qkv, bias, ref = get_numpy_stacked_attention_ref(b, s, n, h, h_v, bias_shape, scale, "float16")
@@ -848,6 +847,7 @@ def test_stacked_attention_split_offload(stacked_attention_size):
     tvm.testing.assert_allclose(out, ref, rtol=1e-2, atol=1e-2)
 
 
+@pytest.mark.skipif(env.has_maca(), reason="attention offload with mctlass not supprot now")
 def test_stacked_attention_strided_slice_offload(stacked_attention_size):
     b, s, n, (h, h_v), bias_shape, scale, single_shape = stacked_attention_size
     qkv, bias, ref = get_numpy_stacked_attention_ref(b, s, n, h, h_v, bias_shape, scale, "float32")
@@ -1027,6 +1027,7 @@ def get_numpy_attention_input(q_shape, k_shape, v_shape, bias_shape, dtype):
     return q, k, v, bias
 
 
+@pytest.mark.skipif(env.has_maca(), reason="attention offload with mctlass not supprot now")
 def test_attention_rewrite_offload(attention_rewrite_size):
     b, (s, s_kv), n, (h, h_v), bias_shape, scale = attention_rewrite_size
     q_shape = [b, s, n, h] if n != "none" else [b, s, h]
@@ -1046,15 +1047,16 @@ def test_attention_rewrite_offload(attention_rewrite_size):
     original_mod = codegen_pass(original_mod)
     expected_mod = codegen_pass(expected_mod)
     if bias is None:
-        original_out = build_and_run(original_mod, [q, k, v], "maca")
-        expected_out = build_and_run(expected_mod, [q, k, v], "maca")
+        original_out = build_and_run(original_mod, [q, k, v], "cuda")
+        expected_out = build_and_run(expected_mod, [q, k, v], "cuda")
         tvm.testing.assert_allclose(original_out, expected_out, rtol=1e-5, atol=1e-5)
     else:
-        original_out = build_and_run(original_mod, [q, k, v, bias], "maca", legalize=False)
-        expected_out = build_and_run(expected_mod, [q, k, v, bias], "maca", legalize=False)
+        original_out = build_and_run(original_mod, [q, k, v, bias], "cuda", legalize=False)
+        expected_out = build_and_run(expected_mod, [q, k, v, bias], "cuda", legalize=False)
         tvm.testing.assert_allclose(original_out, expected_out, rtol=1e-5, atol=1e-5)
 
 
+@pytest.mark.xfail(env.has_maca(), reason="has same issues with upstream")
 def test_conv2d_residual_broadcast():
     data_shape = (2, 64, 64, 8)
     weight_shape = (8, 3, 3, 8)
@@ -1108,6 +1110,7 @@ def test_conv2d_residual_broadcast():
     tvm.testing.assert_allclose(out, ref, rtol=1e-5, atol=1e-5)
 
 
+@pytest.mark.xfail(env.has_maca(), reason="has same issues with upstream")
 @pytest.mark.parametrize(
     "data_shape, dtype, axes",
     [
@@ -1154,6 +1157,7 @@ def test_layer_norm(data_shape, dtype, axes):
     tvm.testing.assert_allclose(out, ref, rtol=1e-2, atol=1e-2)
 
 
+@pytest.mark.skipif(env.has_maca(), reason="attention offload with mctlass not supprot now")
 def test_attention_rewrite_fp16():
     @I.ir_module(s_tir=True)
     class Module:
@@ -1273,6 +1277,7 @@ def split_transform_deploy_mod(mod):
     return mod_transform, mod_deploy, transform_func_name
 
 
+@pytest.mark.skipif(env.has_maca(), reason="fpA_intB_gemm with mctlass not supprot now")
 def test_fp16A_int4B_gemm():
     @I.ir_module(s_tir=True)
     class Module:
@@ -1504,10 +1509,10 @@ def test_fp16A_int4B_gemm():
         (tvm.runtime.tensor(y), tvm.runtime.tensor(bias))
     )
 
-    ex_cuda = tvm.compile(mod_deploy, target="maca")
+    ex_cuda = tvm.compile(mod_deploy, target="cuda")
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         vm = relax.vm.VirtualMachine(ex_cuda, dev)
         x_nd = tvm.runtime.tensor(x, dev)
         residual_nd = tvm.runtime.tensor(residual, dev)
@@ -1530,6 +1535,7 @@ def test_fp16A_int4B_gemm():
     tvm.testing.run_with_gpu_lock(run_and_check)
 
 
+@pytest.mark.skipif(env.has_maca(), reason="fpA_intB_gemm with mctlass not supprot now")
 def test_fp16A_int8B_gemm():
     @I.ir_module(s_tir=True)
     class Module:
@@ -1655,7 +1661,7 @@ def test_fp16A_int8B_gemm():
         (tvm.runtime.tensor(y), tvm.runtime.tensor(bias))
     )
 
-    ex_cuda = tvm.compile(mod_deploy, target="maca")
+    ex_cuda = tvm.compile(mod_deploy, target="cuda")
 
     def gelu_fp16(x):
         erf_inp = x * (0.5**0.5)
@@ -1665,7 +1671,7 @@ def test_fp16A_int8B_gemm():
         return x * 0.5 * (1.0 + erf_out)
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         vm = relax.vm.VirtualMachine(ex_cuda, dev)
         x_nd = tvm.runtime.tensor(x, dev)
         inp = [x_nd, packed_weight.copyto(dev), scales.copyto(dev), bias_trans.copyto(dev)]
@@ -1676,6 +1682,7 @@ def test_fp16A_int8B_gemm():
     tvm.testing.run_with_gpu_lock(run_and_check)
 
 
+@pytest.mark.skipif(env.has_maca(), reason="rms_norm offload with mctlass not supprot now")
 def test_rms_norm():
     @I.ir_module(s_tir=True)
     class Module:
@@ -1736,7 +1743,7 @@ def test_rms_norm():
     # This is because RunCodegen does not support PrimFunc well yet.
     # i.e., it does remove the global symbol of PrimFunc, which would be no longer used,
     # and thus, the following DCE cannot remove this. Revisit when resolved.
-    with tvm.target.Target("maca"):
+    with tvm.target.Target("cuda"):
         mod = tvm.s_tir.transform.DefaultGPUSchedule()(mod)
 
     mod = relax.transform.RunCodegen(
@@ -1745,16 +1752,14 @@ def test_rms_norm():
 
     inp = np.random.randn(*data_shape).astype(dtype)
     weight = np.random.randn(data_shape[-1]).astype(dtype)
-    out = build_and_run(mod, [inp, weight], "maca")
+    out = build_and_run(mod, [inp, weight], "cuda")
     ref = build_and_run(Module, [inp, weight], "llvm", legalize=True)
 
     tvm.testing.assert_allclose(out, ref, rtol=1e-2, atol=1e-2)
 
 
+@pytest.mark.xfail(env.has_maca(), reason="has same issues with upstream")
 def test_conv2d_cuda_graph():
-    if env.has_maca():
-        pytest.xfail(MACA_CUTLASS_CUDA_GRAPH_XFAIL_REASON)
-
     @tvm.script.ir_module
     class Conv2d:
         @R.function
@@ -1812,6 +1817,7 @@ def test_conv2d_cuda_graph():
     tvm.testing.assert_allclose(out, ref, rtol=1e-2, atol=1e-2)
 
 
+@pytest.mark.skipif(env.has_maca(), reason="fpA_intB_gemm with mctlass not supprot now")
 def test_fp16A_int8B_gemm_batched():
     @I.ir_module(s_tir=True)
     class Module:
@@ -1932,10 +1938,10 @@ def test_fp16A_int8B_gemm_batched():
 
     packed_weight, scales = vm[transform_func_name]((tvm.runtime.tensor(y),))
 
-    ex_cuda = tvm.compile(mod_deploy, target="maca")
+    ex_cuda = tvm.compile(mod_deploy, target="cuda")
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         vm = relax.vm.VirtualMachine(ex_cuda, dev)
         x_nd = tvm.runtime.tensor(x, dev)
         inp = [x_nd, packed_weight.copyto(dev), scales.copyto(dev)]
@@ -1946,6 +1952,7 @@ def test_fp16A_int8B_gemm_batched():
     tvm.testing.run_with_gpu_lock(run_and_check)
 
 
+@pytest.mark.skipif(env.has_maca(), reason="fpA_intB_gemm with mctlass not supprot now")
 def test_fp16A_int8B_gemm_batched_finegrained():
     @I.ir_module(s_tir=True)
     class Module:
@@ -2090,10 +2097,10 @@ def test_fp16A_int8B_gemm_batched_finegrained():
 
     packed_weight, scales = vm[transform_func_name]((tvm.runtime.tensor(y),))
 
-    ex_cuda = tvm.compile(mod_deploy, target="maca")
+    ex_cuda = tvm.compile(mod_deploy, target="cuda")
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         vm = relax.vm.VirtualMachine(ex_cuda, dev)
         x_nd = tvm.runtime.tensor(x, dev)
         inp = [x_nd, packed_weight.copyto(dev), scales.copyto(dev)]
@@ -2104,6 +2111,7 @@ def test_fp16A_int8B_gemm_batched_finegrained():
     tvm.testing.run_with_gpu_lock(run_and_check)
 
 
+@pytest.mark.skipif(env.has_maca(), reason="attention offload with mctlass not supprot now")
 def test_attention_rewrite_multi_query():
     @I.ir_module(s_tir=True)
     class Module:
@@ -2145,7 +2153,7 @@ def test_attention_rewrite_multi_query():
     codegen_pass = relax.transform.RunCodegen({"cutlass": {"sm": 80}})
     mod = codegen_pass(mod)
 
-    out = build_and_run(mod, args, "maca")
+    out = build_and_run(mod, args, "cuda")
 
     tvm.testing.assert_allclose(out, ref, rtol=1e-2, atol=1e-2)
 
@@ -2192,7 +2200,7 @@ def _test_batched_var_len_attention(
     codegen_pass = relax.transform.RunCodegen({"cutlass": {"sm": 80}})
     mod = codegen_pass(mod)
 
-    with tvm.target.Target("maca"):
+    with tvm.target.Target("cuda"):
         mod = relax.transform.LegalizeOps()(mod)
         mod = tvm.s_tir.transform.DefaultGPUSchedule()(mod)
 
@@ -2331,6 +2339,7 @@ def test_batched_var_len_multi_query_attention():
     _test_batched_var_len_attention(Module, seq_lens, num_head, num_kv_head, head_size)
 
 
+@pytest.mark.skipif(env.has_maca(), reason="attention offload with mctlass not supprot now")
 def test_sliding_window():
     q_shape = (1, 64, 16, 8)
     k_shape = v_shape = q_shape

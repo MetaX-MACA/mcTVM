@@ -234,9 +234,9 @@ class Module(_Module):
 
         def get_source_format_from_module(module):
             for fmt in module.get_write_formats():
-                if fmt in ["c", "cc", "cpp", "cu"]:
+                if fmt in ["c", "cc", "cpp", "cu", "maca"]:
                     return fmt
-            raise ValueError(f"Module {module.kind} does not exporting to c, cc, cpp or cu.")
+            raise ValueError(f"Module {module.kind} does not exporting to c, cc, cpp, cu or maca.")
 
         for index, module in enumerate(modules):
             if fcompile is not None and hasattr(fcompile, "object_format"):
@@ -254,6 +254,8 @@ class Module(_Module):
                     if "cc" in kwargs:
                         if kwargs["cc"] == "nvcc":
                             object_format = "cu"
+                        elif kwargs["cc"] == "mxcc":
+                            object_format = "maca"
                     has_c_module = True
                 else:
                     assert module.is_compilation_exportable()

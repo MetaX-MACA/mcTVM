@@ -151,7 +151,7 @@ class CSourceModuleNode : public ffi::ModuleObj {
   void WriteToFile(const ffi::String& file_name, const ffi::String& format) const final {
     std::string fmt = GetFileFormat(file_name, format);
     std::string meta_file = GetMetaFilePath(file_name);
-    if (fmt == "c" || fmt == "cc" || fmt == "cpp" || fmt == "cu") {
+    if (fmt == "c" || fmt == "cc" || fmt == "cpp" || fmt == "cu" || fmt == "maca") {
       TVM_FFI_ICHECK_NE(code_.length(), 0);
       SaveBinaryToFile(file_name, code_);
     } else {

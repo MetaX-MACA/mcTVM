@@ -336,3 +336,6 @@ set(USE_MCBLAS OFF)
 
 # Whether use mcDNN
 set(USE_MCDNN OFF)
+
+# Whether use mctlass
+set(USE_MCTLASS OFF)

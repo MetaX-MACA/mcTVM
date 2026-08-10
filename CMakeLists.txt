@@ -118,6 +118,7 @@ tvm_option(USE_CLML_GRAPH_EXECUTOR "Build with CLML graph runtime" OFF)
 tvm_option(USE_NVSHMEM "Build with NVSHMEM support" OFF)
 tvm_option(USE_MCBLAS "Build with mcBLAS" OFF)
 tvm_option(USE_MCDNN "Build with mcDNN" OFF)
+tvm_option(USE_MCTLASS "Build with MCTLASS" OFF)
 
 # Python package options
 tvm_option(TVM_BUILD_PYTHON_MODULE "Build Python module with scikit-build-core" OFF)
@@ -476,6 +477,7 @@ include(cmake/modules/contrib/ExampleNPU.cmake)
 include(cmake/modules/contrib/vllm.cmake)
 include(cmake/modules/Git.cmake)
 include(cmake/modules/MACA.cmake)
+include(cmake/modules/contrib/MCTLASS.cmake)
 
 # ---- libtvm_runtime_extra assembly ----
 # Disco core sources.

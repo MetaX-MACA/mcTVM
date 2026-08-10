@@ -45,4 +45,5 @@ def libinfo():
         "USE_MACA": "ON",
         "USE_MCBLAS": "ON",
         "USE_MCDNN": "ON",
+        "USE_MCTLASS": "ON",
     }

@@ -336,7 +336,7 @@ def _linux_compile(
     output, objects, options, compile_cmd, cwd=None, ccache_env=None, compile_shared=False
 ):
     cmd = [compile_cmd]
-    if compile_cmd != "nvcc":
+    if compile_cmd != "nvcc" and compile_cmd != "mxcc":
         if compile_shared or output.endswith(".so") or output.endswith(".dylib"):
             cmd += ["-shared", "-fPIC"]
             if sys.platform == "darwin":
