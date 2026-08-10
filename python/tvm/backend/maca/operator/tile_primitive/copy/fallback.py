@@ -89,10 +89,14 @@ def _emit_fallback(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFun
         return impl
 
     tid_axis_name = _TID_AXIS_FOR_SCOPE[scope_kind]
-    # first-active tid = composition of per-axis offsets (radix-64, since a warp is 64 lanes)
+    # first-active tid = composition of per-axis offsets (radix-64, since a
+    # MACA warp is 64 lanes).  A warpgroup's fused thread id includes the
+    # four-warp ``wid_in_wg`` component.
     first_tid = int(sctx.intra["laneid"][1])
     if scope_kind == "cta":
         first_tid += 64 * int(sctx.intra["warpid"][1])
+    elif scope_kind == "warpgroup":
+        first_tid += 64 * int(sctx.intra["wid_in_wg"][1])
 
     @T.prim_func(check_well_formed=False)
     def impl():

@@ -38,11 +38,8 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import S, TileLayout, laneid, tid_in_wg, tx
 
-MACA_XFAIL = pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [tile-primitive-copy-reg] support register copy dispatch "
-        "and swizzled shared fast path"
-    ),
+_TCGEN05_XFAIL = pytest.mark.xfail(
+    reason=("TODO(maca): [tile-primitive-copy-reg] support TCGEN05 layouts"),
     strict=False,
 )
 
@@ -80,22 +77,22 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                 B = T.match_buffer(B_ptr, shape, dtype)
                 T.device_entry()
                 T.cta_id([1])
-                T.warpgroup_id([n_threads // 128])
+                T.warpgroup_id([n_threads // 256])
                 T.warp_id_in_wg([4])
-                T.lane_id([32])
-                T.thread_id_in_wg([128])
+                T.lane_id([64])
+                T.thread_id_in_wg([256])
                 tid = T.thread_id([n_threads])
                 A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
                 for kk in range(k):
                     A_smem[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
-                Tx.wg.copy(R_local[full_slices], A_smem[full_slices])
+                Tx.wg.copy(R_local[full_slices], A_smem[full_slices], dispatch="reg")
                 for kk in range(k):
                     A_smem[tid, kk] = T.cast(0, dtype)
-                T.cuda.cta_sync()
-                Tx.wg.copy(A_smem[full_slices], R_local[full_slices])
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
+                Tx.wg.copy(A_smem[full_slices], R_local[full_slices], dispatch="reg")
+                T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A_smem[tid, kk]
 
@@ -113,11 +110,11 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                     A_smem[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
                 T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
-                Tx.warp.copy(R_local[full_slices], A_smem[full_slices])
+                Tx.warp.copy(R_local[full_slices], A_smem[full_slices], dispatch="reg")
                 for kk in range(k):
                     A_smem[tid, kk] = T.cast(0, dtype)
                 T.maca.cta_sync()
-                Tx.warp.copy(A_smem[full_slices], R_local[full_slices])
+                Tx.warp.copy(A_smem[full_slices], R_local[full_slices], dispatch="reg")
                 T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A_smem[tid, kk]
@@ -137,11 +134,11 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                     A_smem[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
                 T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
-                Tx.cta.copy(R_local[full_slices], A_smem[full_slices])
+                Tx.cta.copy(R_local[full_slices], A_smem[full_slices], dispatch="reg")
                 for kk in range(k):
                     A_smem[tid, kk] = T.cast(0, dtype)
                 T.maca.cta_sync()
-                Tx.cta.copy(A_smem[full_slices], R_local[full_slices])
+                Tx.cta.copy(A_smem[full_slices], R_local[full_slices], dispatch="reg")
                 T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A_smem[tid, kk]
@@ -157,21 +154,21 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                 B = T.match_buffer(B_ptr, shape, dtype)
                 T.device_entry()
                 T.cta_id([1])
-                T.warpgroup_id([n_threads // 128])
+                T.warpgroup_id([n_threads // 256])
                 T.warp_id_in_wg([4])
-                T.lane_id([32])
-                T.thread_id_in_wg([128])
+                T.lane_id([64])
+                T.thread_id_in_wg([256])
                 tid = T.thread_id([n_threads])
                 for kk in range(k):
                     A[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
-                Tx.wg.copy(R_local[full_slices], A[full_slices])
+                Tx.wg.copy(R_local[full_slices], A[full_slices], dispatch="reg")
                 for kk in range(k):
                     A[tid, kk] = T.cast(0, dtype)
-                T.cuda.cta_sync()
-                Tx.wg.copy(A[full_slices], R_local[full_slices])
-                T.cuda.cta_sync()
+                T.maca.cta_sync()
+                Tx.wg.copy(A[full_slices], R_local[full_slices], dispatch="reg")
+                T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A[tid, kk]
 
@@ -189,11 +186,11 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                     A[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
                 T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
-                Tx.warp.copy(R_local[full_slices], A[full_slices])
+                Tx.warp.copy(R_local[full_slices], A[full_slices], dispatch="reg")
                 for kk in range(k):
                     A[tid, kk] = T.cast(0, dtype)
                 T.maca.cta_sync()
-                Tx.warp.copy(A[full_slices], R_local[full_slices])
+                Tx.warp.copy(A[full_slices], R_local[full_slices], dispatch="reg")
                 T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A[tid, kk]
@@ -213,11 +210,11 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                     A[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
                 T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
-                Tx.cta.copy(R_local[full_slices], A[full_slices])
+                Tx.cta.copy(R_local[full_slices], A[full_slices], dispatch="reg")
                 for kk in range(k):
                     A[tid, kk] = T.cast(0, dtype)
                 T.maca.cta_sync()
-                Tx.cta.copy(A[full_slices], R_local[full_slices])
+                Tx.cta.copy(A[full_slices], R_local[full_slices], dispatch="reg")
                 T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A[tid, kk]
@@ -243,30 +240,9 @@ def _expected(shape, dtype):
 @pytest.mark.parametrize(
     "scope,n_threads,k",
     [
-        pytest.param(
-            "warpgroup",
-            128,
-            16,
-            marks=pytest.mark.xfail(
-                reason="TODO(maca): [Warpgroup] maca c500 not support warpgroup"
-            ),
-        ),
-        pytest.param(
-            "warpgroup",
-            128,
-            32,
-            marks=pytest.mark.xfail(
-                reason="TODO(maca): [Warpgroup] maca c500 not support warpgroup"
-            ),
-        ),
-        pytest.param(
-            "warpgroup",
-            128,
-            8,
-            marks=pytest.mark.xfail(
-                reason="TODO(maca): [Warpgroup] maca c500 not support warpgroup"
-            ),
-        ),
+        ("warpgroup", 256, 16),
+        ("warpgroup", 256, 32),
+        ("warpgroup", 256, 8),
         ("warp", 64, 8),
         ("warp", 64, 16),
         ("cta", 256, 8),
@@ -324,7 +300,6 @@ def test_reg_roundtrip(scope, n_threads, k, dtype, non_r_scope):
 )
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize(
     "dtype", ["int8", "float8_e4m3fn", "float8_e5m2", "float16", "bfloat16", "float32"]
 )
@@ -363,16 +338,15 @@ def test_copy_g2l_l2g_vec_load(task, dtype):
             A = tvm.runtime.tensor(A_np, dev)
             B = tvm.runtime.tensor(B_np, dev)
             mod(A, B)
-            np.testing.assert_allclose(B_ref, B.numpy())
+            np.testing.assert_allclose(B_ref.astype("float32"), B.numpy().astype("float32"))
 
         tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
-@MACA_XFAIL
 def test_reg_copy_wg_local_to_swizzled_shared_uses_swizzle_fastpath():
     """Regression: R→S copy where R has a ``wg_local_layout`` (thread iter
-    ``1 @ tid_in_wg``) must pick the widest vec PTX ``st.shared.v4`` AND use the
+    ``1 @ tid_in_wg``) must pick the widest MACA 128-bit copy intrinsic AND use the
     swizzle fast path (precomputed ``signed_strides`` + per-iter
     bit-select), not the per-iter ``swizzle.apply()`` fallback.
 
@@ -393,7 +367,7 @@ def test_reg_copy_wg_local_to_swizzled_shared_uses_swizzle_fastpath():
     """
     from tvm.tirx.layout import SwizzleLayout, wg_local_layout
 
-    N_THREADS, EPI_N = 128, 64
+    N_THREADS, EPI_N = 256, 64
     g_shape = (N_THREADS, EPI_N)
     g_layout = TileLayout(S[g_shape])
     # 128b swizzle on the SMEM side (per_element=3 ⇒ 8 fp16 atom width).
@@ -406,9 +380,14 @@ def test_reg_copy_wg_local_to_swizzled_shared_uses_swizzle_fastpath():
 
         T.device_entry()
         T.cta_id([1])
+        T.warpgroup_id([1])
+        T.warp_id_in_wg([4])
+        T.lane_id([64])
         T.thread_id([N_THREADS])
         tid = T.thread_id_in_wg([N_THREADS])
-        reg = T.alloc_buffer(g_shape, "float16", scope="local", layout=wg_local_layout(EPI_N))
+        reg = T.alloc_buffer(
+            g_shape, "float16", scope="local", layout=wg_local_layout(EPI_N, rows=N_THREADS)
+        )
         smem = T.alloc_buffer(g_shape, "float16", scope="shared", layout=smem_layout)
 
         # Populate the per-thread slice via .local() (decomposes the wg
@@ -416,8 +395,8 @@ def test_reg_copy_wg_local_to_swizzled_shared_uses_swizzle_fastpath():
         reg_local = reg.local(EPI_N)
         for i in T.serial(EPI_N):
             reg_local[i] = A[tid, i]
-        Tx.wg.copy(smem, reg)
-        T.cuda.cta_sync()
+        Tx.wg.copy(smem, reg, dispatch="reg")
+        T.maca.cta_sync()
         for i in T.serial(EPI_N):
             B[tid, i] = smem[tid, i]
 
@@ -427,14 +406,11 @@ def test_reg_copy_wg_local_to_swizzled_shared_uses_swizzle_fastpath():
         ex = tvm.compile(mod, target=target, tir_pipeline="tirx")
         src = ex.mod.imports[0].inspect_source()
 
-    # (1) Widest variant: 8 fp16 elements per call (16 bytes → v4.u32 st).
-    assert "tvm_builtin_ptx_st" in src, (
-        "expected PTX st in generated CUDA, alignment check fell back to a narrower variant"
+    # (1) Widest variant: 8 fp16 elements per call (16 bytes → copy_128b).
+    assert "tvm_builtin_copy_128b" in src, (
+        "expected MACA 128-bit copy, alignment check fell back to a narrower variant"
     )
-    assert "st.shared.v4" in src, "expected 128b vector store (st.shared.v4.u32)"
-    assert "tvm_builtin_copy_" not in src, (
-        "copy_xxb helpers appeared — reg dispatch should use PTX ld/st only"
-    )
+    assert "tvm_builtin_copy_16b" not in src, "expected a vectorized register copy"
     # (2) Swizzle fast path fingerprint:
     #   * emit_init allocates a size-N int buffer of "signed strides".
     #   * emit_iter_offset uses bit-select * signed-stride: ``(bit) * v[i]``
@@ -544,7 +520,7 @@ def test_reg_copy_tcgen05_d_epilogue_deposit_layout_pairing():
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@_TCGEN05_XFAIL
 def test_reg_copy_tcgen05_d_epilogue_deposit_codegen():
     """``reg`` dispatch lowers the D epilogue deposit; pre-fix loop only covered half.
 
@@ -624,7 +600,7 @@ def _build_tcgen05_d_epilogue_deposit_roundtrip():
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@_TCGEN05_XFAIL
 def test_reg_copy_tcgen05_d_epilogue_deposit_gpu():
     """GPU: R→S deposit + S→R reload must preserve the Layout-F register tile.
 

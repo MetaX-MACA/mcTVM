@@ -31,13 +31,6 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import ComposeLayout, S, SwizzleLayout, TileLayout
 
-MACA_XFAIL = pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [tile-primitive-copy-gmem-smem] warpgroup execution scope is not supported"
-    ),
-    strict=False,
-)
-
 
 def _build_kernel(scope, n_threads, shape, dtype):
     s_layout = TileLayout(S[shape])
@@ -57,9 +50,9 @@ def _build_kernel(scope, n_threads, shape, dtype):
             T.thread_id_in_wg([256])
             T.thread_id([n_threads])
             A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
-            Tx.wg.copy(A_smem[full_slices], A[full_slices])
+            Tx.wg.copy(A_smem[full_slices], A[full_slices], dispatch="gmem_smem")
             T.maca.cta_sync()
-            Tx.wg.copy(B[full_slices], A_smem[full_slices])
+            Tx.wg.copy(B[full_slices], A_smem[full_slices], dispatch="gmem_smem")
 
     elif scope == "warp":
 
@@ -102,7 +95,7 @@ def _build_kernel(scope, n_threads, shape, dtype):
 TASKS = [
     ("warp", 64, (32, 32)),  # 1024 total, T=64, vec 8 → outer 2
     ("warp", 64, (32, 64)),  # 2048 total, outer 4
-    ("warpgroup", 256, (128, 32)),  # 4096, outer 2 (4 MACA warps)
+    ("warpgroup", 256, (128, 32)),  # 4096, outer 2
     ("warpgroup", 256, (128, 64)),  # 8192, outer 4
     ("warpgroup", 256, (256, 16)),  # 4096, outer 2
     ("cta", 256, (256, 32)),  # 8192, T=256, vec 8 → outer 4
@@ -114,14 +107,7 @@ TASKS = [
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize(
     "scope,n_threads,shape",
-    [
-        pytest.param(
-            *t,
-            id=f"{t[0]}-{t[1]}-{'x'.join(map(str, t[2]))}",
-            marks=MACA_XFAIL if t[0] == "warpgroup" else (),
-        )
-        for t in TASKS
-    ],
+    [pytest.param(*t, id=f"{t[0]}-{t[1]}-{'x'.join(map(str, t[2]))}") for t in TASKS],
 )
 @pytest.mark.parametrize("dtype", ["float16", "float32", "uint8"])
 def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
@@ -210,17 +196,9 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
     ],
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_maca(), reason="need cuda")
 @pytest.mark.parametrize(
-    "dtype",
-    [
-        "int8",
-        "float8_e4m3fn",
-        "float8_e5m2",
-        "float16",
-        "bfloat16",
-        "float32",
-    ],
+    "dtype", ["int8", "float8_e4m3fn", "float8_e5m2", "float16", "bfloat16", "float32"]
 )
 @pytest.mark.parametrize("scope", ["cta", "thread"])
 def test_copy_g2s_s2g(task, dtype, scope):
@@ -266,9 +244,6 @@ def test_copy_g2s_s2g(task, dtype, scope):
             A = tvm.runtime.tensor(A_np, dev)
             B = tvm.runtime.tensor(B_np, dev)
             mod(A, B)
-            # NumPy's float8/bfloat16 dtypes do not promote with the scalar
-            # literals used by ``assert_allclose``. Compare their numerical
-            # values in float32 instead.
             np.testing.assert_allclose(B_ref.astype("float32"), B.numpy().astype("float32"))
 
         tvm.testing.run_with_gpu_lock(run_and_check)
@@ -277,9 +252,8 @@ def test_copy_g2s_s2g(task, dtype, scope):
 # ----------------------------------------------------------------------------
 # Regression tests for known correctness gaps in ``align_layouts_gs``.
 #
-# These are intentionally algorithm-level (no GPU runtime) and currently
-# XFAIL; flipping them to passing is the contract for the upcoming swizzle /
-# alignment fix.
+# These are intentionally algorithm-level (no GPU runtime) and validate the
+# MACA alignment implementation directly.
 # ----------------------------------------------------------------------------
 
 
@@ -306,10 +280,6 @@ def _align(
         )
 
 
-@pytest.mark.xfail(
-    reason="align_layouts_gs ignores swizzle chunk size; "
-    "_extract_tile strips the swizzle wrap before vec_len pick."
-)
 @pytest.mark.parametrize("per_element,expected_max_vec", [(2, 4), (1, 2), (0, 1)])
 def test_swizzled_smem_vec_len_must_fit_chunk(per_element, expected_max_vec):
     """``SwizzleLayout(per_element, ...)`` keeps the bottom ``per_element``
@@ -372,13 +342,8 @@ def test_unaligned_region_offset_must_clamp_vec_len():
     )
 
 
-@MACA_XFAIL
 def test_swizzled_smem_emit_must_be_swizzle_aware():
-    """Codegen-level regression for swizzled shared-memory addressing.
-
-    The case remains xfailed until MACA supports the warpgroup execution
-    scope used by this CUDA-derived swizzle pattern.
-    """
+    """Codegen-level: emitted S address must honor the SwizzleLayout."""
     import tvm
     from tvm.script import tirx as T
     from tvm.tirx.layout import ComposeLayout, S, SwizzleLayout, TileLayout
@@ -397,11 +362,8 @@ def test_swizzled_smem_emit_must_be_swizzle_aware():
         T.thread_id_in_wg([256])
         T.thread_id([256])
         A_smem = T.alloc_buffer(shape, "float16", scope="shared", layout=s_layout)
-        Tx.wg.copy(A_smem[0:128, 0:32], A[0:128, 0:32])
+        Tx.wg.copy(A_smem[0:128, 0:32], A[0:128, 0:32], dispatch="gmem_smem")
 
-    # MACA uses ``mcpu`` rather than CUDA's ``arch`` target option.  Keep the
-    # target construction valid even though this warpgroup case is expected
-    # to remain unsupported on MACA.
     target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
@@ -537,7 +499,7 @@ def test_layout_permute_copy_preserves_smem_strides():
 #
 # Setup: warp-scope 64x64 fp16 G2S/S2G with 128b swizzled SMEM. The outer
 # iter stride is ``thread_cnt * vec_len = 64 * 8 = 512``, which puts the
-# binary-split bj's above the swizzle XOR region (so
+# binary-split bj's at {6, 7, 8} — well above the swizzle XOR region (so
 # Case 1.D, signed_stride = +T). The (C1) analyzer check
 # ``bit_bj(s_off // C) == 0`` needs the placeholder var bounded to
 # laneid ∈ [0, 64); the dispatch passes ``var_bounds`` so it can discharge,
@@ -578,8 +540,7 @@ def test_gmem_smem_swizzle_fast_path_fires_with_var_bounds():
 
     bitsel = re.findall(r"& 1\) \* v_\d+\[", src)
     v_decls = re.findall(
-        r"(?:alignas\(\d+\)|__attribute__\(\(aligned\(\d+\)\)\)) "
-        r"int v_\d+\[(\d+)\]",
+        r"(?:alignas\(\d+\)|__attribute__\(\(aligned\(\d+\)\)\))\s+int v_\d+\[(\d+)\]",
         src,
     )
     assert bitsel, (
@@ -588,7 +549,7 @@ def test_gmem_smem_swizzle_fast_path_fires_with_var_bounds():
     )
     assert "3" in v_decls, (
         f"expected at least one 3-slot signed_strides buffer for bjs "
-        f"[7, 6, 5]; got decl sizes {v_decls}"
+        f"[8, 7, 6]; got decl sizes {v_decls}"
     )
 
     # Round-trip correctness.

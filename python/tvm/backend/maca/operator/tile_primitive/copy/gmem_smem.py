@@ -89,7 +89,7 @@ def _divides_thread_cnt(
 def _is_gmem_smem(op_call: TilePrimitiveCall, sctx: DispatchContext) -> tuple[bool, str | None]:
     if not sctx.is_target("maca"):
         return False, "non-maca target"
-    if sctx.scope_kind not in ("thread", "warp", "cta"):
+    if sctx.scope_kind not in ("thread", "warp", "warpgroup", "cta"):
         return False, f"unsupported exec_scope {sctx.scope_kind}"
     for check in (
         lambda: _all_threads_active(sctx),
@@ -283,7 +283,7 @@ def _emit_gmem_smem(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFu
             g_lin = g_p.apply(f, tid, v0, shape=apply_shape)["m"]
             s_off = _s_off(f, s_lin)
             # Pointer-valued calls are general Exprs after the IR type
-            # migration.  Bind them explicitly so the TIRx parser does not
+            # migration. Bind them explicitly so the TIRx parser does not
             # try to infer a scalar constant type for the call result.
             s_ptr: T.let = _ptr_off(s_buf.ptr_to(s_zero), s_off)
             g_ptr: T.let = _ptr_off(g_buf.ptr_to(g_zero), g_lin)

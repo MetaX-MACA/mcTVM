@@ -40,14 +40,6 @@ from tvm.testing import env
 from tvm.tirx.cuda.operator.tile_primitive.copy import fallback as _fallback_module  # noqa: F401
 from tvm.tirx.layout import S, TileLayout
 
-MACA_XFAIL = pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [tile-primitive-copy-fallback] support fallback copy dispatch "
-        "and scalar gated emit"
-    ),
-    strict=False,
-)
-
 
 def _round_trip_shapes_and_threads():
     """Cases where ``gmem_smem`` rejects on ``n_elements % thread_cnt``.
@@ -57,14 +49,14 @@ def _round_trip_shapes_and_threads():
     variants can't accept it (size doesn't divide thread_cnt).
     """
     return [
-        # warp scope, 64 threads, 24 elements (4x6) → 24 % 32 != 0.
-        ("warp", 64, (4, 6), "4*6=24 ∤ 32"),
-        # warp scope, 64 threads, 8 elements (1x8) → 8 % 32 != 0.
-        ("warp", 64, (1, 8), "1*8=8 ∤ 32"),
-        # warpgroup scope, 128 threads, 24 elements (4x6) → 24 % 128 != 0.
-        ("warpgroup", 128, (4, 6), "4*6=24 ∤ 128"),
-        # warpgroup scope, 128 threads, 32 elements (4x8) → 32 % 128 != 0.
-        ("warpgroup", 128, (4, 8), "4*8=32 ∤ 128"),
+        # warp scope, 64 threads, 24 elements (4x6) → 24 % 64 != 0.
+        ("warp", 64, (4, 6), "4*6=24 ∤ 64"),
+        # warp scope, 64 threads, 8 elements (1x8) → 8 % 64 != 0.
+        ("warp", 64, (1, 8), "1*8=8 ∤ 64"),
+        # warpgroup scope, 256 threads, 24 elements (4x6) → 24 % 256 != 0.
+        ("warpgroup", 256, (4, 6), "4*6=24 ∤ 256"),
+        # warpgroup scope, 256 threads, 32 elements (4x8) → 32 % 256 != 0.
+        ("warpgroup", 256, (4, 8), "4*8=32 ∤ 256"),
         # cta scope, 256 threads, 32 elements (4x8) → 32 % 256 != 0.
         ("cta", 256, (4, 8), "4*8=32 ∤ 256"),
         # cta scope, 1024 threads, 64 elements (8x8) → 64 % 1024 != 0.
@@ -105,14 +97,14 @@ def _build_round_trip_kernel(scope, n_threads, shape, dtype):
             B = T.match_buffer(B_ptr, shape, dtype)
             T.device_entry()
             T.cta_id([1])
-            T.warpgroup_id([n_threads // 128])
+            T.warpgroup_id([n_threads // 256])
             T.warp_id_in_wg([4])
-            T.lane_id([32])
-            T.thread_id_in_wg([128])
+            T.lane_id([64])
+            T.thread_id_in_wg([256])
             T.thread_id([n_threads])
             A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
             Tx.wg.copy(A_smem[full], A[full])
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             Tx.wg.copy(B[full], A_smem[full])
 
     elif scope == "cta":
@@ -142,18 +134,7 @@ def _build_round_trip_kernel(scope, n_threads, shape, dtype):
 @pytest.mark.parametrize(
     "scope,n_threads,shape,why",
     [
-        pytest.param(
-            s,
-            n,
-            sh,
-            w,
-            id=f"{s}-{n}-{'x'.join(map(str, sh))}",
-            marks=pytest.mark.xfail(
-                reason="TODO(maca): [tile-primitive-copy-fallback] support warpgroup"
-            )
-            if s == "warpgroup"
-            else (),
-        )
+        pytest.param(s, n, sh, w, id=f"{s}-{n}-{'x'.join(map(str, sh))}")
         for s, n, sh, w in _round_trip_shapes_and_threads()
     ],
 )
@@ -242,8 +223,8 @@ def test_fallback_emits_gate():
         B = T.match_buffer(B_ptr, shape, dtype)
         T.device_entry()
         T.cta_id([1])
-        T.warp_id([8])  # 256 threads => 8 warps
-        T.lane_id([32])
+        T.warp_id([4])  # 256 threads => 4 Wave64 warps
+        T.lane_id([64])
         T.thread_id([256])
         A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
         Tx.cta.copy(A_smem[full], A[full])
