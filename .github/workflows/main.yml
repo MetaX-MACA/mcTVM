@@ -157,6 +157,7 @@ jobs:
           echo "set(USE_LLVM ON)" >> build/config.cmake
           echo "set(USE_MCBLAS ON)" >> build/config.cmake
           echo "set(USE_MCDNN ON)" >> build/config.cmake
+          echo "set(USE_MCTLASS ON)" >> build/config.cmake
           cmake -B build
           make -j $(nproc) -C build
 
