@@ -104,8 +104,9 @@ def test_fp8_conversions(input):
 )
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(reason=FP8_MACA_XFAIL_REASON, strict=False)
 def test_fp8_packing(dtype):
+    if dtype == "float8_e8m0fnu":
+        pytest.skip("float8_e8m0fnu is not supported on MACA")
     length = 64
     vector_length = 4
     native_dtype, packed_dtype = (f"{dtype}x{vector_length}", "uint32")
@@ -830,11 +831,10 @@ class TestFP8e4x4QuantDequantScale(BaseFP8E4M3QuantScaleOnly):
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize("dtype", ["float8_e5m2", "float8_e4m3fn", "float8_e8m0fnu"])
-@pytest.mark.xfail(
-    reason="TODO(maca): [fp8] support FP8 constants in local buffers",
-    strict=False,
-)
 def test_const(dtype):
+    if dtype == "float8_e8m0fnu":
+        pytest.skip("float8_e8m0fnu is not supported on MACA")
+
     @T.prim_func(s_tir=True)
     def func(A: T.Buffer((4,), dtype)) -> None:
         A_local = T.sblock_alloc_buffer((4,), dtype=dtype, scope="local")
@@ -851,10 +851,6 @@ def test_const(dtype):
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize("dtype", ["float8_e5m2", "float8_e4m3fn"])
 @pytest.mark.parametrize("vec_len", [2, 4, 8, 16])
-@pytest.mark.xfail(
-    reason="TODO(maca): [fp8] support vectorized FP8 buffer copy codegen",
-    strict=False,
-)
 def test_copy(dtype, vec_len):
     @T.prim_func(s_tir=True)
     def func(
