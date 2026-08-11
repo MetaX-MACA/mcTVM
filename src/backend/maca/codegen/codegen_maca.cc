@@ -212,7 +212,20 @@ void CodeGenMACA::PreFunctionBody(const PrimFunc& f) {
   }
 }
 
-void CodeGenMACA::PrintFuncPrefix(std::ostream& os) { os << "extern \"C\" __global__ "; }
+void CodeGenMACA::PrintFunctionSignature(const ffi::String& function_name, const PrimFunc& func,
+                                         std::ostream& os) {
+  CallingConv calling_conv =
+      func->GetAttr<CallingConv>(tvm::attr::kCallingConv, CallingConv::kDefault).value();
+  if (calling_conv == CallingConv::kDeviceKernelLaunch) {
+    os << "extern \"C\" __global__ ";
+  } else if (calling_conv == CallingConv::kDefault) {
+    os << "extern \"C\" __device__ ";
+  } else {
+    TVM_FFI_THROW(InternalError) << "Unsupported calling convention for MACA codegen: "
+                                 << static_cast<int>(calling_conv);
+  }
+  CodeGenC::PrintFunctionSignature(function_name, func, os);
+}
 
 class ThreadIdxExtractor : public tirx::StmtVisitor {
  private:

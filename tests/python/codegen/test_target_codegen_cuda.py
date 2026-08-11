@@ -1017,10 +1017,6 @@ extern "C" __global__ void __launch_bounds__(128) main_kernel(const __grid_const
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason="TODO(maca): [device-function-call] lower private PrimFuncs as callable device functions instead of kernels",
-    strict=False,
-)
 def test_cuda_device_func_call():
     @I.ir_module(s_tir=True)
     class Module:
@@ -1065,10 +1061,6 @@ def test_cuda_float_const_hex_format():
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason="TODO(maca): [host-device-call] support mixed host/device private function calls with MACA targets",
-    strict=False,
-)
 def test_device_host_call_same_func():
     @I.ir_module(s_tir=True)
     class Module:
@@ -1090,9 +1082,7 @@ def test_device_host_call_same_func():
     # 1. If we set host to llvm, it will raise an error of
     #    "Return should be transformed to return zero before LLVM code generation."
     #    Need to revisit this.
-    # 2. We set a dummy mcpu value for testing purpose,
-    #    in order to avoid checking a function is host or device based on the "cpu" substring.
-    target = tvm.target.Target({"kind": "maca", "mcpu": "dummy_mcpu"}, host="c")
+    target = tvm.target.Target({"kind": "maca"}, host="c")
     lib = tvm.compile(Module, target=target)
     cuda_code = lib.mod.imports[0].inspect_source()
     assert 'extern "C" __device__ int add(int a, int b) {\n  return (a + b);\n}' in cuda_code
