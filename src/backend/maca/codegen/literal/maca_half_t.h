@@ -394,7 +394,7 @@ struct __align__(8) half4_bfloat164 {
   __host__ __device__ half4_bfloat164() : x(T(0)), y(T(0)), z(T(0)), w(T(0)) {}
   __host__ __device__ half4_bfloat164(T x, T y, T z, T w) : x(x), y(y), z(z), w(w) {}
   __host__ __device__ half4_bfloat164(const __maca_fp8x4_e4m3& fp8x4) {
-    if constexpr (std::is_same_v<T, __half>) {
+    if constexpr (std::is_same<T, __half>::value) {
       __maca_fp8x2_e4m3 lo_part, hi_part;
       lo_part.__x = static_cast<__maca_fp8x2_storage_t>(fp8x4.__x & 0xFFFF);
       hi_part.__x = static_cast<__maca_fp8x2_storage_t>((fp8x4.__x >> 16) & 0xFFFF);
