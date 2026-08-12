@@ -1128,7 +1128,7 @@ def test_sample_top_p_top_k_from_sorted_prob():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
 def test_renormalize_top_p_top_k_prob():
     prob_shape = (2, 3)
     sample_shape = (2, 1)
