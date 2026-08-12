@@ -42,17 +42,9 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import ComposeLayout, S, TileLayout, laneid, tid_in_wg, tx
 
-MACA_XFAIL = pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [tile-primitive-ldstmatrix] support ldmatrix/stmatrix dispatch "
-        "and swizzle fast path"
-    ),
-    strict=False,
-)
-
 
 def _compile_src(kernel):
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": kernel})
     with target:
         compiled = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -335,8 +327,7 @@ _BUILDERS = {
 @pytest.mark.parametrize("direction", ["ld", "st"])
 @pytest.mark.parametrize("num", [1, 2, 4])
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 def test_ldstmatrix(scope, trans, direction, num):
     kernel, (M, N) = _BUILDERS[scope](num, direction, trans)
     compiled, src = _compile_src(kernel)
@@ -350,7 +341,7 @@ def test_ldstmatrix(scope, trans, direction, num):
     B_np = np.zeros((M, N), dtype="float16")
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A = tvm.runtime.tensor(A_np, device=dev)
         B = tvm.runtime.tensor(B_np, device=dev)
         compiled(A, B)
@@ -369,8 +360,7 @@ def test_ldstmatrix(scope, trans, direction, num):
 @pytest.mark.parametrize("direction", ["ld", "st"])
 @pytest.mark.parametrize("num", [1, 2, 4])
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 def test_ldstmatrix_swizzle(scope, trans, direction, num):
     kernel, (M, N) = _BUILDERS[scope](num, direction, trans, swizzle=True)
     compiled, src = _compile_src(kernel)
@@ -384,7 +374,7 @@ def test_ldstmatrix_swizzle(scope, trans, direction, num):
     B_np = np.zeros((M, N), dtype="float16")
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A = tvm.runtime.tensor(A_np, device=dev)
         B = tvm.runtime.tensor(B_np, device=dev)
         compiled(A, B)
@@ -437,8 +427,7 @@ def _build_multi_iter_kernel(outer_ext: int):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 def test_ldstmatrix_swizzle_multi_iter_pow2():
     """32x64 fp16 warp with a power-of-two outer extent."""
 
@@ -460,7 +449,7 @@ def test_ldstmatrix_swizzle_multi_iter_pow2():
     B_np = np.zeros(shape, dtype="float16")
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A = tvm.runtime.tensor(A_np, device=dev)
         B = tvm.runtime.tensor(B_np, device=dev)
         compiled(A, B)
@@ -470,7 +459,7 @@ def test_ldstmatrix_swizzle_multi_iter_pow2():
 
 
 @pytest.mark.gpu
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 def test_ldstmatrix_tcgen05_warpgroup_atom_emits_ldmatrix():
     """Regression: a warpgroup ``.16x256b`` tcgen05 register atom loaded from a
     128B-swizzled SMEM tile must dispatch to ``ldmatrix.x4``.
@@ -511,8 +500,7 @@ def test_ldstmatrix_tcgen05_warpgroup_atom_emits_ldmatrix():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 def test_ldstmatrix_swizzle_multi_iter_linear():
     """40x64 fp16 warp with a non-power-of-two outer extent."""
 
@@ -534,7 +522,7 @@ def test_ldstmatrix_swizzle_multi_iter_linear():
     B_np = np.zeros(shape, dtype="float16")
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A = tvm.runtime.tensor(A_np, device=dev)
         B = tvm.runtime.tensor(B_np, device=dev)
         compiled(A, B)

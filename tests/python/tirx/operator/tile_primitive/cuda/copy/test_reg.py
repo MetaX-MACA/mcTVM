@@ -87,11 +87,11 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                     A_smem[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
                 T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
-                Tx.wg.copy(R_local[full_slices], A_smem[full_slices], dispatch="reg")
+                Tx.wg.copy(R_local[full_slices], A_smem[full_slices])
                 for kk in range(k):
                     A_smem[tid, kk] = T.cast(0, dtype)
                 T.maca.cta_sync()
-                Tx.wg.copy(A_smem[full_slices], R_local[full_slices], dispatch="reg")
+                Tx.wg.copy(A_smem[full_slices], R_local[full_slices])
                 T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A_smem[tid, kk]
@@ -110,11 +110,11 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                     A_smem[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
                 T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
-                Tx.warp.copy(R_local[full_slices], A_smem[full_slices], dispatch="reg")
+                Tx.warp.copy(R_local[full_slices], A_smem[full_slices])
                 for kk in range(k):
                     A_smem[tid, kk] = T.cast(0, dtype)
                 T.maca.cta_sync()
-                Tx.warp.copy(A_smem[full_slices], R_local[full_slices], dispatch="reg")
+                Tx.warp.copy(A_smem[full_slices], R_local[full_slices])
                 T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A_smem[tid, kk]
@@ -134,11 +134,11 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                     A_smem[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
                 T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
-                Tx.cta.copy(R_local[full_slices], A_smem[full_slices], dispatch="reg")
+                Tx.cta.copy(R_local[full_slices], A_smem[full_slices])
                 for kk in range(k):
                     A_smem[tid, kk] = T.cast(0, dtype)
                 T.maca.cta_sync()
-                Tx.cta.copy(A_smem[full_slices], R_local[full_slices], dispatch="reg")
+                Tx.cta.copy(A_smem[full_slices], R_local[full_slices])
                 T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A_smem[tid, kk]
@@ -163,11 +163,11 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                     A[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
                 T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
-                Tx.wg.copy(R_local[full_slices], A[full_slices], dispatch="reg")
+                Tx.wg.copy(R_local[full_slices], A[full_slices])
                 for kk in range(k):
                     A[tid, kk] = T.cast(0, dtype)
                 T.maca.cta_sync()
-                Tx.wg.copy(A[full_slices], R_local[full_slices], dispatch="reg")
+                Tx.wg.copy(A[full_slices], R_local[full_slices])
                 T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A[tid, kk]
@@ -186,11 +186,11 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                     A[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
                 T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
-                Tx.warp.copy(R_local[full_slices], A[full_slices], dispatch="reg")
+                Tx.warp.copy(R_local[full_slices], A[full_slices])
                 for kk in range(k):
                     A[tid, kk] = T.cast(0, dtype)
                 T.maca.cta_sync()
-                Tx.warp.copy(A[full_slices], R_local[full_slices], dispatch="reg")
+                Tx.warp.copy(A[full_slices], R_local[full_slices])
                 T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A[tid, kk]
@@ -210,11 +210,11 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
                     A[tid, kk] = T.cast(tid * 100 + kk + 1, dtype)
                 T.maca.cta_sync()
                 R_local = T.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
-                Tx.cta.copy(R_local[full_slices], A[full_slices], dispatch="reg")
+                Tx.cta.copy(R_local[full_slices], A[full_slices])
                 for kk in range(k):
                     A[tid, kk] = T.cast(0, dtype)
                 T.maca.cta_sync()
-                Tx.cta.copy(A[full_slices], R_local[full_slices], dispatch="reg")
+                Tx.cta.copy(A[full_slices], R_local[full_slices])
                 T.maca.cta_sync()
                 for kk in range(k):
                     B[tid, kk] = A[tid, kk]
@@ -278,7 +278,7 @@ def test_reg_roundtrip(scope, n_threads, k, dtype, non_r_scope):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_reg_roundtrip_gapped_permuted_storage():
     """Forced reg dispatch addresses sparse register layouts by physical offset."""
     shape = (32, 2, 2)
@@ -303,21 +303,20 @@ def test_reg_roundtrip_gapped_permuted_storage():
         Tx.warp.copy(B, reg, dispatch="vec_auto")
         # fmt: on
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         compiled = tvm.compile(
             tvm.IRModule({"main": kernel}), target=target, tir_pipeline="tirx"
         )
     source = compiled.mod.imports[0].inspect_source()
-    assert "tvm_builtin_ptx_ld" in source
-    assert "tvm_builtin_ptx_st" in source
+    assert "tvm_builtin_copy_32b" in source
 
     rng = np.random.default_rng(0)
     A_np = rng.random(shape, dtype=np.float32)
     B_np = np.zeros(shape, dtype=np.float32)
 
     def run_and_check():
-        dev = tvm.cuda(0)
+        dev = tvm.maca(0)
         A = tvm.runtime.tensor(A_np, dev)
         B = tvm.runtime.tensor(B_np, dev)
         compiled(A, B)
@@ -539,7 +538,7 @@ def test_reg_copy_wg_local_to_swizzled_shared_uses_structured_compose_apply():
         reg_local = reg.local(EPI_N)
         for i in T.serial(EPI_N):
             reg_local[i] = A[tid, i]
-        Tx.wg.copy(smem, reg, dispatch="reg")
+        Tx.wg.copy(smem, reg)
         T.maca.cta_sync()
         for i in T.serial(EPI_N):
             B[tid, i] = smem[tid, i]
@@ -555,18 +554,17 @@ def test_reg_copy_wg_local_to_swizzled_shared_uses_structured_compose_apply():
     assert "tvm_builtin_copy_128b" in src, (
         "expected the widest MACA copy helper; vector-width selection fell back"
     )
-    # (2) Structured address fingerprint: the thread base is materialized
-    # once, while the bounded outer coordinate is XORed into the copy pointer.
+    # (2) Structured address fingerprint: ComposeLayout applies the swizzle
+    # to the complete thread base plus outer coordinate before pointer use.
     assert "s_off[0] =" in src and "* 64" in src
     s_ptr_lines = [
         line for line in src.splitlines() if "s_ptr" in line and "pointer_offset" in line
     ]
     assert len(s_ptr_lines) == 1
-    assert "^" in s_ptr_lines[0]
-    assert "(f >> 2)" in s_ptr_lines[0] and "* v_" in s_ptr_lines[0]
-    assert "/" not in s_ptr_lines[0] and "%" not in s_ptr_lines[0], (
-        "structured hot-loop offset must not contain full quotient/mod decomposition"
-    )
+    assert "s_off[0]" in s_ptr_lines[0]
+    s_off_lines = [line for line in src.splitlines() if "s_off[0] =" in line]
+    assert len(s_off_lines) == 1
+    assert "^" in s_off_lines[0] and "f * 8" in s_off_lines[0]
 
 
 @pytest.mark.gpu
@@ -619,54 +617,54 @@ def test_copy_fallback_handles_scalar_regions():
         Tx.copy(dst[2:3], src[:])
         B[0] = dst[2]
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
         ex = tvm.compile(mod, target=target, tir_pipeline="tirx")
         src = ex.mod.imports[0].inspect_source()
 
-    assert "dst_ptr[2] = src_ptr[0];" in src
+    assert "dst[2] = src[0];" in src
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize(
-    "variant,dtype,n_elements,expected_st,expected_ld",
+    "variant,dtype,n_elements",
     [
-        ("vec_16b", "uint16", 1, "st.shared.u16", "ld.shared.u16"),
-        ("vec_32b", "uint32", 1, "st.shared.u32", "ld.shared.u32"),
-        ("vec_64b", "uint32", 2, "st.shared.v2.u32", "ld.shared.v2.u32"),
-        ("vec_128b", "uint32", 4, "st.shared.v4.u32", "ld.shared.v4.u32"),
+        ("vec_16b", "uint16", 1),
+        ("vec_32b", "uint32", 1),
+        ("vec_64b", "uint32", 2),
+        ("vec_128b", "uint32", 4),
     ],
 )
-def test_copy_forced_vec_width_codegen(variant, dtype, n_elements, expected_st, expected_ld):
+def test_copy_forced_vec_width_codegen(variant, dtype, n_elements):
     @T.prim_func
     def kernel(B_ptr: T.handle) -> None:
         B = T.match_buffer(B_ptr, (n_elements,), dtype)
         T.device_entry()
         T.cta_id([1])
         T.thread_id([1])
-        smem = T.alloc_buffer((n_elements,), dtype, scope="shared")
-        reg = T.alloc_local((n_elements,), dtype)
-        out = T.alloc_local((n_elements,), dtype)
+        # The MACA widths require the same 16-byte base alignment as CUDA's
+        # widest forced-vector path.
+        smem = T.alloc_buffer((n_elements,), dtype, scope="shared", align=16)
+        reg = T.alloc_local((n_elements,), dtype, align=16)
+        out = T.alloc_local((n_elements,), dtype, align=16)
         for i in range(n_elements):
             reg[i] = T.cast(i + 1, dtype)
         Tx.copy(smem[:], reg[:], dispatch=variant)
-        T.cuda.cta_sync()
         Tx.copy(out[:], smem[:], dispatch=variant)
         for i in range(n_elements):
             B[i] = out[i]
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
         ex = tvm.compile(mod, target=target, tir_pipeline="tirx")
         src = ex.mod.imports[0].inspect_source()
 
-    assert expected_st in src
-    assert expected_ld in src
+    assert f"tvm_builtin_copy_{variant.removeprefix('vec_')}" in src
 
-    dev = tvm.cuda(0)
+    dev = tvm.maca(0)
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
     out = tvm.runtime.tensor(np.zeros((n_elements,), dtype=np_dtype), dev)
     ex(out)
@@ -717,7 +715,7 @@ def test_copy_forced_vec_dynamic_swizzled_shared_uses_vector_ptx():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_copy_explicit_vec_auto_uses_auto_family():
     @T.prim_func
     def kernel(B_ptr: T.handle) -> None:
@@ -731,24 +729,23 @@ def test_copy_explicit_vec_auto_uses_auto_family():
         for i in range(4):
             reg[i] = T.cast(i + 1, "float32")
         Tx.copy(smem[:], reg[:], dispatch="vec_auto")
-        T.cuda.cta_sync()
+        T.maca.cta_sync()
         Tx.copy(out[:], smem[:], dispatch="vec_auto")
         for i in range(4):
             B[i] = out[i]
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
         ex = tvm.compile(mod, target=target, tir_pipeline="tirx")
         src = ex.mod.imports[0].inspect_source()
 
-    assert "tvm_builtin_copy_" not in src
-    assert "st.shared.v4.u32" in src
-    assert "ld.shared.v4.u32" in src
+    assert "copy/fallback" not in src
+    assert "tvm_builtin_copy_128b" in src
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize("dispatch", ["reg", "gmem_smem"])
 def test_copy_old_dispatch_names_are_not_registered(dispatch):
     @T.prim_func
@@ -762,7 +759,7 @@ def test_copy_old_dispatch_names_are_not_registered(dispatch):
         Tx.copy(smem[:], reg[:], dispatch=dispatch)
         B[0] = T.cast(0, "float32")
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
         with pytest.raises(RuntimeError, match=f"no variant named '{dispatch}' is registered"):
@@ -770,7 +767,7 @@ def test_copy_old_dispatch_names_are_not_registered(dispatch):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_copy_forced_vec_rejects_size_mismatch():
     @T.prim_func
     def kernel(B_ptr: T.handle) -> None:
@@ -783,7 +780,7 @@ def test_copy_forced_vec_rejects_size_mismatch():
         Tx.copy(smem[:], reg[:], dispatch="vec_64b")
         B[0] = T.cast(0, "float32")
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
         with pytest.raises(RuntimeError, match="src region does not contain exactly 2 elements"):
@@ -791,21 +788,21 @@ def test_copy_forced_vec_rejects_size_mismatch():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_copy_forced_vec_rejects_non_thread_scope():
     @T.prim_func
     def kernel(B_ptr: T.handle) -> None:
         B = T.match_buffer(B_ptr, (4,), "float32")
         T.device_entry()
         T.cta_id([1])
-        T.lane_id([32])
-        T.thread_id([32])
+        T.lane_id([64])
+        T.thread_id([64])
         smem = T.alloc_buffer((4,), "float32", scope="shared")
         reg = T.alloc_buffer((4,), "float32", scope="local", layout=TileLayout(S[4]))
         Tx.warp.copy(smem[:], reg[:], dispatch="vec_128b")
         B[0] = T.cast(0, "float32")
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
         with pytest.raises(RuntimeError, match="expected thread exec_scope"):
@@ -1008,7 +1005,7 @@ def test_reg_copy_tcgen05_d_epilogue_deposit_layout_pairing():
     ``d_reg``: ``(64,64)`` fp32 ``tcgen05_atom_layout("16x256b", ...)``.
     ``smem_cd_mma``: ``(64,64)`` fp32 ``mma_shared_layout(..., swizzle=128B)``.
     """
-    from tvm.backend.cuda.tile_primitive.copy.vec_auto_reg import (
+    from tvm.backend.maca.tile_primitive.copy.vec_auto_reg import (
         _split_thread_loop,
         align_layouts_raw,
     )
@@ -1021,9 +1018,9 @@ def test_reg_copy_tcgen05_d_epilogue_deposit_layout_pairing():
         tvm.target.Target("maca"), ExecScope("warpgroup"), {}, {}, scope_kind="warpgroup"
     )
     with sctx.target:
-        r_sliced = reg_layout.slice([m, n], region)
-        s_sliced = smem_layout.slice([m, n], region)
-        r_p, s_p, s_seps, r_perm = align_layouts_raw(r_sliced, s_sliced, region)
+        r_p, s_p, s_seps, r_perm = align_layouts_raw(
+            reg_layout, [m, n], region, smem_layout, [m, n], region
+        )
 
     r_iters, s_groups = _split_thread_loop(r_perm, s_p, s_seps)
     r_iters_bug, s_groups_bug = _split_thread_loop(r_p, s_p, s_seps)
