@@ -44,16 +44,12 @@ FP8_MACA_XFAIL_REASON = (
 @pytest.mark.parametrize(
     "input",
     [
-        ("float8_e4m3fn", "__nv_fp8_e4m3"),
-        ("float8_e5m2", "__nv_fp8_e5m2"),
+        ("float8_e4m3fn", "__maca_fp8_e4m3"),
+        ("float8_e5m2", "__maca_fp8_e5m2"),
     ],
 )
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason="TODO(maca): [fp8] support FP8 source/type lowering compatible with these expectations",
-    strict=False,
-)
 def test_fp8_conversions(input):
     dtype, nv_dtype = input
 
