@@ -78,7 +78,8 @@ class CodeGenMACA final : public CodeGenC {
   }
   // override behavior
   void PreFunctionBody(const PrimFunc& f) final;
-  void PrintFuncPrefix(std::ostream& os) final;
+  void PrintFunctionSignature(const ffi::String& function_name, const PrimFunc& func,
+                              std::ostream& os) final;
   void PrintExtraAttrs(const PrimFunc& f, std::ostream& os) final;  // NOLINT(*)
   void VisitStmt_(const ForNode* op) final;
   void PrintStorageSync(const CallNode* op) final;
