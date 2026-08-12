@@ -44,7 +44,7 @@ from tvm.target import Target
 
 # pylint: disable=unused-import
 from tvm.target.codegen import llvm_lookup_intrinsic_id
-from tvm.tirx import Buffer, BufferRegion, Expr, IndexMap, type_annotation
+from tvm.tirx import Buffer, BufferRegion, Expr, IndexMap, is_buffer_var, type_annotation
 from tvm.tirx import _ffi_api as _tirx_ffi_api
 from tvm.tirx import op as _tir_op
 from tvm.tirx.exec_scope import ExecScope, ScopeIdDef, Var
@@ -90,7 +90,6 @@ from tvm.tirx.layout import (
     Layout,
     R,
     S,
-    SwizzleLayout,
     TileLayout,
     wg_local_layout,
 )
@@ -155,6 +154,9 @@ def _normalize_prim_type(dtype) -> ir.PrimType:
         ty = getattr(value, "ty", None)
         if isinstance(ty, ir.PrimType):
             return ty
+        type_annotation = getattr(value, "type_annotation", None)
+        if isinstance(type_annotation, ir.PrimType):
+            return type_annotation
     return ir.PrimType(dtype)
 
 
@@ -516,7 +518,7 @@ def match_buffer(
     """
     if shape is None:
         if isinstance(param, BufferRegion):
-            dtype = param.buffer.dtype
+            dtype = param.buffer.ty.dtype
             shape = [region.extent for region in param.region]
         else:
             raise ValueError("Shape must be specified when binding input param")
@@ -598,103 +600,129 @@ def elected():
 
     Write the explicit form instead::
 
-        if T.ptx.elect_sync():
+        if T.cuda.elect_sync():
             ...                         # thread is the default scope
     """
     raise RuntimeError(
         "T.elected() is no longer available. Write explicitly: "
-        "`if T.ptx.elect_sync(): ...` (thread is the default scope)"
+        "`if T.cuda.elect_sync(): ...` (thread is the default scope)"
     )
 
 
-def scope_id(extents: list[Expr | int] | None, parent: str, cur: str) -> Var | list[Var]:
-    ret = _ffi_api.ScopeId(extents, parent, "T.scope_id", cur)  # type: ignore[attr-defined] # pylint: disable=no-member
+def scope_id(
+    extents: list[Expr | int] | None, parent: str, cur: str, dtype: str = "int32"
+) -> Var | list[Var]:
+    ret = _ffi_api.ScopeId(extents, parent, "T.scope_id", cur, dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def cluster_id(extents: list[Expr | int] | None = None) -> Var | list[Var]:
+def cluster_id(extents: list[Expr | int] | None = None, dtype: str = "int32") -> Var | list[Var]:
     """Define a kernel→cluster scope id. Pass ``None`` (the default) to defer the
-    extent; it will be inferred at LowerTIRx from sibling ScopeIdDef closure."""
-    ret = _ffi_api.ClusterId(extents, "kernel")  # type: ignore[attr-defined] # pylint: disable=no-member
+    extent; it will be inferred at LowerTIRx from sibling ScopeIdDef closure.
+
+    ``dtype`` selects the dtype of the introduced vars (``"int32"`` or ``"uint32"``)."""
+    ret = _ffi_api.ClusterId(extents, "kernel", dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def cta_id(extents: list[Expr | int] | None = None, preferred=None) -> Var | list[Var]:
+def cta_id(
+    extents: list[Expr | int] | None = None, preferred=None, dtype: str = "int32"
+) -> Var | list[Var]:
     """Define a kernel→cta scope id. Pass ``None`` (the default) to defer the
-    extent; it will be inferred at LowerTIRx from sibling ScopeIdDef closure."""
-    ret = _ffi_api.CtaId(extents, "kernel", preferred)  # type: ignore[attr-defined] # pylint: disable=no-member
+    extent; it will be inferred at LowerTIRx from sibling ScopeIdDef closure.
+
+    ``dtype`` selects the dtype of the introduced vars (``"int32"`` or ``"uint32"``)."""
+    ret = _ffi_api.CtaId(extents, "kernel", preferred, dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def cta_id_in_cluster(extents: list[Expr | int] | None = None, preferred=None) -> Var | list[Var]:
+def cta_id_in_cluster(
+    extents: list[Expr | int] | None = None, preferred=None, dtype: str = "int32"
+) -> Var | list[Var]:
     """Define a cluster→cta scope id. Pass ``None`` (the default) to defer the
-    extent; it will be inferred at LowerTIRx from sibling ScopeIdDef closure."""
-    ret = _ffi_api.CtaId(extents, "cluster", preferred)  # type: ignore[attr-defined] # pylint: disable=no-member
+    extent; it will be inferred at LowerTIRx from sibling ScopeIdDef closure.
+
+    ``dtype`` selects the dtype of the introduced vars (``"int32"`` or ``"uint32"``)."""
+    ret = _ffi_api.CtaId(extents, "cluster", preferred, dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def cta_id_in_pair() -> Var:
-    ret = _ffi_api.CtaIdInPair()  # type: ignore[attr-defined] # pylint: disable=no-member
+def cta_id_in_pair(dtype: str = "int32") -> Var:
+    ret = _ffi_api.CtaIdInPair(dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
     return ret[0]
 
 
-def warpgroup_id(extents: list[Expr | int] | None = None) -> Var | list[Var]:
+def warpgroup_id(extents: list[Expr | int] | None = None, dtype: str = "int32") -> Var | list[Var]:
     """Define a cta→warpgroup scope id. Pass ``None`` (the default) to defer
-    the extent; it will be inferred at LowerTIRx from sibling closure."""
-    ret = _ffi_api.WarpgroupId(extents, "cta")  # type: ignore[attr-defined] # pylint: disable=no-member
+    the extent; it will be inferred at LowerTIRx from sibling closure.
+
+    ``dtype`` selects the dtype of the introduced vars (``"int32"`` or ``"uint32"``)."""
+    ret = _ffi_api.WarpgroupId(extents, "cta", dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def warp_id(extents: list[Expr | int] | None = None) -> Var | list[Var]:
+def warp_id(extents: list[Expr | int] | None = None, dtype: str = "int32") -> Var | list[Var]:
     """Define a cta→warp scope id. Pass ``None`` (the default) to defer the
-    extent; it will be inferred at LowerTIRx from sibling closure."""
-    ret = _ffi_api.WarpId(extents, "cta")  # type: ignore[attr-defined] # pylint: disable=no-member
+    extent; it will be inferred at LowerTIRx from sibling closure.
+
+    ``dtype`` selects the dtype of the introduced vars (``"int32"`` or ``"uint32"``)."""
+    ret = _ffi_api.WarpId(extents, "cta", dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def warp_id_in_wg(extents: list[Expr | int] | None = None) -> Var | list[Var]:
+def warp_id_in_wg(extents: list[Expr | int] | None = None, dtype: str = "int32") -> Var | list[Var]:
     """Define a warpgroup→warp scope id. Pass ``None`` (the default) to defer
-    the extent; it will be inferred at LowerTIRx from sibling closure."""
-    ret = _ffi_api.WarpId(extents, "warpgroup")  # type: ignore[attr-defined] # pylint: disable=no-member
+    the extent; it will be inferred at LowerTIRx from sibling closure.
+
+    ``dtype`` selects the dtype of the introduced vars (``"int32"`` or ``"uint32"``)."""
+    ret = _ffi_api.WarpId(extents, "warpgroup", dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def lane_id(extents: list[Expr | int] | None = None) -> Var | list[Var]:
+def lane_id(extents: list[Expr | int] | None = None, dtype: str = "int32") -> Var | list[Var]:
     """Define a warp→thread scope id. Pass ``None`` (the default) to defer the
-    extent; it will be inferred at LowerTIRx from sibling closure."""
-    ret = _ffi_api.ThreadId(extents, "warp")  # type: ignore[attr-defined] # pylint: disable=no-member
+    extent; it will be inferred at LowerTIRx from sibling closure.
+
+    ``dtype`` selects the dtype of the introduced vars (``"int32"`` or ``"uint32"``)."""
+    ret = _ffi_api.ThreadId(extents, "warp", dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def thread_id(extents: list[Expr | int] | None = None) -> Var | list[Var]:
+def thread_id(extents: list[Expr | int] | None = None, dtype: str = "int32") -> Var | list[Var]:
     """Define a cta→thread scope id. Pass ``None`` (the default) to defer the
-    extent; it will be inferred at LowerTIRx from sibling closure."""
-    ret = _ffi_api.ThreadId(extents, "cta")  # type: ignore[attr-defined] # pylint: disable=no-member
+    extent; it will be inferred at LowerTIRx from sibling closure.
+
+    ``dtype`` selects the dtype of the introduced vars (``"int32"`` or ``"uint32"``)."""
+    ret = _ffi_api.ThreadId(extents, "cta", dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def thread_id_in_wg(extents: list[Expr | int] | None = None) -> Var | list[Var]:
+def thread_id_in_wg(
+    extents: list[Expr | int] | None = None, dtype: str = "int32"
+) -> Var | list[Var]:
     """Define a warpgroup→thread scope id. Pass ``None`` (the default) to defer
-    the extent; it will be inferred at LowerTIRx from sibling closure."""
-    ret = _ffi_api.ThreadId(extents, "warpgroup")  # type: ignore[attr-defined] # pylint: disable=no-member
+    the extent; it will be inferred at LowerTIRx from sibling closure.
+
+    ``dtype`` selects the dtype of the introduced vars (``"int32"`` or ``"uint32"``)."""
+    ret = _ffi_api.ThreadId(extents, "warpgroup", dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
     if len(ret) == 1:
         return ret[0]
     return ret
@@ -1146,7 +1174,8 @@ def serial(
     *,
     annotations: dict[str, Any] | None = None,
     step: Expr | None = None,
-    unroll: bool | None = None,
+    unroll: bool | int | None = None,
+    dtype: str | None = None,
 ) -> frame.ForFrame:
     """The serial For statement.
 
@@ -1164,11 +1193,18 @@ def serial(
     step : Expr
         The optional step value of iteration.
 
-    unroll : bool, optional
+    unroll : bool or int, optional
         If True, adds ``{"pragma_unroll": True}`` annotation, which asks CUDA codegen
         to emit ``#pragma unroll`` while preserving the loop as a C++ ``for``.
         If False, adds ``{"disable_unroll": True}`` annotation.
-        Shorthand for ``annotations={"disable_unroll": True}``.
+        If a positive integer, emits ``#pragma unroll N``. Boolean values are
+        handled separately from integers, so ``False`` keeps disabling unrolling.
+
+    dtype : str, optional
+        The dtype of the loop variable, either ``"int32"`` or ``"uint32"``. When
+        omitted it is inferred from the bounds. Bounds that do not already have this
+        dtype are converted (literals are retyped, other expressions get a Cast).
+        Note ``T.thread_binding`` does not support this; its loop var is always int32.
 
     Returns
     -------
@@ -1177,17 +1213,24 @@ def serial(
     """
     if unroll is not None:
         annotations = dict(annotations) if annotations else {}
-        if unroll:
-            annotations["pragma_unroll"] = True
+        if isinstance(unroll, bool):
+            if unroll:
+                annotations["pragma_unroll"] = True
+            else:
+                annotations["disable_unroll"] = True
+        elif isinstance(unroll, int):
+            if unroll < 1:
+                raise ValueError("unroll must be a positive integer")
+            annotations["pragma_unroll"] = unroll
         else:
-            annotations["disable_unroll"] = True
+            raise TypeError("unroll must be a bool, a positive integer, or None")
     if stop is None:
         stop = start
         if is_prim_expr(start):
             start = IntImm(start.ty, 0)
         else:
             start = 0
-    return _ffi_api.Serial(start, stop, annotations, step)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Serial(start, stop, annotations, step, dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def parallel(
@@ -1196,6 +1239,7 @@ def parallel(
     *,
     annotations: dict[str, Any] | None = None,
     step: Expr | None = None,
+    dtype: str | None = None,
 ) -> frame.ForFrame:
     """The parallel For statement.
 
@@ -1213,6 +1257,10 @@ def parallel(
     step : Expr
         The optional step value of iteration.
 
+    dtype : str, optional
+        The dtype of the loop variable, either ``"int32"`` or ``"uint32"``. When
+        omitted it is inferred from the bounds.
+
     Returns
     -------
     res : frame.ForFrame
@@ -1224,7 +1272,7 @@ def parallel(
             start = IntImm(start.ty, 0)
         else:
             start = 0
-    return _ffi_api.Parallel(start, stop, annotations, step)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Parallel(start, stop, annotations, step, dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def vectorized(
@@ -1233,6 +1281,7 @@ def vectorized(
     *,
     annotations: dict[str, Any] | None = None,
     step: Expr | None = None,
+    dtype: str | None = None,
 ) -> frame.ForFrame:
     """The vectorized For statement.
 
@@ -1250,6 +1299,10 @@ def vectorized(
     step : Expr
         The optional step value of iteration.
 
+    dtype : str, optional
+        The dtype of the loop variable, either ``"int32"`` or ``"uint32"``. When
+        omitted it is inferred from the bounds.
+
     Returns
     -------
     res : frame.ForFrame
@@ -1261,7 +1314,7 @@ def vectorized(
             start = IntImm(start.ty, 0)
         else:
             start = 0
-    return _ffi_api.Vectorized(start, stop, annotations, step)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Vectorized(start, stop, annotations, step, dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def unroll(
@@ -1270,6 +1323,7 @@ def unroll(
     *,
     annotations: dict[str, Any] | None = None,
     step: Expr | None = None,
+    dtype: str | None = None,
 ) -> frame.ForFrame:
     """The unrolled For statement.
 
@@ -1287,6 +1341,10 @@ def unroll(
     step : Expr
         The optional step value of iteration.
 
+    dtype : str, optional
+        The dtype of the loop variable, either ``"int32"`` or ``"uint32"``. When
+        omitted it is inferred from the bounds.
+
     Returns
     -------
     res : frame.ForFrame
@@ -1298,7 +1356,7 @@ def unroll(
             start = IntImm(start.ty, 0)
         else:
             start = 0
-    return _ffi_api.Unroll(start, stop, annotations, step)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Unroll(start, stop, annotations, step, dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def thread_binding(
@@ -1349,7 +1407,7 @@ def thread_binding(
     )
 
 
-def grid(*extents: tuple[Expr | tuple[Expr, Expr]]) -> frame.ForFrame:
+def grid(*extents: tuple[Expr | tuple[Expr, Expr]], dtype: str | None = None) -> frame.ForFrame:
     """The grid For statement.
 
     Parameters
@@ -1359,6 +1417,10 @@ def grid(*extents: tuple[Expr | tuple[Expr, Expr]]) -> frame.ForFrame:
         If a tuple of two Expr is provided, the first is the start of the iteration,
         and the second is the extent of the iteration.
 
+    dtype : str, optional
+        The dtype of every loop variable, either ``"int32"`` or ``"uint32"``. When
+        omitted each loop variable takes the dtype of its own extent.
+
     Returns
     -------
     res : frame.ForFrame
@@ -1366,17 +1428,20 @@ def grid(*extents: tuple[Expr | tuple[Expr, Expr]]) -> frame.ForFrame:
     """
     # Convert integer extents to IntImm
     # TODO(@bohan): fix this after FFI refactor
+    imm_dtype = dtype if dtype is not None else "int32"
     processed_extents = []
     for extent in extents:
         if isinstance(extent, tuple):
             start, extent = extent
-            start = IntImm("int32", start) if isinstance(start, int) else start
-            extent = IntImm("int32", extent) if isinstance(extent, int) else extent
+            start = IntImm(imm_dtype, start) if isinstance(start, int) else start
+            extent = IntImm(imm_dtype, extent) if isinstance(extent, int) else extent
             processed_extents.append((start, extent))
         else:
-            processed_extents.append(IntImm("int32", extent) if isinstance(extent, int) else extent)
+            processed_extents.append(
+                IntImm(imm_dtype, extent) if isinstance(extent, int) else extent
+            )
     extents = tuple(processed_extents)
-    return _ffi_api.Grid(extents)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Grid(extents, dtype)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def Assert(condition: Expr, message, error_kind: str = "RuntimeError") -> frame.AssertFrame:  # pylint: disable=invalid-name
@@ -1807,7 +1872,7 @@ def alloc_tcgen05_ldst_frag(instr_shape, tensor_shape, dtype):
 
     Sizes the per-thread storage, allocates ``local`` scope memory, and returns
     a 2-D view of shape ``tensor_shape`` with a matching ``tcgen05_atom_layout``.
-    Pass the result to ``Tx.copy_async`` (with a ``(128, W)``-shaped TMEM
+    Pass the result to ``Tx.wg.copy_async`` (with a matching TMEM
     buffer) to trigger the corresponding dispatch path.
 
     Parameters
@@ -1819,7 +1884,8 @@ def alloc_tcgen05_ldst_frag(instr_shape, tensor_shape, dtype):
         per-shape per-lane register decomposition).
     tensor_shape : tuple[int, int]
         Logical fragment shape ``(frag_rows, K)`` in element units. ``frag_rows``
-        is ``128`` for ``.32x32b`` and ``64`` for the ``.16x*b`` shapes.
+        is ``128`` for ``.32x32b`` and ``64`` for the ``.16x*b`` shapes. The
+        fp32 Layout B readback image also uses ``("32x32b", (64, N))``.
     dtype : str
         ``"float32"``, ``"float16"``, or ``"bfloat16"``.
 
@@ -1833,11 +1899,16 @@ def alloc_tcgen05_ldst_frag(instr_shape, tensor_shape, dtype):
     --------
     M=128 readback (existing dispatch):
         ``frag = T.alloc_tcgen05_ldst_frag("32x32b", (128, 64), "float32")``
-        ``Tx.copy_async(frag[:, :], tmem[:, 0:64])``
+        ``Tx.wg.copy_async(frag[:, :], tmem[:, 0:64])``
 
     M=64 readback (.16x64b dispatch):
         ``frag = T.alloc_tcgen05_ldst_frag("16x64b", (64, 64), "float32")``
-        ``Tx.copy_async(frag[:, :], tmem[0:64, 0:64])``
+        ``Tx.wg.copy_async(frag[:, :], tmem[0:64, 0:64])``
+
+    Datapath B readback (cta_group=2, per-CTA M=64):
+        ``C = tmem_pool.alloc((64, 128), "float32", datapath="B")``
+        ``frag = T.alloc_tcgen05_ldst_frag("32x32b", (64, 128), "float32")``
+        ``Tx.wg.copy_async(frag[:, :], C[:, :])``
     """
     from tvm.tirx.layout import tcgen05_atom_layout  # local import to avoid cycle
 
@@ -1879,10 +1950,10 @@ def alloc_cast_frag(src, dtype):
     Buffer
         Fresh ``local`` frag, ``src.shape`` shaped, ``src.layout``, dtype-cast.
     """
-    rows, cols = src.shape
+    rows, cols = src.ty.shape
     per_thread_elems = (rows * cols) // 128
     flat = alloc_local((per_thread_elems,), dtype)
-    return flat.view(rows, cols, layout=src.layout)
+    return flat.view(rows, cols, layout=src.ty.layout)
 
 
 if TYPE_CHECKING:
@@ -1986,7 +2057,7 @@ else:
 def alloc_scalar(dtype: str = "float32", scope: str = "global") -> BufferLoad:
     """Allocate a zero-dimensional buffer (scalar)."""
     buf = alloc_buffer(shape=(1,), dtype=dtype, scope=scope, layout=TileLayout(S[1]))
-    assert isinstance(buf, Buffer)
+    assert is_buffer_var(buf)
     scalar = buf[0]
     if _current_meta_construction_scope() is not None:
         return scalar
@@ -2006,7 +2077,7 @@ def decl_scalar(dtype, data, scope, elem_offset=None, byte_offset=None) -> Buffe
         offset_factor=0,
         layout=TileLayout(S[1]),
     )
-    assert isinstance(buf, Buffer)
+    assert is_buffer_var(buf)
     scalar = buf[0]
     if _current_meta_construction_scope() is not None:
         return scalar
@@ -2042,7 +2113,7 @@ def _meta_resource_for_value(value: Any) -> Any | None:
         return value.scalar.buffer
     if isinstance(value, BufferLoad):
         return value.buffer
-    if isinstance(value, Buffer):
+    if is_buffer_var(value):
         return value
     return None
 
@@ -2292,7 +2363,7 @@ def buffer_store(
                 expr_indices.append(ramp(index.start, step, lanes))
         else:
             expr_indices.append(index)
-    if isinstance(value, bool) and buffer.dtype == "bool":
+    if isinstance(value, bool) and buffer.ty.dtype == "bool":
         value = IntImm("bool", value)
     return _ffi_api.BufferStore(  # type: ignore[attr-defined] # pylint: disable=no-member
         buffer, value, expr_indices, predicate
@@ -2913,19 +2984,19 @@ class WebGPUNamespace:
 
     @staticmethod
     def subgroup_shuffle(var, lane):
-        if isinstance(var, Buffer):
+        if is_buffer_var(var):
             var = var[0]
         return _tir_op.call_intrin(var.ty, "tirx.webgpu.subgroup_shuffle", var, lane)
 
     @staticmethod
     def subgroup_shuffle_up(var, delta):
-        if isinstance(var, Buffer):
+        if is_buffer_var(var):
             var = var[0]
         return _tir_op.call_intrin(var.ty, "tirx.webgpu.subgroup_shuffle_up", var, delta)
 
     @staticmethod
     def subgroup_shuffle_down(var, delta):
-        if isinstance(var, Buffer):
+        if is_buffer_var(var):
             var = var[0]
         return _tir_op.call_intrin(var.ty, "tirx.webgpu.subgroup_shuffle_down", var, delta)
 
@@ -3519,7 +3590,6 @@ __all__ += [
     "R",
     "S",
     "ScopeIdDef",
-    "SwizzleLayout",
     "TensorMap",
     "TileLayout",
     "Var",

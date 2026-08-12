@@ -94,11 +94,7 @@ Use `python -m tirx_kernels.bench_suite` in the **tirx-kernels** repo
 - Keep changes scoped to the task and avoid unrelated cleanups.
 - Prefer explicit tests that show the IR or behavior being changed.
 - Use Apache TVM commit tags such as `[REFACTOR][IR]`, `[FIX][TIR]`, or
-  `[DOCS]` as appropriate.
+  `[DOCS]` as appropriate. When creating a commit of MACA, follow the mcTVM commit
+  message convention in `docs/contribute/pull_request.rst`.
 - Preserve Apache license headers in new source, script, and documentation
   files when the surrounding tree uses them.
-
-## Commit Messages
-
-When creating a commit, follow the mcTVM commit message convention in
-`docs/contribute/pull_request.rst`.

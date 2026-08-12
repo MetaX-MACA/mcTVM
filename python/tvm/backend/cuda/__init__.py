@@ -23,7 +23,17 @@ from tvm_ffi.libinfo import load_lib_ctypes
 
 from tvm.base import _LOADED_LIBS
 
-_LAZY_SUBMODULES = {"lang", "op", "operator", "script", "target_tags"}
+_LAZY_SUBMODULES = {
+    "iket",
+    "intrinsics",
+    "lang",
+    "op",
+    "ptx",
+    "script",
+    "target_tags",
+    "tile_primitive",
+    "transforms",
+}
 
 
 def _detect_target_from_device(dev):
@@ -60,23 +70,27 @@ def register_backend():
     for name, namespace in script_namespaces().items():
         builder_ir.register_script_namespace(name, namespace)
 
-    import_module(f"{__name__}.operator.intrinsics")
-    import_module(f"{__name__}.operator.tile_primitive")
+    import_module(f"{__name__}.intrinsics")
+    import_module(f"{__name__}.tile_primitive")
     import_module(f"{__name__}.target_tags")
 
 
 def script_namespaces(**_):
     """Return CUDA-owned TVMScript namespaces."""
+    from .ptx import PTXNamespace  # pylint: disable=import-outside-toplevel
     from .script import (  # pylint: disable=import-outside-toplevel
         CUDANamespace,
         NVSHMEMNamespace,
-        PTXNamespace,
+        PTXLegacyNamespace,
+        STIRNamespace,
     )
 
     return {
         "cuda": CUDANamespace(),
         "nvshmem": NVSHMEMNamespace(),
+        "ptx_legacy": PTXLegacyNamespace(),
         "ptx": PTXNamespace(),
+        "s_tir": STIRNamespace(),
     }
 
 
@@ -92,12 +106,16 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "iket",
+    "intrinsics",
     "lang",
     "op",
-    "operator",
+    "ptx",
     "register_backend",
     "script",
     "script_namespace",
     "script_namespaces",
     "target_tags",
+    "tile_primitive",
+    "transforms",
 ]

@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=missing-function-docstring
-"""Round-trip tests for the ``gmem_smem`` copy dispatch (synthesized partition).
+"""Round-trip tests for the ``vec_auto`` global ↔ shared path.
 
 Pipeline: A_gmem --G2S--> A_smem --S2G--> B_gmem. If either direction is
 wrong the round trip leaves B mismatched against A.
@@ -29,7 +29,7 @@ import tvm.testing
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.testing import env
-from tvm.tirx.layout import ComposeLayout, S, SwizzleLayout, TileLayout
+from tvm.tirx.layout import ComposeLayout, S, TileLayout
 
 
 def _build_kernel(scope, n_threads, shape, dtype):
@@ -134,7 +134,7 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
 
 # ----------------------------------------------------------------------------
 # Migrated from test_copy_sync.py: sync G↔S copy via the user-facing
-# Tx.copy() (which dispatches to gmem_smem).
+# Tx.copy() (which dispatches to the vec_auto global ↔ shared path).
 # ----------------------------------------------------------------------------
 
 
@@ -189,7 +189,7 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
             64,
             TileLayout(S[96, 512]),
             TileLayout(S[96, 512]),
-            ComposeLayout(SwizzleLayout(3, 3, 3), TileLayout(S[8, 64]))
+            ComposeLayout(3, 3, 3, TileLayout(S[8, 64]))
             .tile_to((16, 128), (8, 64))
             .tile_to((32, 256), (16, 128)),
         ),
@@ -260,7 +260,7 @@ def test_copy_g2s_s2g(task, dtype, scope):
 def _align(
     g_layout, g_shape, s_layout, s_shape, elem_bits, thread_cnt, g_region=None, s_region=None
 ):
-    from tvm.backend.maca.operator.tile_primitive.copy._common import align_layouts_gs
+    from tvm.tirx.maca.tile_primitive.copy._common import align_layouts_gs
 
     target = tvm.target.Target("maca")
     if g_region is None:
@@ -282,17 +282,17 @@ def _align(
 
 @pytest.mark.parametrize("per_element,expected_max_vec", [(2, 4), (1, 2), (0, 1)])
 def test_swizzled_smem_vec_len_must_fit_chunk(per_element, expected_max_vec):
-    """``SwizzleLayout(per_element, ...)`` keeps the bottom ``per_element``
+    """A swizzled ``ComposeLayout`` keeps the bottom ``per_element``
     bits unswizzled. vec must stay within that chunk or it crosses an XOR
     boundary and reads/writes the wrong physical bytes."""
     shape = (32, 32)  # 1024 fp16 elements total
     g_layout = TileLayout(S[shape])
-    s_layout = ComposeLayout(SwizzleLayout(per_element, 3, 3), TileLayout(S[shape]))
+    s_layout = ComposeLayout(per_element, 3, 3, TileLayout(S[shape]))
     _g, _s, vec_len = _align(g_layout, shape, s_layout, shape, elem_bits=16, thread_cnt=32)
     chunk_elems = 1 << per_element
     assert vec_len <= chunk_elems, (
         f"vec_len={vec_len} crosses swizzle chunk size={chunk_elems} "
-        f"(SwizzleLayout(per_element={per_element}, ...))"
+        f"(swizzle per_element={per_element}, ...)"
     )
 
 
@@ -343,13 +343,16 @@ def test_unaligned_region_offset_must_clamp_vec_len():
 
 
 def test_swizzled_smem_emit_must_be_swizzle_aware():
-    """Codegen-level: emitted S address must honor the SwizzleLayout."""
+    """Codegen-level: emitted S address should go through the swizzle's
+    Apply so the XOR scrambling is honored. Currently emit uses
+    ``s_buf.ptr_to([0,..,0]) + linear_offset`` which only matches a
+    non-swizzled storage layout."""
     import tvm
     from tvm.script import tirx as T
-    from tvm.tirx.layout import ComposeLayout, S, SwizzleLayout, TileLayout
+    from tvm.tirx.layout import ComposeLayout, S, TileLayout
 
     shape = (128, 32)
-    s_layout = ComposeLayout(SwizzleLayout(3, 3, 3), TileLayout(S[shape]))
+    s_layout = ComposeLayout(3, 3, 3, TileLayout(S[shape]))
 
     @T.prim_func
     def kernel(A_ptr: T.handle) -> None:
@@ -376,18 +379,11 @@ def test_swizzled_smem_emit_must_be_swizzle_aware():
     #      to a ``^`` (XOR) somewhere in the S-offset computation
     #      (typically on a separate ``s_off_ptr[0] = ...`` line, not on
     #      the ``tvm_builtin_pointer_offset`` line itself).
-    #   2. fast path precomputes a ``signed_strides[N]`` register array
-    #      (one per binary outer iter), so each per-iter offset is a
-    #      sum of those strides — fingerprintable by the ``1 - 2 *``
-    #      sign-computation idiom emit_init writes.
-    # XOR-less code paired with no signed_strides init means swizzle
-    # was silently dropped.
-    has_xor = "^" in src
-    has_signed_strides_init = "1 - 2 *" in src or "(1 - 2 *" in src
-    assert has_xor or has_signed_strides_init, (
-        "emitted s_ptr address shows no swizzle handling — no XOR (fallback "
-        "path) and no signed_strides init (fast path)"
-    )
+    #   2. fast path computes the swizzled base once and XORs compile-time
+    #      constants per iter — also containing a ``^`` somewhere in the
+    #      S-offset computation.
+    # XOR-less code means swizzle was silently dropped.
+    assert "^" in src, "emitted s_ptr address shows no swizzle handling — no XOR anywhere"
 
 
 def test_layout_permute_copy_preserves_smem_strides():
@@ -494,30 +490,24 @@ def test_layout_permute_copy_preserves_smem_strides():
 
 
 # ----------------------------------------------------------------------------
-# Fast-path firing test (positive). Pairs with the var_bounds wiring inside
-# ``gmem_smem._emit_gmem_smem``.
-#
-# Setup: warp-scope 64x64 fp16 G2S/S2G with 128b swizzled SMEM. The outer
-# iter stride is ``thread_cnt * vec_len = 64 * 8 = 512``, which puts the
-# binary-split bj's at {6, 7, 8} — well above the swizzle XOR region (so
-# Case 1.D, signed_stride = +T). The (C1) analyzer check
-# ``bit_bj(s_off // C) == 0`` needs the placeholder var bounded to
-# laneid ∈ [0, 64); the dispatch passes ``var_bounds`` so it can discharge,
-# recognizer accepts, and emit lowers to the
-# ``base_off + sum_j bit_j(f) · signed_strides[j]`` precomputed form.
+# Structured ComposeLayout lowering test. The transformed S TileLayout is
+# recomposed with the original swizzle and applied directly to (f, tid, 0).
 # ----------------------------------------------------------------------------
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-def test_gmem_smem_swizzle_fast_path_fires_with_var_bounds():
-    """Warp-scope 64x64 fp16 G2S/S2G with 128b swizzled SMEM. Fast path
-    must fire: a 3-slot ``v_<n>[]`` signed_strides buffer + bit-select adds
-    per outer iter, no per-iter ``swizzle.apply`` XOR splice in the hot path."""
-    import re
+@pytest.mark.skipif(not env.has_maca(), reason="need cuda compute >= 9.0")
+def test_gmem_smem_swizzle_uses_structured_compose_apply():
+    """The hot copy loops use the structured P/XOR-low/ADD-high address form."""
 
-    swizzle = SwizzleLayout(3, 3, 3)
+    swizzle = ComposeLayout(3, 3, 3, TileLayout(S[(512,)]))
     shape = (64, 64)
     g_layout = TileLayout(S[shape])
-    s_layout = ComposeLayout(swizzle, TileLayout(S[shape]))
+    s_layout = ComposeLayout(
+        swizzle.per_element,
+        swizzle.swizzle_len,
+        swizzle.atom_len,
+        TileLayout(S[shape]),
+        swizzle.swizzle_inner,
+    )
 
     @T.prim_func
     def kernel(A_ptr: T.handle, B_ptr: T.handle) -> None:
@@ -538,18 +528,16 @@ def test_gmem_smem_swizzle_fast_path_fires_with_var_bounds():
         ex = tvm.compile(mod, target=target, tir_pipeline="tirx")
         src = ex.mod.imports[0].inspect_source()
 
-    bitsel = re.findall(r"& 1\) \* v_\d+\[", src)
-    v_decls = re.findall(
-        r"(?:alignas\(\d+\)|__attribute__\(\(aligned\(\d+\)\)\))\s+int v_\d+\[(\d+)\]",
-        src,
+    s_off_lines = [
+        line for line in src.splitlines() if line.strip().startswith("s_off") and "[0] =" in line
+    ]
+    assert len(s_off_lines) == 2, "expected one structured S offset in each copy direction"
+    assert all("^" in line for line in s_off_lines)
+    assert all("/" not in line and "%" not in line for line in s_off_lines), (
+        "structured hot-loop offsets must not contain full quotient/mod decomposition"
     )
-    assert bitsel, (
-        "expected fast-path ``(bit & 1) * v_<n>[i]`` adds; if missing, "
-        "var_bounds wiring may have regressed"
-    )
-    assert "3" in v_decls, (
-        f"expected at least one 3-slot signed_strides buffer for bjs "
-        f"[8, 7, 6]; got decl sizes {v_decls}"
+    assert all("* v_" in line for line in s_off_lines), (
+        "the atom-aligned outer contribution must remain a direct add"
     )
 
     # Round-trip correctness.

@@ -14,20 +14,16 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Unit tests for generic PTX ``T.ptx.ld`` / ``T.ptx.st`` vector copy ops."""
+"""Unit tests for the ptx ``ld`` / ``st`` entries, scalar and vector."""
 
 import numpy as np
 import pytest
 
 import tvm
-from tvm.ir import Op
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.testing import env
-from tvm.tirx.cuda.operator.tile_primitive.copy._common import (
-    copy_ptx_form,
-    copy_ptx_ld_return_type,
-)
+from tvm.tirx.cuda.tile_primitive.copy._common import copy_ptx_form
 
 MACA_TIRX_COPY_INTRIN_XFAIL_REASON = (
     "TODO(maca): [tirx-copy] support TIRX shared-memory scope resolution and PTX ld/st "
@@ -82,8 +78,8 @@ def _shared_scratch_copy_kernel(num_bytes: int):
     fill_value = spec.get("fill_value")
     fill_fp16 = spec.get("fill_fp16")
     fill_u8 = spec.get("fill_u8")
-    vec, ptx_type = copy_ptx_form(num_bytes)
-    return_type = copy_ptx_ld_return_type(ptx_type)
+    tail, lanes, reg_dtype = copy_ptx_form(num_bytes)
+    ld_chain, st_chain = f"ld.shared.{tail}", f"st.shared.{tail}"
 
     @T.prim_func
     def func(out_ptr: T.handle):
@@ -94,7 +90,7 @@ def _shared_scratch_copy_kernel(num_bytes: int):
         lane = T.lane_id([32])
         src_buf = T.alloc_buffer((nelems,), smem_dtype, scope="shared")
         dst_buf = T.alloc_buffer((nelems,), smem_dtype, scope="shared")
-        tmp = T.alloc_local((nelems,), tmp_dtype)
+        tmp = T.alloc_local((lanes,), reg_dtype)
         if fill_offset is not None:
             if lane < nelems:
                 src_buf[lane] = T.uint32(lane + fill_offset)
@@ -108,42 +104,13 @@ def _shared_scratch_copy_kernel(num_bytes: int):
             src_buf[0] = T.uint32(fill_value)
         T.cuda.cta_sync()
         if lane == 0:
-            T.ptx.ld(
-                src_buf.ptr_to([0]),
-                return_type,
-                ptx_type,
-                dst=tmp.ptr_to([0]),
-                space="shared",
-                vec=vec,
-            )
-            T.ptx.st(
-                dst_buf.ptr_to([0]),
-                src=tmp.ptr_to([0]),
-                space="shared",
-                vec=vec,
-                ptx_type=ptx_type,
-            )
+            T.ptx[ld_chain](*[tmp[i] for i in range(lanes)], src_buf.ptr_to([0]))
+            T.ptx[st_chain](dst_buf.ptr_to([0]), *[tmp[i] for i in range(lanes)])
         T.cuda.cta_sync()
         if lane < nelems:
             out[lane] = dst_buf[lane]
 
     return func
-
-
-def test_ptx_ld_st_ops_registered():
-    """PTX ld/st must be registered TIR ops and exposed on the T.ptx namespace."""
-    for name in ("tirx.ptx.ld", "tirx.ptx.st"):
-        Op.get(name)  # raises if unregistered
-
-    for attr in (
-        "ld",
-        "st",
-        "ld_acquire",
-        "st_release",
-        "ld_volatile",
-        "st_volatile",
-    ):
-        assert hasattr(T.ptx, attr), attr
 
 
 def test_ptx_ld_st_codegen_emits_shared_asm():
@@ -161,14 +128,10 @@ def test_ptx_ld_st_codegen_emits_shared_asm():
         smem = T.alloc_buffer((4,), "uint32", scope="shared")
         reg = T.alloc_local((4,), "uint32")
         if tid_in_wg == 0:
-            T.ptx.st(
-                smem.ptr_to([0]), src=reg.ptr_to([0]), space="shared", vec="v4", ptx_type="u32"
-            )
+            T.ptx.st.shared.v4.u32(smem.ptr_to([0]), reg[0], reg[1], reg[2], reg[3])
         T.cuda.cta_sync()
         if tid_in_wg == 0:
-            T.ptx.ld(
-                smem.ptr_to([0]), "uint32", "u32", dst=reg.ptr_to([0]), space="shared", vec="v4"
-            )
+            T.ptx.ld.shared.v4.u32(reg[0], reg[1], reg[2], reg[3], smem.ptr_to([0]))
         Tx.copy(D[0:4], reg[:])
     # fmt: on
 
@@ -178,8 +141,111 @@ def test_ptx_ld_st_codegen_emits_shared_asm():
     src = mod.mod.imports[0].inspect_source("cuda")
     assert "ld.shared" in src, "PTX ld did not emit ld.shared"
     assert "st.shared" in src, "PTX st did not emit st.shared"
-    assert "tvm_builtin_ptx_ld" in src
-    assert "tvm_builtin_ptx_st" in src
+    assert "ld.shared.v4.u32 {%0, %1, %2, %3}, [%4];" in src
+    assert "st.shared.v4.u32 [%0], {%1, %2, %3, %4};" in src
+
+
+def test_ptx_ld_st_raw_shared_address_codegen():
+    @T.prim_func
+    def main(out: T.Buffer((2,), "uint64")):
+        T.device_entry()
+        tx = T.thread_id([32])
+        smem = T.alloc_buffer((2,), "uint64", scope="shared")
+        values = T.alloc_local((4,), "uint32")
+        if tx == 0:
+            raw_addr: T.uint32 = T.cuda.cvta_generic_to_shared(smem.data)
+            T.ptx.ld.shared.u64(out[0], raw_addr)
+            T.ptx.ld.shared.u64(out[1], smem.data)
+            T.ptx.st.weak.shared__cta.b128(raw_addr, values.view("uint128")[0])
+
+    with TARGET:
+        mod = tvm.compile(tvm.IRModule({"main": main}), target=TARGET, tir_pipeline="tirx")
+    src = mod.mod.imports[0].inspect_source("cuda")
+    assert "ld.shared.u64 %0, [%1];" in src
+    # One cvta, for the generic pointer. The raw window address is already a
+    # uint32 and passes straight through -- ptx converts only pointers.
+    assert src.count("__cvta_generic_to_shared") == 1
+    assert '"st.weak.shared::cta.b128 [%0], %1;"' in src
+    assert '"q"(__value)' in src
+
+
+def test_ptx_ld_global_nc_v8_codegen():
+    """FlashMLA index loads need ``ld.global.nc`` with a 256B prefetch."""
+
+    @T.prim_func
+    def copy_kernel(src_ptr: T.handle, out_ptr: T.handle) -> None:
+        src = T.match_buffer(src_ptr, (8,), "int32")
+        out = T.match_buffer(out_ptr, (8,), "int32")
+        T.device_entry()
+        tx = T.thread_id([32])
+        tmp = T.alloc_local((8,), "int32")
+        if tx == 0:
+            T.ptx["ld.global.nc.L1::no_allocate.L2::evict_first.L2::256B.v8.s32"](
+                *[tmp[i] for i in range(8)], src.data
+            )
+            for i in T.unroll(8):
+                out[i] = tmp[i]
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.compile(tvm.IRModule({"main": copy_kernel}), target=target, tir_pipeline="tirx")
+    src = mod.mod.imports[0].inspect_source("cuda")
+    assert "ld.global.nc.L1::no_allocate.L2::evict_first.L2::256B.v8.s32" in src
+    assert "{%0, %1, %2, %3, %4, %5, %6, %7}, [%8];" in src
+
+
+def test_ptx_ld_global_nc_v4_u64_256b_codegen():
+    """FlashMLA 32-byte index loads may use four 64-bit PTX outputs."""
+
+    @T.prim_func
+    def copy_kernel(src_ptr: T.handle, out_ptr: T.handle) -> None:
+        src = T.match_buffer(src_ptr, (4,), "uint64")
+        out = T.match_buffer(out_ptr, (4,), "uint64")
+        T.device_entry()
+        tx = T.thread_id([32])
+        tmp = T.alloc_local((4,), "uint64")
+        if tx == 0:
+            T.ptx["ld.global.nc.L1::no_allocate.L2::evict_normal.L2::256B.v4.u64"](
+                tmp[0], tmp[1], tmp[2], tmp[3], src.data
+            )
+            for i in T.unroll(4):
+                out[i] = tmp[i]
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.compile(tvm.IRModule({"main": copy_kernel}), target=target, tir_pipeline="tirx")
+    src = mod.mod.imports[0].inspect_source("cuda")
+    assert "ld.global.nc.L1::no_allocate.L2::evict_normal.L2::256B.v4.u64" in src
+    assert "{%0, %1, %2, %3}, [%4];" in src
+
+
+def test_ptx_ld_vector_scatter_dst_codegen():
+    """Vector loads may write independent destination pointers."""
+
+    @T.prim_func
+    def copy_kernel(src_ptr: T.handle, out_ptr: T.handle) -> None:
+        src = T.match_buffer(src_ptr, (4,), "int32")
+        out = T.match_buffer(out_ptr, (4,), "int32")
+        T.device_entry()
+        tx = T.thread_id([32])
+        tmp0 = T.alloc_local((1,), "int32")
+        tmp1 = T.alloc_local((1,), "int32")
+        tmp2 = T.alloc_local((1,), "int32")
+        tmp3 = T.alloc_local((1,), "int32")
+        if tx == 0:
+            T.ptx["ld.global.nc.v4.s32"](tmp0[0], tmp1[0], tmp2[0], tmp3[0], src.data)
+            out[0] = tmp0[0]
+            out[1] = tmp1[0]
+            out[2] = tmp2[0]
+            out[3] = tmp3[0]
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.compile(tvm.IRModule({"main": copy_kernel}), target=target, tir_pipeline="tirx")
+    src = mod.mod.imports[0].inspect_source("cuda")
+    assert "ld.global.nc.v4.s32 {%0, %1, %2, %3}, [%4];" in src
+    # Four independent destinations: each lane is its own reference parameter.
+    assert "int32_t& __d0, int32_t& __d1, int32_t& __d2, int32_t& __d3" in src
 
 
 @pytest.mark.gpu
@@ -202,9 +268,8 @@ def test_ptx_ld_st_shared_copy_gpu(num_bytes):
     else:
         np.testing.assert_array_equal(result, expected)
     src = mod.mod.imports[0].inspect_source("cuda")
-    assert "tvm_builtin_ptx_ld" in src
-    assert "tvm_builtin_ptx_st" in src
-    vec, _ptx_type = copy_ptx_form(num_bytes)
+    tail, _lanes, _dtype = copy_ptx_form(num_bytes)
+    vec = tail.split(".")[0] if tail.startswith("v") else ""
     if vec == "v4":
         assert "ld.shared.v4" in src
         assert "st.shared.v4" in src
