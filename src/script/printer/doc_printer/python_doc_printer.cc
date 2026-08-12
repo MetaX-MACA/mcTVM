@@ -20,7 +20,7 @@
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/script/printer/doc.h>
-#include <tvm/tirx/tirx_op.h>
+#include <tvm/tirx/tile_primitive.h>
 
 #include <algorithm>
 #include <cmath>
@@ -805,6 +805,11 @@ void PythonDocPrinter::PrintTypedDoc(const FunctionDoc& doc) {
 
   output_ << "def ";
   PrintDoc(doc->name);
+  if (!doc->type_params.empty()) {
+    output_ << "[";
+    PrintJoinedDocs(doc->type_params, ", ");
+    output_ << "]";
+  }
 
   output_ << "(";
   PrintJoinedDocs(doc->args, ", ");

@@ -24,7 +24,7 @@ import tvm.testing
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.testing import env
-from tvm.tirx.layout import S, TileLayout, wg_local_layout
+from tvm.tirx.layout import S, TileLayout, tcgen05_atom_layout, wg_local_layout
 
 MACA_XFAIL = pytest.mark.xfail(
     reason=(
@@ -32,6 +32,10 @@ MACA_XFAIL = pytest.mark.xfail(
         "elementwise dispatch variants"
     ),
     strict=False,
+)
+
+CUDA_TCGEN05 = pytest.mark.skipif(
+    not env.has_cuda_compute(10), reason="need CUDA compute capability >= 10.0"
 )
 
 
@@ -587,12 +591,7 @@ def test_binary_op_packed_f32x2_auto_dispatch(op_type):
             "sub": r"sub\.[a-z]+\.ftz\.f32x2",
             "mul": r"mul\.[a-z]+\.ftz\.f32x2",
         }[op_type]
-        builtin_pat = {
-            "add": r"tvm_builtin_ptx_add_packed_",
-            "sub": r"tvm_builtin_ptx_sub_packed_",
-            "mul": r"tvm_builtin_ptx_mul_packed_",
-        }[op_type]
-        assert re.search(ptx_pat, src) or re.search(builtin_pat, src), src
+        assert re.search(ptx_pat, src), src
         if op_type == "add":
             A_ref = A_np + B_np
         elif op_type == "sub":
@@ -734,9 +733,9 @@ def test_binary_op_warpgroup_wg_local_emits_packed_f32x2(op_name, ptx_op):
         src = ex.mod.imports[0].inspect_source()
 
     # Codegen must use the packed f32x2 path, not scalar fallback.
-    assert re.search(rf"{ptx_op}\.[a-z]+\.ftz\.f32x2", src) or re.search(
-        rf"tvm_builtin_ptx_{ptx_op}_packed_[a-z]+_f32x2", src
-    ), f"expected packed f32x2 PTX for op={op_name}, source preview:\n{src[:2000]}"
+    assert re.search(rf"{ptx_op}\.[a-z]+\.ftz\.f32x2", src), (
+        f"expected packed f32x2 PTX for op={op_name}, source preview:\n{src[:2000]}"
+    )
 
 
 @MACA_XFAIL
@@ -777,9 +776,9 @@ def test_fma_warpgroup_wg_local_emits_packed_f32x2():
         ex = tvm.compile(mod, target=target, tir_pipeline="tirx")
         src = ex.mod.imports[0].inspect_source()
 
-    assert re.search(r"fma\.[a-z]+\.ftz\.f32x2", src) or re.search(
-        r"tvm_builtin_ptx_fma_packed_[a-z]+_f32x2", src
-    ), f"expected packed f32x2 fma PTX, source preview:\n{src[:2000]}"
+    assert re.search(r"fma\.[a-z]+\.ftz\.f32x2", src), (
+        f"expected packed f32x2 fma PTX, source preview:\n{src[:2000]}"
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -813,9 +812,9 @@ def test_binary_add_f32_sm100_packed_f32x2_dispatch():
         mod = tvm.IRModule({"main": k})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
         src = mod.mod.imports[0].inspect_source()
-    assert re.search(r"add\.[a-z]+\.ftz\.f32x2", src) or re.search(
-        r"tvm_builtin_ptx_add_packed_", src
-    ), f"expected packed add_f32x2; got:\n{src[:2000]}"
+    assert re.search(r"add\.[a-z]+\.ftz\.f32x2", src), (
+        f"expected packed add_f32x2; got:\n{src[:2000]}"
+    )
 
 
 @pytest.mark.gpu
@@ -886,6 +885,42 @@ def test_binary_add_f16_scalar_fallback_dispatch():
     assert "half" in src or "__half" in src, f"expected scalar half add; got:\n{src[:2000]}"
     assert not re.search(r"add\.[a-z]+\.ftz\.f(32|16)x2", src), (
         f"unexpected packed f32x2/f16x2 add in scalar-fallback path; got:\n{src[:2000]}"
+    )
+
+
+@CUDA_TCGEN05
+def test_mul_tcgen05_16x256b_atom_warpgroup_dispatch():
+    """A split laneid/wid_in_wg register atom must canonicalize before slicing."""
+    rows, cols = 64, 64
+    regs_per_thread = 32
+    atom_layout = tcgen05_atom_layout("16x256b", (rows, cols), "float32")
+
+    @T.prim_func
+    def kernel(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (128, regs_per_thread), "float32")
+        B = T.match_buffer(B_ptr, (128, regs_per_thread), "float32")
+        T.device_entry()
+        T.cta_id([1])
+        T.warpgroup_id([1])
+        T.warp_id_in_wg([4])
+        T.lane_id([32])
+        tid = T.thread_id_in_wg([128])
+        src = T.alloc_buffer((rows, cols), "float32", scope="local", layout=atom_layout)
+        dst = T.alloc_buffer((rows, cols), "float32", scope="local", layout=atom_layout)
+        src_local = src.local(regs_per_thread)
+        dst_local = dst.local(regs_per_thread)
+        for i in T.serial(regs_per_thread):
+            src_local[i] = A[tid, i]
+        Tx.wg.mul(dst, src, T.float32(3.0))
+        for i in T.serial(regs_per_thread):
+            B[tid, i] = dst_local[i]
+
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
+    with target:
+        mod = tvm.compile(tvm.IRModule({"main": kernel}), target=target, tir_pipeline="tirx")
+        src = mod.mod.imports[0].inspect_source()
+    assert re.search(r"mul\.[a-z]+\.ftz\.f32x2", src), (
+        f"expected packed mul_f32x2 for tcgen05 atom; got:\n{src[:2000]}"
     )
 
 

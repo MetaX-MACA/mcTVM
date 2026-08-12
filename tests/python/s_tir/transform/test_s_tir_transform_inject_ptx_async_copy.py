@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# ruff: noqa: E501, F401, F841
+# ruff: noqa: E501, F401
 
 import numpy as np
 import pytest
@@ -42,7 +42,7 @@ def test_cp_async_raw_dtype_round_trips():
     def f(A: T.Buffer((128,), "float16"), B: T.Buffer((128,), "float16")):
         T.func_attr({"global_symbol": "f"})
         for i in T.serial(8):
-            T.ptx.cp_async("float16", B.data, i * 16, A.data, i * 16, 16)
+            T.s_tir.cp_async_raw("float16", B.data, i * 16, A.data, i * 16, 16)
 
     reparsed = tvm.script.from_source(f.script())
     tvm.ir.assert_structural_equal(f, reparsed)
@@ -52,7 +52,7 @@ def count_cp_async(stmt):
     num_alloc = [0]
 
     def verify(n):
-        if isinstance(n, tvm.ir.Call) and n.op.name == "tirx.ptx.cp_async_raw":
+        if isinstance(n, tvm.ir.Call) and n.op.name == "tirx.s_tir.cp_async_raw":
             num_alloc[0] += 1
 
     tvm.tirx.stmt_functor.post_order_visit(stmt, verify)
@@ -82,8 +82,8 @@ def generate_global_to_shared_vectorized_copy(dtype, vector_size):
                 for j in T.vectorized(vector_size):
                     A_shared[tx, i * vector_size_expr + j] = A[tx, i * vector_size_expr + j]
 
-            T.evaluate(T.ptx.cp_async.commit_group(dtype=""))
-            T.evaluate(T.ptx.cp_async.wait_group(0, dtype=""))
+            T.evaluate(T.ptx.cp.async_.commit_group())
+            T.evaluate(T.ptx.cp.async_.wait_group(0))
 
             for i in range(128):
                 B[tx, i] = A_shared[tx, i]
@@ -109,8 +109,8 @@ def ptx_global_to_shared_copy_fp32x1(
         for i in T.serial(128):
             A_shared[tx, i] = A[tx, i]
 
-        T.evaluate(T.ptx.cp_async.commit_group(dtype=""))
-        T.evaluate(T.ptx.cp_async.wait_group(0, dtype=""))
+        T.evaluate(T.ptx.cp.async_.commit_group())
+        T.evaluate(T.ptx.cp.async_.wait_group(0))
 
         for i in range(128):
             B[tx, i] = A_shared[tx, i]
@@ -139,8 +139,8 @@ def ptx_global_to_shared_dyn_copy_fp16x8(
                 A_shared[tx, i * 8 + j] = A[tx, i * 8 + j]
                 B_shared[tx, i * 8 + j] = B[tx, i * 8 + j]
 
-        T.evaluate(T.ptx.cp_async.commit_group(dtype=""))
-        T.evaluate(T.ptx.cp_async.wait_group(0, dtype=""))
+        T.evaluate(T.ptx.cp.async_.commit_group())
+        T.evaluate(T.ptx.cp.async_.wait_group(0))
 
         for i in range(128):
             C[tx, i] = A_shared[tx, i] + B_shared[tx, i]
@@ -248,21 +248,17 @@ expected_cuda_script = r"""#include <cuda.h>
   #define uchar unsigned char
   #define ushort unsigned short
 #endif
-
-__forceinline__ __device__ void tvm_builtin_ptx_cp_async_wait_group_0() {
-    asm volatile("cp.async.wait_group 0;");
+__forceinline__ __device__ void tvm_builtin_ptx_cp_async_wait_group_async_wait_group_0() {
+  asm volatile("cp.async.wait_group 0;" :  :  : "memory");
 }
-
-__forceinline__ __device__ void tvm_builtin_ptx_cp_async_wait_group_1() {
-    asm volatile("cp.async.wait_group 1;");
+__forceinline__ __device__ void tvm_builtin_ptx_cp_async_wait_group_async_wait_group_1() {
+  asm volatile("cp.async.wait_group 1;" :  :  : "memory");
 }
-
-__forceinline__ __device__ void tvm_builtin_ptx_cp_async_wait_group_2() {
-    asm volatile("cp.async.wait_group 2;");
+__forceinline__ __device__ void tvm_builtin_ptx_cp_async_wait_group_async_wait_group_2() {
+  asm volatile("cp.async.wait_group 2;" :  :  : "memory");
 }
-
-__forceinline__ __device__ void tvm_builtin_ptx_cp_async_wait_group_5() {
-    asm volatile("cp.async.wait_group 5;");
+__forceinline__ __device__ void tvm_builtin_ptx_cp_async_wait_group_async_wait_group_5() {
+  asm volatile("cp.async.wait_group 5;" :  :  : "memory");
 }
 
 __forceinline__ __device__ void ptx_cp_async_legacy_pred_ca_4_4_4(void* dst, int dst_off, void* src, int src_off, int predicate) {
@@ -287,9 +283,8 @@ __forceinline__ __device__ void ptx_cp_async_legacy_ca_4_4_4(void* dst, int dst_
   asm volatile("cp.async.ca.shared.global [%0], [%1], %2;"
     :: "r"(dst_addr), "l"(src_p), "n"(4));
 }
-
-__forceinline__ __device__ void tvm_builtin_ptx_cp_async_commit_group() {
-    asm volatile("cp.async.commit_group;");
+__forceinline__ __device__ void tvm_builtin_ptx_cp_async_commit_group_async_commit_group() {
+  asm volatile("cp.async.commit_group;" :  : );
 }
 extern "C" __global__ void __launch_bounds__(16) main_kernel(float* __restrict__ A_ptr, float* __restrict__ B_ptr, float* __restrict__ C_ptr);
 extern "C" __global__ void __launch_bounds__(16) main_kernel(float* __restrict__ A_ptr, float* __restrict__ B_ptr, float* __restrict__ C_ptr) {
@@ -297,38 +292,38 @@ extern "C" __global__ void __launch_bounds__(16) main_kernel(float* __restrict__
   __shared__ alignas(64) float B_shared_ptr[64];
   A_shared_ptr[((int)threadIdx.x)] = 0x0p+0f/*0.000000e+00*/;
   B_shared_ptr[((int)threadIdx.x)] = 0x0p+0f/*0.000000e+00*/;
-  tvm_builtin_ptx_cp_async_commit_group();
+  tvm_builtin_ptx_cp_async_commit_group_async_commit_group();
   int cse_v1 = (((int)threadIdx.x) * 14);
   int cse_v2 = (((int)threadIdx.x) + 16);
   ptx_cp_async_legacy_ca_4_4_4(A_shared_ptr, (((int)threadIdx.x) + 16), A_ptr, (((int)threadIdx.x) * 14));
   ptx_cp_async_legacy_ca_4_4_4(B_shared_ptr, (((int)threadIdx.x) + 16), B_ptr, (((int)threadIdx.x) * 14));
-  tvm_builtin_ptx_cp_async_commit_group();
+  tvm_builtin_ptx_cp_async_commit_group_async_commit_group();
   int cse_v3 = (((int)threadIdx.x) + 32);
   int cse_v6 = ((((int)threadIdx.x) * 14) + 1);
   ptx_cp_async_legacy_ca_4_4_4(A_shared_ptr, (((int)threadIdx.x) + 32), A_ptr, ((((int)threadIdx.x) * 14) + 1));
   ptx_cp_async_legacy_ca_4_4_4(B_shared_ptr, (((int)threadIdx.x) + 32), B_ptr, ((((int)threadIdx.x) * 14) + 1));
-  tvm_builtin_ptx_cp_async_commit_group();
+  tvm_builtin_ptx_cp_async_commit_group_async_commit_group();
   int cse_v4 = (((int)threadIdx.x) * 16);
   for (int i = 0; i < 13; ++i) {
     int cse_v7 = (((((int)threadIdx.x) * 14) + i) + 2);
     int cse_v9 = ((((i + 3) & 3) * 16) + ((int)threadIdx.x));
     ptx_cp_async_legacy_pred_ca_4_4_4(A_shared_ptr, ((((i + 3) & 3) * 16) + ((int)threadIdx.x)), A_ptr, (((((int)threadIdx.x) * 14) + i) + 2), (i < 12));
-    tvm_builtin_ptx_cp_async_commit_group();
-    tvm_builtin_ptx_cp_async_wait_group_5();
+    tvm_builtin_ptx_cp_async_commit_group_async_commit_group();
+    tvm_builtin_ptx_cp_async_wait_group_async_wait_group_5();
     __syncthreads();
     int cse_v8 = (((i & 3) * 16) + ((int)threadIdx.x));
     C_ptr[((((int)threadIdx.x) * 16) + i)] = (A_shared_ptr[(((i & 3) * 16) + ((int)threadIdx.x))] + B_shared_ptr[(((i & 3) * 16) + ((int)threadIdx.x))]);
     __syncthreads();
     ptx_cp_async_legacy_pred_ca_4_4_4(B_shared_ptr, ((((i + 3) & 3) * 16) + ((int)threadIdx.x)), B_ptr, (((((int)threadIdx.x) * 14) + i) + 2), (i < 12));
-    tvm_builtin_ptx_cp_async_commit_group();
+    tvm_builtin_ptx_cp_async_commit_group_async_commit_group();
   }
-  tvm_builtin_ptx_cp_async_wait_group_2();
+  tvm_builtin_ptx_cp_async_wait_group_async_wait_group_2();
   __syncthreads();
   C_ptr[((((int)threadIdx.x) * 16) + 13)] = (A_shared_ptr[(((int)threadIdx.x) + 16)] + B_shared_ptr[(((int)threadIdx.x) + 16)]);
-  tvm_builtin_ptx_cp_async_wait_group_1();
+  tvm_builtin_ptx_cp_async_wait_group_async_wait_group_1();
   __syncthreads();
   C_ptr[((((int)threadIdx.x) * 16) + 14)] = (A_shared_ptr[(((int)threadIdx.x) + 32)] + B_shared_ptr[(((int)threadIdx.x) + 32)]);
-  tvm_builtin_ptx_cp_async_wait_group_0();
+  tvm_builtin_ptx_cp_async_wait_group_async_wait_group_0();
   __syncthreads();
   int cse_v5 = (((int)threadIdx.x) + 48);
   C_ptr[((((int)threadIdx.x) * 16) + 15)] = (A_shared_ptr[(((int)threadIdx.x) + 48)] + B_shared_ptr[(((int)threadIdx.x) + 48)]);
@@ -505,8 +500,8 @@ def test_vectorize_cp_async_in_if_then_else(postproc_if_missing_async_support):
                                     16,
                                     16,
                                     16,
-                                    C.elem_offset // C_s0 // 16 * (C_s0 // 16)
-                                    + C.elem_offset % C_s0 // 16,
+                                    C.ty.elem_offset // C_s0 // 16 * (C_s0 // 16)
+                                    + C.ty.elem_offset % C_s0 // 16,
                                     T.float32(0),
                                 )
                         for k_0_0 in T.serial(
@@ -697,12 +692,12 @@ def test_vectorize_cp_async_in_if_then_else(postproc_if_missing_async_support):
                                             16,
                                             16,
                                             16,
-                                            C.elem_offset // C_s0 // 16 * (C_s0 // 16)
-                                            + C.elem_offset % C_s0 // 16,
+                                            C.ty.elem_offset // C_s0 // 16 * (C_s0 // 16)
+                                            + C.ty.elem_offset % C_s0 // 16,
                                             T.tvm_access_ptr(
                                                 T.type_annotation("float16"),
                                                 A_1.data,
-                                                A_1.elem_offset,
+                                                A_1.ty.elem_offset,
                                                 A_s0 * 16,
                                                 1,
                                             ),
@@ -758,12 +753,12 @@ def test_vectorize_cp_async_in_if_then_else(postproc_if_missing_async_support):
                                             16,
                                             16,
                                             16,
-                                            C.elem_offset // C_s0 // 16 * (C_s0 // 16)
-                                            + C.elem_offset % C_s0 // 16,
+                                            C.ty.elem_offset // C_s0 // 16 * (C_s0 // 16)
+                                            + C.ty.elem_offset % C_s0 // 16,
                                             T.tvm_access_ptr(
                                                 T.type_annotation("float16"),
                                                 A_1.data,
-                                                A_1.elem_offset,
+                                                A_1.ty.elem_offset,
                                                 A_s0 * 16,
                                                 1,
                                             ),
@@ -836,17 +831,17 @@ def test_vectorize_cp_async_in_if_then_else(postproc_if_missing_async_support):
                                         )
                                         T.tvm_mma_sync(
                                             C.data,
-                                            C.elem_offset // C_s0 // 16 * (C_s0 // 16)
-                                            + C.elem_offset % C_s0 // 16,
+                                            C.ty.elem_offset // C_s0 // 16 * (C_s0 // 16)
+                                            + C.ty.elem_offset % C_s0 // 16,
                                             A_1.data,
-                                            A_1.elem_offset // A_s0 // 16 * (A_s0 // 16)
-                                            + A_1.elem_offset % A_s0 // 16,
+                                            A_1.ty.elem_offset // A_s0 // 16 * (A_s0 // 16)
+                                            + A_1.ty.elem_offset % A_s0 // 16,
                                             B.data,
-                                            B.elem_offset // B_s0 // 16 * (B_s0 // 16)
-                                            + B.elem_offset % B_s0 // 16,
+                                            B.ty.elem_offset // B_s0 // 16 * (B_s0 // 16)
+                                            + B.ty.elem_offset % B_s0 // 16,
                                             C.data,
-                                            C.elem_offset // C_s0 // 16 * (C_s0 // 16)
-                                            + C.elem_offset % C_s0 // 16,
+                                            C.ty.elem_offset // C_s0 // 16 * (C_s0 // 16)
+                                            + C.ty.elem_offset % C_s0 // 16,
                                         )
                         for ax0_0, ax1_0 in T.grid(2, 2):
                             with T.sblock("Conv_reindex_wmma.accumulator_o"):
@@ -886,12 +881,12 @@ def test_vectorize_cp_async_in_if_then_else(postproc_if_missing_async_support):
                                     16,
                                     16,
                                     16,
-                                    A_1.elem_offset // A_s0 // 16 * (A_s0 // 16)
-                                    + A_1.elem_offset % A_s0 // 16,
+                                    A_1.ty.elem_offset // A_s0 // 16 * (A_s0 // 16)
+                                    + A_1.ty.elem_offset % A_s0 // 16,
                                     T.tvm_access_ptr(
                                         T.type_annotation("float16"),
                                         C.data,
-                                        C.elem_offset,
+                                        C.ty.elem_offset,
                                         C_s0 * 16,
                                         2,
                                     ),
@@ -922,8 +917,8 @@ def test_multiplication_nodes_are_inlined():
                 A_shared[T.Ramp(tx * T.int64(128) + cse_v1 * T.int64(8), T.int64(1), 8)] = (
                     A_flattened[T.Ramp(tx * T.int64(128) + cse_v1 * T.int64(8), T.int64(1), 8)]
                 )
-            T.ptx.cp_async.commit_group()
-            T.ptx.cp_async.wait_group(0)
+            T.ptx.cp.async_.commit_group()
+            T.ptx.cp.async_.wait_group(0)
 
     @I.ir_module(s_tir=True)
     class Expected:
@@ -934,16 +929,16 @@ def test_multiplication_nodes_are_inlined():
             A_shared = T.decl_buffer((4096,), "float16", scope="shared")
             for i in range(16):
                 cse_v1: T.int64 = T.Cast("int64", i)
-                T.ptx.cp_async(
+                T.s_tir.cp_async_raw(
                     "float16",
                     A_shared.data,
                     tx * T.int64(128) + cse_v1 * T.int64(8),
-                    A.data,
+                    A_flattened.data,
                     tx * T.int64(128) + cse_v1 * T.int64(8),
                     16,
                 )
-            T.ptx.cp_async.commit_group()
-            T.ptx.cp_async.wait_group(0)
+            T.ptx.cp.async_.commit_group()
+            T.ptx.cp.async_.wait_group(0)
 
     After = tvm.s_tir.transform.InjectPTXAsyncCopy()(Before)
     tvm.ir.assert_structural_equal(After, Expected)

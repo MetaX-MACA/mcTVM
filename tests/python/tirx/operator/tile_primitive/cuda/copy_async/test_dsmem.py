@@ -32,13 +32,13 @@ from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx import IntImm, Var
-from tvm.tirx.cuda.operator.tile_primitive.copy_async.dsmem import copy_dsmem_impl
+from tvm.tirx.cuda.tile_primitive.copy_async.dsmem import copy_dsmem_impl
 from tvm.tirx.exec_scope import ExecScope
 from tvm.tirx.layout import S, TileLayout
-from tvm.tirx.operator.tile_primitive.dispatch_context import DispatchContext
 from tvm.tirx.operator.tile_primitive.dispatcher import DispatchFail
 from tvm.tirx.operator.tile_primitive.ops import CopyAsync
 from tvm.tirx.stmt_functor import StmtExprVisitor
+from tvm.tirx.tile_primitive import DispatchContext
 
 MACA_XFAIL = pytest.mark.xfail(
     reason="TODO(maca): [tile-primitive-copy-async-dsmem] support DSMEM async copy dispatch",
@@ -76,7 +76,7 @@ class _S2CCounter(StmtExprVisitor):
 
     def visit_evaluate_(self, op):
         if isinstance(op.value, tvm.ir.Call):
-            if op.value.op.name == "tirx.ptx.cp_async_bulk_shared_to_cluster":
+            if op.value.op.name == "tirx.ptx.cp_async_bulk_s2c":
                 n = 1
                 for e in self._loop_extents:
                     n *= e
@@ -192,13 +192,13 @@ def test_dsmem(shape, dtype, src_spec, dst_spec, expected):
         pool.commit()
 
         mbar.init(1)
-        T.ptx.fence.mbarrier_init()
+        T.ptx.fence.mbarrier_init.release.cluster()
         T.cuda.cluster_sync()
 
         if tid == 0:
             if cbx == 0:
                 Tx.copy(src_smem[r], A[r])
-                T.ptx.fence.proxy_async("shared::cta")
+                T.ptx.fence.proxy.async_.shared__cta()
 
                 Tx.copy_async(
                     dst_smem[r], src_smem[r],
@@ -207,7 +207,7 @@ def test_dsmem(shape, dtype, src_spec, dst_spec, expected):
                     remote_cta_id=T.int32(1),
                 )
             else:
-                T.ptx.mbarrier.arrive.expect_tx(mbar.ptr_to([0]), copy_bytes)
+                T.ptx.mbarrier.arrive.expect_tx.shared.b64(mbar.ptr_to([0]), T.uint32(copy_bytes))
                 mbar.wait(0, 0)
 
                 Tx.copy(B[r], dst_smem[r])

@@ -502,7 +502,7 @@ void CodeGenMACA::VisitStmt_(const tirx::ForNode* op) {
 }
 
 void CodeGenMACA::VisitStmt_(const DeclBufferNode* op) {
-  auto data = op->buffer->data;
+  auto data = op->buffer.get();
   ffi::String data_scope = op->buffer.scope();
   if (data_scope == "shared.dyn") {
     ffi::String data_name = data->name;
@@ -1280,11 +1280,11 @@ void CodeGenMACA::VisitStmt_(const AttrStmtNode* op) {
 
 void CodeGenMACA::VisitStmt_(const AllocBufferNode* op) {
   TVM_FFI_ICHECK(op->buffer.defined());
-  std::string vid = AllocVarID(op->buffer->data.get());
+  std::string vid = AllocVarID(op->buffer.get());
 
   this->PrintIndent();
-  std::string scope = GetPtrStorageScope(op->buffer->data);
-  const VarNode* buffer = op->buffer->data.as<VarNode>();
+  std::string scope = op->buffer.scope();
+  const VarNode* buffer = op->buffer.get();
   PrimType dtype = op->buffer->dtype;
   if (scope.find("wmma.") == 0) {
     if (scope == "wmma.matrix_a" || scope == "wmma.matrix_b") {
@@ -1355,9 +1355,9 @@ void CodeGenMACA::VisitStmt_(const AllocBufferNode* op) {
     stream << ' ' << vid << '[' << constant_size << "];\n";
   }
 
-  RegisterHandleType(op->buffer->data.get(), dtype);
+  RegisterHandleType(op->buffer.get(), dtype);
   if (op->annotations.count(tirx::attr::kVolatile)) {
-    MarkVolatile(op->buffer->data.get());
+    MarkVolatile(op->buffer.get());
   }
 }
 
@@ -1748,7 +1748,7 @@ void CodeGenMACA::HandleVolatileLoads(const std::string& value, const BufferLoad
   // stores are volatile. The loaded objects are not marked as volatile.
   //
   PrimType op_ty = op->ty.as_or_throw<PrimType>();
-  if ((IsFloat16(op_ty) || IsBFloat16(op_ty)) && IsVolatile(op->buffer->data.get())) {
+  if ((IsFloat16(op_ty) || IsBFloat16(op_ty)) && IsVolatile(op->buffer.get())) {
     os << "(";
     PrintType(op_ty, os);
     os << ")(" << value << ")";

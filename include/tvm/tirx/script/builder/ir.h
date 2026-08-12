@@ -27,7 +27,7 @@
 #include <tvm/tirx/layout.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/script/builder/frame.h>
-#include <tvm/tirx/tirx_stmt.h>
+#include <tvm/tirx/tile_primitive.h>
 
 namespace tvm {
 namespace script {
@@ -37,7 +37,7 @@ namespace tirx {
 using tvm::ffi::Tuple;
 using tvm::ffi::Variant;
 using tvm::runtime::Tensor;
-using tvm::tirx::Buffer;
+using tvm::tirx::BufferVar;
 using tvm::tirx::ExecScope;
 using tvm::tirx::Layout;
 using tvm::tirx::Var;
@@ -55,11 +55,11 @@ using tvm::tirx::Var;
  * \param offset_factor The factor of elem_offset field.
  * \return The declared buffer.
  */
-Buffer BufferDecl(ffi::Array<PrimExpr> shape, PrimType dtype, ffi::String buffer_name,
-                  ffi::Optional<Var> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
-                  ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
-                  int offset_factor, ffi::Optional<Layout> layout = std::nullopt,
-                  ffi::Array<PrimExpr> allocated_addr = {});
+BufferVar BufferDecl(ffi::Array<PrimExpr> shape, PrimType dtype, ffi::String buffer_name,
+                     ffi::Optional<Expr> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
+                     ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
+                     int offset_factor, ffi::Optional<Layout> layout = std::nullopt,
+                     ffi::Array<PrimExpr> allocated_addr = {});
 
 /*!
  * \brief The primitive function statement.
@@ -81,7 +81,7 @@ Var Arg(ffi::String name, Var var);
  * \param buffer The buffer argument.
  * \return The buffer.
  */
-Buffer Arg(ffi::String name, Buffer buffer);
+BufferVar Arg(ffi::String name, BufferVar buffer);
 
 /*!
  * \brief The PrimFunc naming statement.
@@ -115,11 +115,11 @@ Type FuncRet(Type ret_type);
  * \param offset_factor The factor of elem_offset field.
  * \return The matched buffer.
  */
-Buffer MatchBuffer(ffi::ObjectRef param, ffi::Array<PrimExpr> shape,
-                   PrimType dtype = PrimType::Float(32), ffi::Optional<Var> data = std::nullopt,
-                   ffi::Array<PrimExpr> strides = {}, PrimExpr elem_offset = PrimExpr(),
-                   ffi::String storage_scope = "global", int align = -1, int offset_factor = 0,
-                   ffi::Optional<Layout> layout = std::nullopt);
+BufferVar MatchBuffer(ffi::ObjectRef param, ffi::Array<PrimExpr> shape,
+                      PrimType dtype = PrimType::Float(32), ffi::Optional<Expr> data = std::nullopt,
+                      ffi::Array<PrimExpr> strides = {}, PrimExpr elem_offset = PrimExpr(),
+                      ffi::String storage_scope = "global", int align = -1, int offset_factor = 0,
+                      ffi::Optional<Layout> layout = std::nullopt);
 
 /*!
  * \brief The block declaration statement.
@@ -131,15 +131,37 @@ SBlockFrame Block(ffi::String name, bool no_realize = false, ffi::String exec_sc
 
 void TilePrimitiveCall(tvm::tirx::TilePrimitiveCall op_call);
 
-ffi::Array<tvm::tirx::Var> KernelId(ffi::Array<PrimExpr> extents, ffi::String parent);
+/*!
+ * \brief Define a scope id. Pass `extents=std::nullopt` to defer the extent; it is
+ *        inferred at LowerTIRx from the sibling ScopeIdDef closure.
+ * \param extents The optional extents of the scope id.
+ * \param parent The parent scope name.
+ * \param name The user-facing API name, used in error messages.
+ * \param cur The current scope name.
+ * \param dtype The dtype of the introduced scope id vars ("int32" or "uint32").
+ * \return The introduced scope id vars.
+ */
+ffi::Array<tvm::tirx::Var> ScopeId(ffi::Optional<ffi::Array<PrimExpr>> extents, ffi::String parent,
+                                   ffi::String name, ffi::String cur,
+                                   PrimType dtype = PrimType::Int(32));
 
-ffi::Array<tvm::tirx::Var> CtaId(ffi::Array<PrimExpr> extents, ffi::String parent);
+ffi::Array<tvm::tirx::Var> ClusterId(ffi::Optional<ffi::Array<PrimExpr>> extents,
+                                     ffi::String parent, PrimType dtype = PrimType::Int(32));
 
-ffi::Array<tvm::tirx::Var> CtaIdInPair();
+ffi::Array<tvm::tirx::Var> CtaId(ffi::Optional<ffi::Array<PrimExpr>> extents, ffi::String parent,
+                                 ffi::Optional<ffi::Array<PrimExpr>> preferred = std::nullopt,
+                                 PrimType dtype = PrimType::Int(32));
 
-ffi::Array<tvm::tirx::Var> WarpId(ffi::Array<PrimExpr> extents, ffi::String parent);
+ffi::Array<tvm::tirx::Var> CtaIdInPair(PrimType dtype = PrimType::Int(32));
 
-ffi::Array<tvm::tirx::Var> ThreadId(ffi::Array<PrimExpr> extents, ffi::String parent);
+ffi::Array<tvm::tirx::Var> WarpgroupId(ffi::Optional<ffi::Array<PrimExpr>> extents,
+                                       ffi::String parent, PrimType dtype = PrimType::Int(32));
+
+ffi::Array<tvm::tirx::Var> WarpId(ffi::Optional<ffi::Array<PrimExpr>> extents, ffi::String parent,
+                                  PrimType dtype = PrimType::Int(32));
+
+ffi::Array<tvm::tirx::Var> ThreadId(ffi::Optional<ffi::Array<PrimExpr>> extents, ffi::String parent,
+                                    PrimType dtype = PrimType::Int(32));
 
 /*!
  * \brief The block initialization statement.
@@ -186,9 +208,9 @@ void BlockAttrs(ffi::Map<ffi::String, ffi::Any> attrs);
  * \return The allocated buffer or the AllocBufferFrame if the function is called under
  * T.prim_func(tirx=True).
  */
-ffi::Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
+ffi::Variant<BufferVar, AllocBufferFrame> SBlockAllocBuffer(
     ffi::Array<PrimExpr> shape, PrimType dtype = PrimType::Float(32),
-    ffi::Optional<Var> data = std::nullopt, ffi::Array<PrimExpr> strides = {},
+    ffi::Optional<Expr> data = std::nullopt, ffi::Array<PrimExpr> strides = {},
     PrimExpr elem_offset = PrimExpr(), ffi::String storage_scope = "", int align = -1,
     int offset_factor = 0, ffi::Optional<Layout> layout = std::nullopt,
     ffi::Array<PrimExpr> allocated_addr = {});
@@ -249,44 +271,53 @@ ffi::Array<Var> Remap(ffi::String kinds, ffi::Array<PrimExpr> bindings,
  * \param stop The maximum value of iteration.
  * \param annotations The optional annotations of the For statement.
  * \param step The optional step value of iteration.
+ * \param dtype The optional dtype of the loop var ("int32" or "uint32"). When omitted
+ *              it is inferred from the bounds.
  * \return The ForFrame.
  */
 ForFrame Serial(PrimExpr start, PrimExpr stop,
                 ffi::Optional<ffi::Map<ffi::String, Any>> annotations = std::nullopt,
-                ffi::Optional<PrimExpr> step = std::nullopt);
+                ffi::Optional<PrimExpr> step = std::nullopt,
+                ffi::Optional<PrimType> dtype = std::nullopt);
 /*!
  * \brief The parallel For statement.
  * \param start The minimum value of iteration.
  * \param stop The maximum value of iteration.
  * \param annotations The optional annotations of the For statement.
  * \param step The optional step value of iteration.
+ * \param dtype The optional dtype of the loop var ("int32" or "uint32").
  * \return The ForFrame.
  */
 ForFrame Parallel(PrimExpr start, PrimExpr stop,
                   ffi::Optional<ffi::Map<ffi::String, Any>> annotations = std::nullopt,
-                  ffi::Optional<PrimExpr> step = std::nullopt);
+                  ffi::Optional<PrimExpr> step = std::nullopt,
+                  ffi::Optional<PrimType> dtype = std::nullopt);
 /*!
  * \brief The vectorized For statement.
  * \param start The minimum value of iteration.
  * \param stop The maximum value of iteration.
  * \param annotations The optional annotations of the For statement.
  * \param step The optional step value of iteration.
+ * \param dtype The optional dtype of the loop var ("int32" or "uint32").
  * \return The ForFrame.
  */
 ForFrame Vectorized(PrimExpr start, PrimExpr stop,
                     ffi::Optional<ffi::Map<ffi::String, Any>> annotations = std::nullopt,
-                    ffi::Optional<PrimExpr> step = std::nullopt);
+                    ffi::Optional<PrimExpr> step = std::nullopt,
+                    ffi::Optional<PrimType> dtype = std::nullopt);
 /*!
  * \brief The unrolled For statement.
  * \param start The minimum value of iteration.
  * \param stop The maximum value of iteration.
  * \param annotations The optional annotations of the For statement.
  * \param step The optional step value of iteration.
+ * \param dtype The optional dtype of the loop var ("int32" or "uint32").
  * \return The ForFrame.
  */
 ForFrame Unroll(PrimExpr start, PrimExpr stop,
                 ffi::Optional<ffi::Map<ffi::String, Any>> annotations = std::nullopt,
-                ffi::Optional<PrimExpr> step = std::nullopt);
+                ffi::Optional<PrimExpr> step = std::nullopt,
+                ffi::Optional<PrimType> dtype = std::nullopt);
 /*!
  * \brief The thread-binding For statement.
  * \param start The minimum value of iteration.
@@ -300,9 +331,12 @@ ForFrame ThreadBinding(PrimExpr start, PrimExpr stop, ffi::String thread,
 /*!
  * \brief The grid For statement.
  * \param extents The extents of the iteration.
+ * \param dtype The optional dtype of every loop var ("int32" or "uint32"). When omitted
+ *              each loop var takes the dtype of its own extent.
  * \return The ForFrame.
  */
-ForFrame Grid(ffi::Array<Variant<PrimExpr, ffi::Tuple<PrimExpr, PrimExpr>>> extents);
+ForFrame Grid(ffi::Array<Variant<PrimExpr, ffi::Tuple<PrimExpr, PrimExpr>>> extents,
+              ffi::Optional<PrimType> dtype = std::nullopt);
 
 /*!
  * \brief The assertion statement.
@@ -406,7 +440,7 @@ ElseFrame Else();
  * \return The declaration frame.
  */
 DeclBufferFrame DeclBuffer(ffi::Array<PrimExpr> shape, PrimType dtype, ffi::String buffer_name,
-                           ffi::Optional<Var> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
+                           ffi::Optional<Expr> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
                            ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope,
                            int align, int offset_factor,
                            ffi::Optional<Layout> layout = std::nullopt,
@@ -420,9 +454,9 @@ DeclBufferFrame DeclBuffer(ffi::Array<PrimExpr> shape, PrimType dtype, ffi::Stri
  * \param annotations Optional annotations for the allocation.
  * \return The allocated buffer.
  */
-Buffer AllocBuffer(ffi::Array<PrimExpr> shape, PrimType dtype = PrimType::Float(32),
-                   ffi::String storage_scope = "global",
-                   ffi::Optional<ffi::Map<ffi::String, ffi::Any>> annotations = std::nullopt);
+BufferVar AllocBuffer(ffi::Array<PrimExpr> shape, PrimType dtype = PrimType::Float(32),
+                      ffi::String storage_scope = "global",
+                      ffi::Optional<ffi::Map<ffi::String, ffi::Any>> annotations = std::nullopt);
 
 /*!
  * \brief Launch a thread.
@@ -447,7 +481,7 @@ LaunchThreadFrame LaunchThread(ffi::String thread_tag, PrimExpr extent);
  * \param dispatch The optional dispatch variant name.
  * \return The result ComposeOpFrame.
  */
-ComposeOpFrame ComposeOp(ffi::Map<ffi::String, Buffer> workspace,
+ComposeOpFrame ComposeOp(ffi::Map<ffi::String, BufferVar> workspace,
                          ffi::Map<ffi::String, ffi::Any> config,
                          ffi::Optional<ffi::String> dispatch = std::nullopt);
 
@@ -467,7 +501,7 @@ Var EnvThread(ffi::String thread_tag, PrimType dtype = PrimType::Int(32));
  * \param predicate A vector mask of boolean values indicating which lanes of a vector are to be
  * stored. The number lanes of the mask must be equal to the number of lanes in value.
  */
-void BufferStore(Buffer buffer, PrimExpr value, ffi::Array<PrimExpr> indices,
+void BufferStore(BufferVar buffer, PrimExpr value, ffi::Array<PrimExpr> indices,
                  ffi::Optional<PrimExpr> predicate);
 
 /*!

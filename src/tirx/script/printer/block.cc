@@ -179,7 +179,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   }
   // Step 5. Handle `alloc_buffer`
   for (int i = 0, n = block->alloc_buffers.size(); i < n; ++i) {
-    tirx::Buffer buffer = block->alloc_buffers[i];
+    tirx::BufferVar buffer = block->alloc_buffers[i];
     AccessPath buffer_p = block_p->Attr("alloc_buffers")->ArrayItem(i);
     IdDoc lhs = DefineBuffer(buffer, *frame, d);
     ExprDoc rhs = BufferDecl(buffer, "sblock_alloc_buffer", {}, buffer_p, *frame, d,
@@ -256,6 +256,21 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             kwarg_keys.push_back("preferred");
             kwarg_vals.push_back(d->AsDoc<ExprDoc>(def->preferred_extents.value(),
                                                    def_p->Attr("preferred_extents")));
+          }
+          // The scope-id dtype is independent of the extents, so it has to be printed
+          // explicitly whenever it is not the int32 default in order to round-trip.
+          if (!def->def_ids.empty()) {
+            PrimType scope_id_ty = def->def_ids[0].ty();
+            for (auto scope_id : def->def_ids) {
+              TVM_FFI_ICHECK(scope_id.ty() == scope_id_ty)
+                  << "mixed scope-id dtypes are unsupported, got " << scope_id_ty << " and "
+                  << scope_id.ty();
+            }
+            if (scope_id_ty != PrimType::Int(32)) {
+              kwarg_keys.push_back("dtype");
+              kwarg_vals.push_back(
+                  LiteralDoc::Str(DType2Str(scope_id_ty->dtype), def_p->Attr("def_ids")));
+            }
           }
           ExprDoc rhs = TIR(d, ScopeIdApiName(def->scope))->Call(rhs_args, kwarg_keys, kwarg_vals);
           return AssignDoc(TupleDoc(lhs), rhs, std::nullopt);

@@ -17,7 +17,7 @@
 
 """SMEM matrix descriptor helper for tcgen05 / wgmma."""
 
-from tvm.backend.cuda.operator.tile_primitive.common import smem_desc_add_16B_offset
+from tvm.backend.cuda.tile_primitive.common import smem_desc_add_16B_offset
 from tvm.script import tirx as T
 
 
@@ -34,7 +34,7 @@ class SmemDescriptor:
 
     @T.inline
     def init(self, smem_ptr, ldo, sdo, swizzle):
-        T.ptx.tcgen05.encode_matrix_descriptor(
+        T.cuda.tcgen05.encode_matrix_descriptor(
             T.address_of(self._buf[0]), smem_ptr, ldo, sdo, swizzle
         )
 
