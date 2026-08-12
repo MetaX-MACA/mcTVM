@@ -33,11 +33,6 @@ from tvm.relax import BasePyModule
 from tvm.script import relax as R
 from tvm.script import tirx as T
 
-MACA_DLPACK_XFAIL_REASON = (
-    "TODO(maca): [dlpack] support DLPack device-type interoperability with PyTorch-compatible "
-    "GPU tensors and MACA DeviceAPI copy paths"
-)
-
 
 class TestDLPackIntegration:
     def test_dlpack_pytorch_to_tvm_conversion(self):
@@ -53,7 +48,6 @@ class TestDLPackIntegration:
         pytorch_numpy = pytorch_tensor.numpy()
         tvm.testing.assert_allclose(tvm_numpy, pytorch_numpy, atol=1e-5)
 
-    @pytest.mark.xfail(reason=MACA_DLPACK_XFAIL_REASON, strict=False)
     def test_dlpack_pytorch_to_tvm_conversion_gpu(self):
         if tvm.maca().exist:
 
@@ -67,7 +61,7 @@ class TestDLPackIntegration:
                 assert isinstance(tvm_tensor, tvm.runtime.Tensor)
                 assert tvm_tensor.shape == pytorch_tensor.shape
                 assert str(tvm_tensor.dtype) == str(pytorch_tensor.dtype).replace("torch.", "")
-                assert str(tvm_tensor.device) == "cuda:0"
+                assert str(tvm_tensor.device) == "maca:0"
 
                 # Move to CPU for numpy conversion
                 tvm_numpy = tvm_tensor.numpy()
@@ -94,7 +88,6 @@ class TestDLPackIntegration:
         pytorch_numpy = pytorch_tensor.numpy()
         tvm.testing.assert_allclose(tvm_numpy, pytorch_numpy, atol=1e-5)
 
-    @pytest.mark.xfail(reason=MACA_DLPACK_XFAIL_REASON, strict=False)
     def test_dlpack_tvm_to_pytorch_conversion_gpu(self):
         if tvm.maca().exist:
             import numpy as np
