@@ -88,7 +88,6 @@ fattention_rotary = None
 fcopy_single_page = None
 fcompact_copy = None
 
-
 _COMPILED_KERNEL_CACHE = {}
 
 
@@ -236,23 +235,20 @@ def create_kv_cache(head_dim, dtype, rope_mode, support_sliding_window):
 
 
 @pytest.fixture(
-    params=[
-        param
-        for param in itertools.chain(
-            itertools.product(
-                [64, 128],
-                ["float32", "float16"],
-                [RopeMode.NORMAL],
-                [False],
-            ),
-            itertools.product(
-                [128],
-                ["float16"],
-                [RopeMode.NONE, RopeMode.INLINE],
-                [False, True],
-            ),
-        )
-    ]
+    params=itertools.chain(
+        itertools.product(
+            [64, 128],
+            ["float32", "float16"],
+            [RopeMode.NORMAL],
+            [False],
+        ),
+        itertools.product(
+            [128],
+            ["float16"],
+            [RopeMode.NONE, RopeMode.INLINE],
+            [False, True],
+        ),
+    )
 )
 def kv_cache_and_config(request):
     global head_dim, sm_scale, dtype, dtype_torch
