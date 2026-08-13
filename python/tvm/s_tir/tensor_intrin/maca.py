@@ -26,6 +26,34 @@ from tvm.tirx.function import PrimFunc
 ######## WMMA intrinsics ########
 
 
+def shared_16x4_to_local_64x1_layout_A(i, j):
+    thread_id = j * 16 + i
+    return thread_id, 0
+
+
+def shared_4x16_to_local_64x1_layout_B(i, j):
+    thread_id = i * 16 + j
+    return thread_id, 0
+
+
+def shared_16x16_to_local_64x4_layout_C(i, j):
+    thread_id = j + (i // 4) * 16
+    local = i % 4
+    return thread_id, local
+
+
+def shared_16x16_to_local_64x4_layout_A(i, j):
+    thread_id = i + 16 * (j // 4)
+    local = j % 4
+    return thread_id, local
+
+
+def shared_16x16_to_local_64x4_layout_B(i, j):
+    thread_id = j + (i // 4) * 16
+    local = i % 4
+    return thread_id, local
+
+
 def get_wmma_fragment_index(buffer, stride, m_dim, n_dim):
     """Compute wmma fragment index using elem_offset of the buffer"""
     frag_index_m = buffer.elem_offset // stride // m_dim
@@ -635,6 +663,12 @@ TensorIntrin.register(
 WMMA_STORE_8x8x32_S32_SHARED_DYN_INTRIN = "maca_wmma_store_8x8x32_s32_shared_dyn"
 TensorIntrin.register(
     WMMA_STORE_8x8x32_S32_SHARED_DYN_INTRIN, *get_wmma_store_intrin(8, 8, 32, "int32", "shared.dyn")
+)
+
+WMMA_STORE_16x16x4_F32_GLOBAL_INTRIN = "maca_wmma_store_16x16x4_f32_global"
+TensorIntrin.register(
+    WMMA_STORE_16x16x4_F32_GLOBAL_INTRIN,
+    *get_wmma_store_intrin(16, 16, 4, "float32", "global"),
 )
 
 WMMA_STORE_16x16x16_F32_GLOBAL_INTRIN = "maca_wmma_store_16x16x16_f32_global"

@@ -148,7 +148,8 @@ def mfma_schedule(
     mfma_store_intrin,
     shared_scope="shared",
 ):
-    """Create a tensorized schedule for GEMM with MFMA intrinsics."""
+    """Create a tensorized schedule for GEMM with WMMA intrinsics."""
+
     import tvm
 
     ir_module = tvm.IRModule({"main": workload})
@@ -198,12 +199,13 @@ def mfma_schedule(
     fetch_to_shared(block_outer, 0, 2)
     fetch_to_shared(block_outer, 1, 2)
 
-    A_warp = sch.cache_read(block_outer, 0, "warp")
-    B_warp = sch.cache_read(block_outer, 1, "warp")
+    A_warp = sch.cache_read(block_outer, 0, "wmma.matrix_a")
+    B_warp = sch.cache_read(block_outer, 1, "wmma.matrix_b")
 
     sch.compute_at(A_warp, k1)
     sch.compute_at(B_warp, k1)
-    C_warp = sch.cache_write(block_outer, 0, "warp")
+
+    C_warp = sch.cache_write(block_outer, 0, "wmma.accumulator")
     sch.reverse_compute_at(C_warp, thread_idy)
 
     ii, jj = sch.get_loops(C_warp)[-2:]
@@ -227,10 +229,6 @@ def mfma_schedule(
         loop_b = tile_wmma_fragment(B_warp, 16, k_inner)
     else:
         loop_b = tile_wmma_fragment(B_warp, k_inner, 16)
-
-    sch.transform_layout(A_warp, ("write", 0), index_map_A)
-    sch.transform_layout(B_warp, ("write", 0), index_map_B)
-    sch.transform_layout(C_warp, ("read", 0), index_map_C)
 
     sch.tensorize(loop_a, ldmatrix_a_intrin)
     sch.tensorize(loop_b, ldmatrix_b_intrin)
