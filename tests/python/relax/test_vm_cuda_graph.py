@@ -32,11 +32,6 @@ from tvm.testing import env
 
 # fmt: off
 
-MACA_GRAPH_RUNTIME_XFAIL_REASON = (
-    "TODO(maca): [cuda-graph] implement graph capture runtime builtins, cached allocation, "
-    "and recoverable capture-error handling for the MACA VM path"
-)
-
 
 @I.ir_module(s_tir=True)
 class Module:
@@ -105,7 +100,6 @@ def codegen(mod, target, exec_mode="bytecode"):
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(reason=MACA_GRAPH_RUNTIME_XFAIL_REASON, strict=False)
 def test_vm_run():
     mod = Module
     target = tvm.target.Target("maca", host="llvm")
@@ -124,8 +118,8 @@ def test_vm_run():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(reason=MACA_GRAPH_RUNTIME_XFAIL_REASON, strict=False)
+@pytest.mark.skipif(not env.has_cudagraph(), reason="need cudagraph")
+@pytest.mark.xfail(env.has_maca(), reason="StreamCapture not support now")
 def test_capture_error_is_recoverable():
     """Function calls while capturing cudagraph may throw exceptions
 
@@ -180,12 +174,12 @@ def test_capture_error_is_recoverable():
 
     def run_and_check():
         dev = tvm.maca()
-        cudart_path = ctypes.util.find_library("cudart")
-        assert cudart_path is not None, "Unable to locate the CUDA runtime library"
-        cudart = ctypes.CDLL(cudart_path)
-        cudart.cudaGetLastError.argtypes = []
-        cudart.cudaGetLastError.restype = ctypes.c_int
-        cudart.cudaGetLastError()
+        mcruntime_path = ctypes.util.find_library("mcruntime")
+        assert mcruntime_path is not None, "Unable to locate the MACA runtime library"
+        mcruntime = ctypes.CDLL(mcruntime_path)
+        mcruntime.mcGetLastError.argtypes = []
+        mcruntime.mcGetLastError.restype = ctypes.c_int
+        mcruntime.mcGetLastError()
 
         @tvm.register_global_func("test_vm_cuda_graph.invalid_impl_for_cudagraph", override=True)
         def invalid_impl_for_cudagraph(arg_tensor):
@@ -204,9 +198,9 @@ def test_capture_error_is_recoverable():
 
         # cudaGetLastError is host-thread-local, so query it in the same
         # callback that triggered the invalid capture.
-        cuda_error = cudart.cudaGetLastError()
-        assert cuda_error == 0, (
-            f"CUDA error state was not cleared after failed graph capture: {cuda_error}"
+        maca_error = mcruntime.mcGetLastError()
+        assert maca_error == 0, (
+            f"MACA error state was not cleared after failed graph capture: {maca_error}"
         )
 
     tvm.testing.run_with_gpu_lock(run_and_check)

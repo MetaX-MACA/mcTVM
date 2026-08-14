@@ -177,6 +177,11 @@ def have_int8(compute_version):  # pylint: disable=unused-argument
     return True
 
 
+def have_macagraph():
+    """Either MACA Graph support is provided"""
+    return True
+
+
 @tvm_ffi.register_global_func("tvm.support.mxcc.supports_bf16")
 def have_bf16(compute_version):  # pylint: disable=unused-argument
     """Whether bf16 support is provided in the specified compute capability or not."""
