@@ -393,8 +393,13 @@ def has_cudagraph() -> bool:
     (add ``@pytest.mark.gpu`` for CI selection).
     """
     try:
-        from tvm.support import nvcc  # pylint: disable=import-outside-toplevel
+        from tvm.support import (
+            mxcc,  # pylint: disable=import-outside-toplevel
+            nvcc,  # pylint: disable=import-outside-toplevel
+        )
 
+        if has_maca():
+            return bool(mxcc.have_macagraph())
         return has_cuda() and bool(nvcc.have_cudagraph())
     except Exception:  # pylint: disable=broad-except
         return False
