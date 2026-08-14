@@ -45,7 +45,8 @@ namespace maca {
 namespace {
 
 bool IsFloat8(const PrimType& type) {
-  return type.MatchesCode(DLDataTypeCode::kDLFloat8_e4m3fn, DLDataTypeCode::kDLFloat8_e5m2);
+  return type.MatchesCode(DLDataTypeCode::kDLFloat8_e4m3fn, DLDataTypeCode::kDLFloat8_e5m2,
+                          DLDataTypeCode::kDLFloat8_e8m0fnu);
 }
 
 bool IsFloat16(const PrimType& type) {
@@ -162,6 +163,10 @@ std::string GetFP8Type(const PrimType& type) {
     vec = "x16";
   } else {
     LOG(FATAL) << "Only support scalar and vector types of width (2, 4, 8, 16) for FP8";
+  }
+  if (type.MatchesCode(DLDataTypeCode::kDLFloat8_e8m0fnu)) {
+    stream << "fp8_e8" << vec << "_t";
+    return stream.str();
   }
   stream << "__maca_fp8";
   std::string suffix;
@@ -296,6 +301,54 @@ std::string CodeGenMACA::Finish() {
   if (enable_fp8_) {
     decl_stream << "#if defined(__MACA_ARCH__) && (__MACA_ARCH__ >= 1000)\n";
     decl_stream << "#include <maca_fp8.h>\n";
+    decl_stream << R"(
+__host__ __device__ unsigned char __tvm_cvt_float_to_e8m0(float value) {
+  unsigned int bits = *reinterpret_cast<unsigned int*>(&value);
+  unsigned int exponent = (bits >> 23) & 0xff;
+  unsigned int mantissa = bits & 0x7fffff;
+  if (mantissa >= 0x400000 && exponent < 0xff) {
+    ++exponent;
+  }
+  return static_cast<unsigned char>(exponent);
+}
+__host__ __device__ unsigned char __tvm_cvt_double_to_e8m0(double value) {
+  return __tvm_cvt_float_to_e8m0(static_cast<float>(value));
+}
+__host__ __device__ unsigned char __tvm_cvt_int_to_e8m0(int value) {
+  return value == 0 ? 0 : __tvm_cvt_float_to_e8m0(static_cast<float>(value < 0 ? -value : value));
+}
+struct fp8_e8_t {
+  unsigned char v;
+  __host__ __device__ fp8_e8_t() : v(0) {}
+  __host__ __device__ explicit fp8_e8_t(unsigned char value) : v(value) {}
+  __host__ __device__ explicit fp8_e8_t(float value) : v(__tvm_cvt_float_to_e8m0(value)) {}
+  __host__ __device__ explicit fp8_e8_t(double value) : v(__tvm_cvt_double_to_e8m0(value)) {}
+  __host__ __device__ explicit fp8_e8_t(int value) : v(__tvm_cvt_int_to_e8m0(value)) {}
+  __host__ __device__ operator unsigned char() const { return v; }
+  __host__ __device__ operator float() const {
+    unsigned int bits = static_cast<unsigned int>(v) << 23;
+    return *reinterpret_cast<float*>(&bits);
+  }
+};
+struct __align__(2) fp8_e8x2_t {
+  fp8_e8_t x, y;
+  __host__ __device__ fp8_e8x2_t(fp8_e8_t x, fp8_e8_t y) : x(x), y(y) {}
+  __host__ __device__ explicit fp8_e8x2_t(float2 value) : x(value.x), y(value.y) {}
+};
+struct __align__(4) fp8_e8x4_t {
+  fp8_e8_t x, y, z, w;
+  __host__ __device__ fp8_e8x4_t(fp8_e8_t x, fp8_e8_t y, fp8_e8_t z, fp8_e8_t w)
+      : x(x), y(y), z(z), w(w) {}
+  __host__ __device__ explicit fp8_e8x4_t(float4 value)
+      : x(value.x), y(value.y), z(value.z), w(value.w) {}
+};
+struct __align__(8) fp8_e8x8_t {
+  fp8_e8x4_t x, y;
+};
+struct __align__(16) fp8_e8x16_t {
+  fp8_e8x8_t x, y;
+};
+)";
     decl_stream << "using fp8_e4_t = __maca_fp8_e4m3;\n";
     decl_stream << "using fp8_e4x2_t = __maca_fp8x2_e4m3;\n";
     decl_stream << "using fp8_e4x4_t = __maca_fp8x4_e4m3;\n";
@@ -1008,6 +1061,28 @@ void CodeGenMACA::VisitExpr_(const CastNode* op, std::ostream& os) {
   PrimType from_ty = op->value.ty();
   PrimType target_ty = op->ty.as_or_throw<PrimType>();
   TVM_FFI_ICHECK_EQ(target_ty.lanes(), from_ty.lanes());
+
+  // MACA has no native e8m0 type.  Use TVM's helpers for the scalar and packed
+  // conversions supported here.
+  bool is_float32 = IsFloat(from_ty) && from_ty.bits() == 32;
+  if ((IsFloat16(from_ty) || is_float32) && IsFloat8(target_ty) && target_ty.lanes() <= 4) {
+    if (target_ty.MatchesCode(DLDataTypeCode::kDLFloat8_e8m0fnu)) {
+      enable_fp16_ = enable_fp16_ || IsFloat16(from_ty);
+      os << (is_float32 ? "cast_float_to_fp8_" : "cast_half_to_fp8_");
+      os << "e8m0";
+      os << "(" << PrintExpr(op->value) << ")";
+      return;
+    }
+  }
+
+  bool target_is_float32 = IsFloat(target_ty) && target_ty.bits() == 32;
+  if (from_ty.MatchesCode(DLDataTypeCode::kDLFloat8_e8m0fnu) &&
+      (IsFloat16(target_ty) || target_is_float32) && target_ty.lanes() <= 4) {
+    enable_fp16_ = enable_fp16_ || IsFloat16(target_ty);
+    os << (target_is_float32 ? "cast_fp8_e8m0_to_float(" : "cast_fp8_e8m0_to_half(");
+    os << PrintExpr(op->value) << ")";
+    return;
+  }
 
   // Emit simple C-style type conversion.
   if (from_ty.IsScalar()) return CodeGenC::VisitExpr_(op, os);

@@ -36,25 +36,22 @@ except ImportError:
     ml_dtypes = None
 
 
-FP8_MACA_XFAIL_REASON = (
-    "TODO(maca): [fp8] support FP8 datatype lowering, conversion, packing, and source expectations"
-)
+FP8_MACA_XFAIL_REASON = "TODO(maca): [fp8] fp16 to fp8 conversion results in precision loss"
 
 
 @pytest.mark.parametrize(
     "input",
     [
-        ("float8_e4m3fn", "__nv_fp8_e4m3"),
-        ("float8_e5m2", "__nv_fp8_e5m2"),
+        ("float8_e4m3fn", "__maca_fp8_e4m3"),
+        ("float8_e5m2", "__maca_fp8_e5m2"),
     ],
 )
+@pytest.mark.parametrize("promoted_dtype", ["float32", "float16"])
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason="TODO(maca): [fp8] support FP8 source/type lowering compatible with these expectations",
-    strict=False,
-)
-def test_fp8_conversions(input):
+def test_fp8_conversions(input, promoted_dtype):
+    if "float16" in promoted_dtype:
+        pytest.xfail(FP8_MACA_XFAIL_REASON)
     dtype, nv_dtype = input
 
     def _create_mod(dtype):
@@ -74,7 +71,8 @@ def test_fp8_conversions(input):
                             T.reads(A[v_i], B[v_i])
                             T.writes(C[v_i])
                             C[v_i] = T.Cast(
-                                dtype, T.Cast("float16", A[v_i]) + T.Cast("float16", B[v_i])
+                                dtype,
+                                T.Cast(promoted_dtype, A[v_i]) + T.Cast(promoted_dtype, B[v_i]),
                             )
 
         return Module
@@ -94,7 +92,7 @@ def test_fp8_conversions(input):
     fadd(a, b, c)
 
     tvm.testing.assert_allclose(
-        c.numpy().astype("float16"), (a.numpy() + b.numpy()).astype("float16")
+        c.numpy().astype(promoted_dtype), (a.numpy() + b.numpy()).astype(promoted_dtype)
     )
 
 
@@ -105,8 +103,6 @@ def test_fp8_conversions(input):
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_fp8_packing(dtype):
-    if dtype == "float8_e8m0fnu":
-        pytest.skip("float8_e8m0fnu is not supported on MACA")
     length = 64
     vector_length = 4
     native_dtype, packed_dtype = (f"{dtype}x{vector_length}", "uint32")
@@ -169,12 +165,19 @@ def test_fp8_packing(dtype):
         ("float8_e5m2x2", "float16x2", "float8_e5m2"),
         ("float8_e5m2x4", "float32x4", "float8_e5m2"),
         ("float8_e5m2x4", "float16x4", "float8_e5m2"),
+        ("float8_e8m0fnu", "float32", "float8_e8m0fnu"),
+        ("float8_e8m0fnu", "float16", "float8_e8m0fnu"),
+        ("float8_e8m0fnux2", "float32x2", "float8_e8m0fnu"),
+        ("float8_e8m0fnux2", "float16x2", "float8_e8m0fnu"),
+        ("float8_e8m0fnux4", "float32x4", "float8_e8m0fnu"),
+        ("float8_e8m0fnux4", "float16x4", "float8_e8m0fnu"),
     ],
 )
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(reason=FP8_MACA_XFAIL_REASON, strict=False)
 def test_fp8_vector_conversions(native_dtype, promoted_dtype, numpytype):
+    if "float16" in promoted_dtype and ("e8m0fnu" not in native_dtype):
+        pytest.xfail(FP8_MACA_XFAIL_REASON)
     vector_length = 64
 
     def _create_mod(native_dtype, promoted_dtype):
@@ -810,10 +813,6 @@ class TestFP8e4x4QuantDequantScale(BaseFP8E4M3QuantScaleOnly):
 
     @pytest.mark.gpu
     @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-    @pytest.mark.xfail(
-        reason="TODO(maca): [fp8] support FP8 quantize/dequantize schedules and runtime codegen",
-        strict=False,
-    )
     def test_main(self, weight_shape, model_dtype, target_str, compiled_functions):
         quant, dequant = compiled_functions
         dev = tvm.device(target_str, 0)
@@ -832,9 +831,6 @@ class TestFP8e4x4QuantDequantScale(BaseFP8E4M3QuantScaleOnly):
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize("dtype", ["float8_e5m2", "float8_e4m3fn", "float8_e8m0fnu"])
 def test_const(dtype):
-    if dtype == "float8_e8m0fnu":
-        pytest.skip("float8_e8m0fnu is not supported on MACA")
-
     @T.prim_func(s_tir=True)
     def func(A: T.Buffer((4,), dtype)) -> None:
         A_local = T.sblock_alloc_buffer((4,), dtype=dtype, scope="local")
@@ -889,10 +885,6 @@ spatial_size = 4096
     reason="TODO(maca): [fp8] install ml_dtypes for FP8 GEMV verification",
     strict=False,
     run=False,
-)
-@pytest.mark.xfail(
-    reason="TODO(maca): [fp8] support FP8 GEMV lowering with shuffle-down scheduling",
-    strict=False,
 )
 def test_moe_gemv_shfl_down_illegal_instr():
     global num_experts
@@ -1006,10 +998,6 @@ def test_moe_gemv_shfl_down_illegal_instr():
 @pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason="TODO(maca): [fp8] support FP8 to FP16/BF16 vectorized arithmetic lowering",
-    strict=False,
-)
 def test_fp8_fp16_bf16_vectorize_arith(vec_length, dtype):
     def _create_mod(vec_length, dtype):
         num_threads = 128 // vec_length

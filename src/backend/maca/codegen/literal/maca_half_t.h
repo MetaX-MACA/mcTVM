@@ -394,7 +394,7 @@ struct __align__(8) half4_bfloat164 {
   __host__ __device__ half4_bfloat164() : x(T(0)), y(T(0)), z(T(0)), w(T(0)) {}
   __host__ __device__ half4_bfloat164(T x, T y, T z, T w) : x(x), y(y), z(z), w(w) {}
   __host__ __device__ half4_bfloat164(const __maca_fp8x4_e4m3& fp8x4) {
-    if constexpr (std::is_same_v<T, __half>) {
+    if constexpr (std::is_same<T, __half>::value) {
       __maca_fp8x2_e4m3 lo_part, hi_part;
       lo_part.__x = static_cast<__maca_fp8x2_storage_t>(fp8x4.__x & 0xFFFF);
       hi_part.__x = static_cast<__maca_fp8x2_storage_t>((fp8x4.__x >> 16) & 0xFFFF);
@@ -502,6 +502,57 @@ __host__ __device__ maca_bfloat162 cast_to_maca_bfloat162(const __maca_fp8x2_e4m
 }
       )";
     }
+  }
+  if (enable_fp8) {
+    stream << R"(
+__host__ __device__ fp8_e8_t cast_float_to_fp8_e8m0(float value) {
+    return fp8_e8_t(value);
+}
+__host__ __device__ fp8_e8x2_t cast_float_to_fp8_e8m0(float2 value) {
+    return fp8_e8x2_t{fp8_e8_t(value.x), fp8_e8_t(value.y)};
+}
+__host__ __device__ fp8_e8x4_t cast_float_to_fp8_e8m0(float4 value) {
+    return fp8_e8x4_t{fp8_e8_t(value.x), fp8_e8_t(value.y),
+                      fp8_e8_t(value.z), fp8_e8_t(value.w)};
+}
+__host__ __device__ float cast_fp8_e8m0_to_float(fp8_e8_t value) {
+    return static_cast<float>(value);
+}
+__host__ __device__ float2 cast_fp8_e8m0_to_float(fp8_e8x2_t value) {
+    return make_float2(static_cast<float>(value.x), static_cast<float>(value.y));
+}
+__host__ __device__ float4 cast_fp8_e8m0_to_float(fp8_e8x4_t value) {
+    return make_float4(static_cast<float>(value.x), static_cast<float>(value.y),
+                       static_cast<float>(value.z), static_cast<float>(value.w));
+}
+    )";
+  }
+  if (enable_fp16 && enable_fp8) {
+    stream << R"(
+__host__ __device__ fp8_e8_t cast_half_to_fp8_e8m0(__half value) {
+    return cast_float_to_fp8_e8m0(static_cast<float>(value));
+}
+__host__ __device__ fp8_e8x2_t cast_half_to_fp8_e8m0(__half2 value) {
+    return cast_float_to_fp8_e8m0(__half22float2(value));
+}
+__host__ __device__ fp8_e8x4_t cast_half_to_fp8_e8m0(half4 value) {
+    return cast_float_to_fp8_e8m0(make_float4(static_cast<float>(value.x),
+                                               static_cast<float>(value.y),
+                                               static_cast<float>(value.z),
+                                               static_cast<float>(value.w)));
+}
+__host__ __device__ __half cast_fp8_e8m0_to_half(fp8_e8_t value) {
+    return __float2half(cast_fp8_e8m0_to_float(value));
+}
+__host__ __device__ __half2 cast_fp8_e8m0_to_half(fp8_e8x2_t value) {
+    return __float22half2_rn(cast_fp8_e8m0_to_float(value));
+}
+__host__ __device__ half4 cast_fp8_e8m0_to_half(fp8_e8x4_t value) {
+    float4 converted = cast_fp8_e8m0_to_float(value);
+    return make_half4(__float2half(converted.x), __float2half(converted.y),
+                      __float2half(converted.z), __float2half(converted.w));
+}
+    )";
   }
   if (enable_fp8) {
     stream << R"(
