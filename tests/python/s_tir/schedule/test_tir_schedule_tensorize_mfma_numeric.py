@@ -21,20 +21,22 @@ import pytest
 import tvm
 import tvm.testing
 from tvm import te
-from tvm.s_tir.tensor_intrin.rocm import (
-    ROCM_MFMA_f16f16f32_INTRIN,
-    ROCM_MFMA_f32f32f32_INTRIN,
-    ROCM_MFMA_fill_16x16_f32_INTRIN,
-    ROCM_MFMA_fill_16x16_i32_INTRIN,
-    ROCM_MFMA_LOAD_16x4_A_SHARED_f32_INTRIN,
-    ROCM_MFMA_LOAD_16x4_B_SHARED_f32_INTRIN,
-    ROCM_MFMA_LOAD_16x16_A_SHARED_f16_INTRIN,
-    ROCM_MFMA_LOAD_16x16_A_SHARED_s8_INTRIN,
-    ROCM_MFMA_LOAD_16x16_B_SHARED_f16_INTRIN,
-    ROCM_MFMA_LOAD_16x16_B_SHARED_s8_INTRIN,
-    ROCM_MFMA_s8s8s32_INTRIN,
-    ROCM_MFMA_STORE_16x16_f32_INTRIN,
-    ROCM_MFMA_STORE_16x16_s32_INTRIN,
+from tvm.s_tir.tensor_intrin.maca import (
+    WMMA_FILL_16x16x4_F32_INTRIN,
+    WMMA_FILL_16x16x16_F32_INTRIN,
+    WMMA_FILL_16x16x16_S32_INTRIN,
+    WMMA_LOAD_16x16x4_F32_A_DYN_INTRIN,
+    WMMA_LOAD_16x16x4_F32_B_DYN_INTRIN,
+    WMMA_LOAD_16x16x16_F16_A_INTRIN,
+    WMMA_LOAD_16x16x16_F16_B_INTRIN,
+    WMMA_LOAD_16x16x16_S8_A_INTRIN,
+    WMMA_LOAD_16x16x16_S8_B_INTRIN,
+    WMMA_STORE_16x16x4_F32_GLOBAL_INTRIN,
+    WMMA_STORE_16x16x16_F32_GLOBAL_INTRIN,
+    WMMA_STORE_16x16x16_S32_GLOBAL_INTRIN,
+    WMMA_SYNC_16x16x4_f32f32f32_INTRIN,
+    WMMA_SYNC_16x16x16_f16f16f32_INTRIN,
+    WMMA_SYNC_16x16x16_s8s8s32_INTRIN,
     shared_4x16_to_local_64x1_layout_B,
     shared_16x4_to_local_64x1_layout_A,
     shared_16x16_to_local_64x4_layout_A,
@@ -91,6 +93,7 @@ def run_test(
     mma_intrin,
     mma_fill_intrin,
     mma_store_intrin,
+    shared_scope="shared",
 ):
     sch = mfma_schedule(
         te.create_prim_func(matmul(M, N, K, in_dtype, out_dtype, b_transposed)),
@@ -108,9 +111,10 @@ def run_test(
         mma_intrin,
         mma_fill_intrin,
         mma_store_intrin,
+        shared_scope=shared_scope,
     )
 
-    f = tvm.compile(sch.mod["main"], target="rocm")
+    f = tvm.compile(sch.mod["main"], target="maca")
 
     if in_dtype == "float32":
         a_np = np.random.uniform(size=(M, K)).astype("float32")
@@ -147,7 +151,7 @@ def run_test(
             c_np = np.dot(a_np.astype("float32"), b_np.astype("float32")).astype("int32")
 
     def run_and_check(measure=False):
-        dev = tvm.rocm(0)
+        dev = tvm.maca(0)
         a = tvm.runtime.tensor(a_np, dev)
         b = tvm.runtime.tensor(b_np, dev)
         c = tvm.runtime.tensor(np.zeros((M, N), dtype=out_dtype), dev)
@@ -163,7 +167,7 @@ def run_test(
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_matrixcore(), reason="need matrixcore")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_i8i8i32_m16n16k16():
     def index_map_A(i, j):
         return (
@@ -202,11 +206,12 @@ def test_i8i8i32_m16n16k16():
         index_map_A,
         index_map_B,
         index_map_C,
-        ROCM_MFMA_LOAD_16x16_A_SHARED_s8_INTRIN,
-        ROCM_MFMA_LOAD_16x16_B_SHARED_s8_INTRIN,
-        ROCM_MFMA_s8s8s32_INTRIN,
-        ROCM_MFMA_fill_16x16_i32_INTRIN,
-        ROCM_MFMA_STORE_16x16_s32_INTRIN,
+        WMMA_LOAD_16x16x16_S8_A_INTRIN,
+        WMMA_LOAD_16x16x16_S8_B_INTRIN,
+        WMMA_SYNC_16x16x16_s8s8s32_INTRIN,
+        WMMA_FILL_16x16x16_S32_INTRIN,
+        WMMA_STORE_16x16x16_S32_GLOBAL_INTRIN,
+        shared_scope="shared",
     )
 
     if measure_perf and timer:
@@ -214,7 +219,7 @@ def test_i8i8i32_m16n16k16():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_matrixcore(), reason="need matrixcore")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_f16f16f32_m16n16k16():
     def index_map_A(i, j):
         return (
@@ -253,11 +258,12 @@ def test_f16f16f32_m16n16k16():
         index_map_A,
         index_map_B,
         index_map_C,
-        ROCM_MFMA_LOAD_16x16_A_SHARED_f16_INTRIN,
-        ROCM_MFMA_LOAD_16x16_B_SHARED_f16_INTRIN,
-        ROCM_MFMA_f16f16f32_INTRIN,
-        ROCM_MFMA_fill_16x16_f32_INTRIN,
-        ROCM_MFMA_STORE_16x16_f32_INTRIN,
+        WMMA_LOAD_16x16x16_F16_A_INTRIN,
+        WMMA_LOAD_16x16x16_F16_B_INTRIN,
+        WMMA_SYNC_16x16x16_f16f16f32_INTRIN,
+        WMMA_FILL_16x16x16_F32_INTRIN,
+        WMMA_STORE_16x16x16_F32_GLOBAL_INTRIN,
+        shared_scope="shared",
     )
 
     if measure_perf and timer:
@@ -265,7 +271,11 @@ def test_f16f16f32_m16n16k16():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_matrixcore(), reason="need matrixcore")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(
+    env.has_maca_compute(16, 0, exact=True),
+    reason="m16n16k4 f32 MMA is not supported on xcore1600",
+)
 def test_f32f32f32_m16n16k4():
     def index_map_A(i, j):
         return (
@@ -304,11 +314,12 @@ def test_f32f32f32_m16n16k4():
         index_map_A,
         index_map_B,
         index_map_C,
-        ROCM_MFMA_LOAD_16x4_A_SHARED_f32_INTRIN,
-        ROCM_MFMA_LOAD_16x4_B_SHARED_f32_INTRIN,
-        ROCM_MFMA_f32f32f32_INTRIN,
-        ROCM_MFMA_fill_16x16_f32_INTRIN,
-        ROCM_MFMA_STORE_16x16_f32_INTRIN,
+        WMMA_LOAD_16x16x4_F32_A_DYN_INTRIN,
+        WMMA_LOAD_16x16x4_F32_B_DYN_INTRIN,
+        WMMA_SYNC_16x16x4_f32f32f32_INTRIN,
+        WMMA_FILL_16x16x4_F32_INTRIN,
+        WMMA_STORE_16x16x4_F32_GLOBAL_INTRIN,
+        shared_scope="shared.dyn",
     )
 
     if measure_perf and timer:
