@@ -5186,6 +5186,7 @@ def test_atan2():
     verify_model(Atan2(), [([256, 256], "float32"), ([256, 256], "float32")], {}, Expected1)
 
 
+@pytest.mark.xfail(tvm.testing.env.has_maca(), reason="torch.fx has error with python3.12")
 def test_attention():
     @I.ir_module
     class Expected1:
