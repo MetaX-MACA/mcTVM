@@ -35,22 +35,12 @@ from tvm.relax.frontend.nn.llm.kv_cache import (
     _merge_state_inplace,
 )
 from tvm.s_tir import dlight as dl
-from tvm.testing import env
-
-MACA_FLASHINFER_XFAIL_REASON = (
-    "TODO(maca): [flashinfer-jit] support linking FlashInfer JIT modules against the MACA "
-    "CUDA bridge runtime"
-)
-
-
-pytestmark = [
-    pytest.mark.skipif(not env.has_maca(), reason="need maca"),
-    pytest.mark.xfail(reason=MACA_FLASHINFER_XFAIL_REASON, strict=False),
-]
 
 
 def has_flashinfer():
     """Check whether FlashInfer (with the JIT module generator) is available."""
+    if tvm.testing.env.has_maca():
+        return False
     try:
         from flashinfer.jit import gen_batch_mla_module  # noqa: F401
 
@@ -261,7 +251,7 @@ def kv_cache_and_config(request):
 
 
 def _get_cuda_target():
-    return tvm.target.Target.from_device(tvm.maca())
+    return tvm.target.Target.from_device(tvm.cuda())
 
 
 def _run_with_kv_cache(test):
@@ -269,7 +259,7 @@ def _run_with_kv_cache(test):
     def wrapper(kv_cache_and_config):
         def run_and_check():
             global device, w_kv, w_uk, w_uv
-            device = tvm.maca()
+            device = tvm.cuda()
             (dtype,) = kv_cache_and_config
             try:
                 _initialize_weights()

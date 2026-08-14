@@ -994,7 +994,7 @@ def test_multinomial_from_uniform():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
 def test_sample_top_p_top_k_from_sorted_prob():
     prob_shape = (2, 3)
     sample_shape = (3, 1)
