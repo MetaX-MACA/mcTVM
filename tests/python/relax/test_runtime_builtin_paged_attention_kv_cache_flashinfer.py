@@ -36,22 +36,12 @@ from tvm.relax.frontend.nn.llm.kv_cache import (
     llama_rope_with_position_map,
 )
 from tvm.s_tir import dlight as dl
-from tvm.testing import env
-
-MACA_FLASHINFER_XFAIL_REASON = (
-    "TODO(maca): [flashinfer-jit] support linking FlashInfer JIT modules against the MACA "
-    "CUDA bridge runtime"
-)
-
-
-pytestmark = [
-    pytest.mark.skipif(not env.has_maca(), reason="need maca"),
-    pytest.mark.xfail(reason=MACA_FLASHINFER_XFAIL_REASON, strict=False),
-]
 
 
 def has_flashinfer():
     """Check whether FlashInfer (with the JIT module generator) is available."""
+    if tvm.testing.env.has_maca():
+        return False
     try:
         from flashinfer.jit import gen_customize_batch_prefill_module  # noqa: F401
 
@@ -232,7 +222,7 @@ def kv_cache_and_rope_mode(request):
 
 
 def _get_cuda_target():
-    return tvm.target.Target.from_device(tvm.maca())
+    return tvm.target.Target.from_device(tvm.cuda())
 
 
 def _run_with_kv_cache(test):
@@ -240,7 +230,7 @@ def _run_with_kv_cache(test):
     def wrapper(kv_cache_and_rope_mode):
         def run_and_check():
             global device
-            device = tvm.maca()
+            device = tvm.cuda()
             try:
                 cache = create_kv_cache(kv_cache_and_rope_mode)
                 return test((cache, kv_cache_and_rope_mode))

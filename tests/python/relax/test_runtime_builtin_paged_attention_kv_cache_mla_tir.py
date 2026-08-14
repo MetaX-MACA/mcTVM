@@ -14,6 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import itertools
+
 import numpy as np
 import pytest
 import torch
@@ -75,11 +77,6 @@ fcopy_single_page = None
 w_kv = None
 w_uk = None
 w_uv = None
-
-MACA_MLA_PAGED_ATTENTION_XFAIL_REASON = (
-    "TODO(maca): [mla-paged-attention] support aligned shared-memory declarations emitted by MLA "
-    "paged-attention TIR codegen in the MACA compiler path"
-)
 
 
 # Register a dumb function for testing purpose.
@@ -193,14 +190,7 @@ def create_kv_cache(dtype):
     return cache
 
 
-@pytest.fixture(
-    params=[
-        pytest.param(
-            ("float16",),
-            marks=pytest.mark.xfail(reason=MACA_MLA_PAGED_ATTENTION_XFAIL_REASON, strict=False),
-        )
-    ]
-)
+@pytest.fixture(params=itertools.product(["float16"]))
 def kv_cache_and_config(request):
     global dtype, dtype_torch
     (dtype,) = request.param
@@ -517,6 +507,7 @@ def test_paged_attention_kv_cache_remove_sequence(kv_cache_and_config):
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.xfail
 def test_paged_attention_kv_cache_fork_sequence(kv_cache_and_config):
     def run_and_check():
         global device, w_kv, w_uk, w_uv

@@ -5186,6 +5186,7 @@ def test_atan2():
     verify_model(Atan2(), [([256, 256], "float32"), ([256, 256], "float32")], {}, Expected1)
 
 
+@pytest.mark.xfail(tvm.testing.env.has_maca(), reason="torch.fx has error with python3.12")
 def test_attention():
     @I.ir_module
     class Expected1:
@@ -5272,46 +5273,39 @@ def test_attention():
                 R.output(gv)
             return gv
 
-    old_disable_flash_attn = getattr(torch, "disable_flash_attn", None)
-    if hasattr(torch, "disable_flash_attn"):
-        torch.disable_flash_attn = True
-    try:
-        verify_model(
-            lambda q, k, v: F.scaled_dot_product_attention(q, k, v),
-            [
-                ([32, 8, 128, 64], "float32"),
-                ([32, 8, 128, 64], "float32"),
-                ([32, 8, 128, 64], "float32"),
-            ],
-            {},
-            Expected1,
-        )
+    verify_model(
+        lambda q, k, v: F.scaled_dot_product_attention(q, k, v),
+        [
+            ([32, 8, 128, 64], "float32"),
+            ([32, 8, 128, 64], "float32"),
+            ([32, 8, 128, 64], "float32"),
+        ],
+        {},
+        Expected1,
+    )
 
-        verify_model(
-            lambda q, k, v, mask: F.scaled_dot_product_attention(q, k, v, mask),
-            [
-                ([32, 8, 128, 64], "float32"),
-                ([32, 8, 128, 64], "float32"),
-                ([32, 8, 128, 64], "float32"),
-                ([32, 8, 128, 128], "float32"),
-            ],
-            {},
-            Expected2,
-        )
+    verify_model(
+        lambda q, k, v, mask: F.scaled_dot_product_attention(q, k, v, mask),
+        [
+            ([32, 8, 128, 64], "float32"),
+            ([32, 8, 128, 64], "float32"),
+            ([32, 8, 128, 64], "float32"),
+            ([32, 8, 128, 128], "float32"),
+        ],
+        {},
+        Expected2,
+    )
 
-        verify_model(
-            lambda q, k, v: F.scaled_dot_product_attention(q, k, v, is_causal=True),
-            [
-                ([32, 8, 128, 64], "float32"),
-                ([32, 8, 128, 64], "float32"),
-                ([32, 8, 128, 64], "float32"),
-            ],
-            {},
-            Expected3,
-        )
-    finally:
-        if hasattr(torch, "disable_flash_attn"):
-            torch.disable_flash_attn = old_disable_flash_attn
+    verify_model(
+        lambda q, k, v: F.scaled_dot_product_attention(q, k, v, is_causal=True),
+        [
+            ([32, 8, 128, 64], "float32"),
+            ([32, 8, 128, 64], "float32"),
+            ([32, 8, 128, 64], "float32"),
+        ],
+        {},
+        Expected3,
+    )
 
 
 def test_sym_size_int():

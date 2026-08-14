@@ -27,11 +27,6 @@ from tvm.script.parser import ir as I
 from tvm.script.parser import relax as R
 from tvm.testing import env
 
-MACA_MULTI_DEVICE_XFAIL_REASON = (
-    "TODO(maca): [multi-device] support multi-device Relax lowering with MACA TIR scheduling, "
-    "thread binding, and memory verification"
-)
-
 
 def compile(mod: IRModule):
     # compile the model
@@ -85,7 +80,6 @@ def test_multi_cpu():
 
 
 @pytest.mark.skipif(not env.has_multi_gpu(), reason="need multiple gpus")
-@pytest.mark.xfail(reason=MACA_MULTI_DEVICE_XFAIL_REASON, strict=False)
 def test_multi_gpu():
     @I.ir_module
     class Example:
@@ -146,8 +140,7 @@ def test_multi_gpu():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(reason=MACA_MULTI_DEVICE_XFAIL_REASON, strict=False)
+@pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
 def test_multi_device():
     @I.ir_module
     class Example:
