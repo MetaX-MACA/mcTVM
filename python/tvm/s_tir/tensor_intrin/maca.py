@@ -23,6 +23,520 @@ from tvm.script import tirx as T
 from tvm.tirx import Cast, IntImm, TensorIntrin
 from tvm.tirx.function import PrimFunc
 
+########## MACA MMA intrinsics ##########
+
+MACA_MMA_WARP_SIZE = 64
+MACA_MMA_M_DIM = 16
+MACA_MMA_N_DIM = 16
+
+
+MACA_MMA_F16F16F32_SOURCE = r"""
+typedef __NATIVE_VECTOR__(4, __fp16) tvm_maca_native_f16x4;
+typedef __NATIVE_VECTOR__(4, float) tvm_maca_native_f32x4;
+
+static __device__ __forceinline__ float4
+tvm_maca_mma_16x16x16f16(
+    half4 a,
+    half4 b,
+    float4 c) {
+
+    tvm_maca_native_f16x4 a_native =
+        *reinterpret_cast<const tvm_maca_native_f16x4*>(&a);
+
+    tvm_maca_native_f16x4 b_native =
+        *reinterpret_cast<const tvm_maca_native_f16x4*>(&b);
+
+    tvm_maca_native_f32x4 c_native =
+        *reinterpret_cast<const tvm_maca_native_f32x4*>(&c);
+
+    tvm_maca_native_f32x4 d_native =
+        __builtin_mxc_mma_16x16x16f16(
+            a_native,
+            b_native,
+            c_native);
+
+    return *reinterpret_cast<float4*>(&d_native);
+}
+"""
+
+
+def maca_mma_shared_16x16_to_local_64x4_layout_A(i, j):
+    thread_id = i + 16 * (j // 4)
+    local_id = j % 4
+    return thread_id, local_id
+
+
+def maca_mma_shared_16x16_to_local_64x4_layout_B(i, j):
+    thread_id = j + (i // 4) * 16
+    local_id = i % 4
+    return thread_id, local_id
+
+
+def maca_mma_shared_16x16_to_local_64x4_layout_C(i, j):
+    thread_id = j + (i // 4) * 16
+    local_id = i % 4
+    return thread_id, local_id
+
+
+def maca_mma_local_64x4_to_shared_16x16_layout_A(thread_id, local_id):
+    i = thread_id % 16
+    j = (thread_id // 16) * 4 + local_id
+    return i, j
+
+
+def maca_mma_local_64x4_to_shared_16x16_layout_B(thread_id, local_id):
+    i = local_id + (thread_id // 16) * 4
+    j = thread_id % 16
+    return i, j
+
+
+def maca_mma_local_64x4_to_shared_16x16_layout_C(thread_id, local_id):
+    i = local_id + (thread_id // 16) * 4
+    j = thread_id % 16
+    return i, j
+
+
+def get_maca_mma_load_intrin(
+    k_dim=16,
+    dtype="float16",
+    scope="shared",
+    is_b=False,
+):
+    if k_dim != 16:
+        raise ValueError("MACA MMA currently only supports k_dim=16")
+
+    warp_size = MACA_MMA_WARP_SIZE
+    local_size = 4
+
+    memory_shape = (16, 16)
+
+    if is_b:
+        index_map = maca_mma_shared_16x16_to_local_64x4_layout_B
+        reverse_index_map = maca_mma_local_64x4_to_shared_16x16_layout_B
+    else:
+        index_map = maca_mma_shared_16x16_to_local_64x4_layout_A
+        reverse_index_map = maca_mma_local_64x4_to_shared_16x16_layout_A
+
+    @T.prim_func(s_tir=True)
+    def maca_mma_load_desc(
+        reg_handle: T.handle,
+        memory_handle: T.handle,
+    ) -> None:
+        memory = T.match_buffer(
+            memory_handle,
+            memory_shape,
+            dtype,
+            offset_factor=1,
+            scope=scope,
+        )
+
+        reg = T.match_buffer(
+            reg_handle,
+            (warp_size, local_size),
+            dtype,
+            offset_factor=1,
+            scope="warp",
+        )
+
+        with T.sblock("root"):
+            T.reads(memory[0:16, 0:16])
+            T.writes(reg[0:warp_size, 0:local_size])
+
+            for i, j in T.grid(16, 16):
+                with T.sblock("memory_reg"):
+                    vi, vj = T.axis.remap("SS", [i, j])
+
+                    thread_id, local_id = T.meta_var(index_map(vi, vj))
+
+                    T.reads(memory[vi, vj])
+                    T.writes(reg[thread_id, local_id])
+
+                    reg[thread_id, local_id] = memory[vi, vj]
+
+    @T.prim_func(s_tir=True)
+    def maca_mma_load_impl(
+        reg_handle: T.handle,
+        memory_handle: T.handle,
+    ) -> None:
+        s0 = T.int32()
+        s1 = T.int32()
+
+        memory = T.match_buffer(
+            memory_handle,
+            memory_shape,
+            dtype,
+            align=64,
+            offset_factor=1,
+            scope=scope,
+            strides=[s0, s1],
+        )
+
+        reg = T.match_buffer(
+            reg_handle,
+            (warp_size, local_size),
+            dtype,
+            align=64,
+            offset_factor=1,
+            scope="warp",
+        )
+
+        with T.sblock("root"):
+            T.reads(memory[0:16, 0:16])
+            T.writes(reg[0:warp_size, 0:local_size])
+
+            tx = T.env_thread("threadIdx.x")
+
+            T.launch_thread(tx, warp_size)
+
+            for local_id in T.serial(0, local_size):
+                row, col = T.meta_var(reverse_index_map(tx, local_id))
+
+                reg[tx, local_id] = memory[row, col]
+
+    return maca_mma_load_desc, maca_mma_load_impl
+
+
+def get_maca_mma_fill_intrin(
+    dtype="float32",
+    local_size=4,
+):
+    warp_size = MACA_MMA_WARP_SIZE
+
+    zero = IntImm("int32", 0).astype(dtype)
+
+    index_map = maca_mma_shared_16x16_to_local_64x4_layout_C
+
+    @T.prim_func(s_tir=True)
+    def maca_mma_fill_desc(a: T.handle) -> None:
+        C_warp = T.match_buffer(
+            a,
+            (warp_size, local_size),
+            dtype=dtype,
+            scope="warp",
+        )
+
+        with T.sblock("root"):
+            T.reads()
+            T.writes(C_warp[0:warp_size, 0:local_size])
+
+            for i0, i1 in T.grid(16, 16):
+                with T.sblock("C_warp"):
+                    i, j = T.axis.remap("SS", [i0, i1])
+
+                    thread_id, local_id = T.meta_var(index_map(i, j))
+
+                    T.reads()
+                    T.writes(C_warp[thread_id, local_id])
+
+                    C_warp[thread_id, local_id] = zero
+
+    @T.prim_func(s_tir=True)
+    def maca_mma_fill_impl(a: T.handle) -> None:
+        C_warp = T.match_buffer(
+            a,
+            (warp_size, local_size),
+            dtype=dtype,
+            scope="warp",
+            offset_factor=1,
+        )
+
+        with T.sblock("root"):
+            T.reads()
+            T.writes(C_warp[0:warp_size, 0:local_size])
+
+            tx = T.env_thread("threadIdx.x")
+            T.launch_thread(tx, warp_size)
+
+            for local_id in T.serial(0, local_size):
+                C_warp[tx, local_id] = zero
+
+    return maca_mma_fill_desc, maca_mma_fill_impl
+
+
+def get_maca_mma_store_intrin(
+    local_size=4,
+    dtype="float32",
+    scope="global",
+):
+    warp_size = MACA_MMA_WARP_SIZE
+
+    index_map = maca_mma_shared_16x16_to_local_64x4_layout_C
+
+    @T.prim_func(s_tir=True)
+    def maca_mma_store_desc(
+        a: T.handle,
+        c: T.handle,
+    ) -> None:
+        C_warp = T.match_buffer(
+            a,
+            (warp_size, local_size),
+            dtype=dtype,
+            scope="warp",
+        )
+
+        C = T.match_buffer(
+            c,
+            (16, 16),
+            dtype=dtype,
+            scope=scope,
+        )
+
+        with T.sblock("root"):
+            T.reads(C_warp[0:warp_size, 0:local_size])
+            T.writes(C[0:16, 0:16])
+
+            for i0, i1 in T.grid(16, 16):
+                with T.sblock("C_warp"):
+                    i, j = T.axis.remap("SS", [i0, i1])
+
+                    thread_id, local_id = T.meta_var(index_map(i, j))
+
+                    T.reads(C_warp[thread_id, local_id])
+                    T.writes(C[i, j])
+
+                    C[i, j] = C_warp[thread_id, local_id]
+
+    @T.prim_func(s_tir=True)
+    def maca_mma_store_impl(
+        a: T.handle,
+        c: T.handle,
+    ) -> None:
+        s0 = T.int32()
+        s1 = T.int32()
+
+        C_warp = T.match_buffer(
+            a,
+            (warp_size, local_size),
+            dtype=dtype,
+            scope="warp",
+            offset_factor=1,
+        )
+
+        C = T.match_buffer(
+            c,
+            (16, 16),
+            dtype=dtype,
+            scope=scope,
+            offset_factor=1,
+            strides=[s0, s1],
+        )
+
+        with T.sblock("root"):
+            T.reads(C_warp[0:warp_size, 0:local_size])
+            T.writes(C[0:16, 0:16])
+
+            tx = T.env_thread("threadIdx.x")
+            T.launch_thread(tx, warp_size)
+
+            for local_id in T.serial(0, local_size):
+                row = (tx // 16) * 4 + local_id
+                col = tx % 16
+                C[row, col] = C_warp[tx, local_id]
+
+    return maca_mma_store_desc, maca_mma_store_impl
+
+
+def get_maca_mma_intrin(
+    k_dim=16,
+    in_dtype="float16",
+    out_dtype="float32",
+):
+    if k_dim != 16:
+        raise ValueError("MACA MMA currently only supports k_dim=16")
+
+    if in_dtype != "float16" or out_dtype != "float32":
+        raise ValueError("MACA MMA currently only supports float16 x float16 -> float32")
+
+    warp_size = MACA_MMA_WARP_SIZE
+    m_dim = MACA_MMA_M_DIM
+    n_dim = MACA_MMA_N_DIM
+
+    local_size = (m_dim * k_dim) // warp_size
+    local_size_out = (m_dim * n_dim) // warp_size
+
+    index_map_A = maca_mma_shared_16x16_to_local_64x4_layout_A
+    index_map_B = maca_mma_shared_16x16_to_local_64x4_layout_B
+    index_map_C = maca_mma_shared_16x16_to_local_64x4_layout_C
+
+    @T.prim_func(s_tir=True)
+    def maca_mma_sync_desc(
+        a: T.handle,
+        b: T.handle,
+        c: T.handle,
+    ) -> None:
+        A = T.match_buffer(
+            a,
+            (warp_size, local_size),
+            in_dtype,
+            offset_factor=1,
+            scope="warp",
+        )
+
+        B = T.match_buffer(
+            b,
+            (warp_size, local_size),
+            in_dtype,
+            offset_factor=1,
+            scope="warp",
+        )
+
+        C = T.match_buffer(
+            c,
+            (warp_size, local_size_out),
+            out_dtype,
+            offset_factor=1,
+            scope="warp",
+        )
+
+        with T.sblock("root"):
+            T.reads(
+                C[0:warp_size, 0:local_size_out],
+                A[0:warp_size, 0:local_size],
+                B[0:warp_size, 0:local_size],
+            )
+            T.writes(C[0:warp_size, 0:local_size_out])
+
+            for i, j, k in T.grid(m_dim, n_dim, k_dim):
+                with T.sblock("C"):
+                    vi, vj, vk = T.axis.remap(
+                        "SSR",
+                        [i, j, k],
+                    )
+
+                    thread_id_C, local_id_C = T.meta_var(index_map_C(vi, vj))
+                    thread_id_A, local_id_A = T.meta_var(index_map_A(vi, vk))
+                    thread_id_B, local_id_B = T.meta_var(index_map_B(vk, vj))
+
+                    T.reads(
+                        C[thread_id_C, local_id_C],
+                        A[thread_id_A, local_id_A],
+                        B[thread_id_B, local_id_B],
+                    )
+                    T.writes(C[thread_id_C, local_id_C])
+
+                    C[thread_id_C, local_id_C] += Cast(
+                        out_dtype,
+                        A[thread_id_A, local_id_A],
+                    ) * Cast(
+                        out_dtype,
+                        B[thread_id_B, local_id_B],
+                    )
+
+    @T.prim_func(s_tir=True)
+    def maca_mma_sync_impl(
+        a: T.handle,
+        b: T.handle,
+        c: T.handle,
+    ) -> None:
+        A = T.match_buffer(
+            a,
+            (warp_size, local_size),
+            in_dtype,
+            offset_factor=1,
+            scope="warp",
+        )
+
+        B = T.match_buffer(
+            b,
+            (warp_size, local_size),
+            in_dtype,
+            offset_factor=1,
+            scope="warp",
+        )
+
+        C = T.match_buffer(
+            c,
+            (warp_size, local_size_out),
+            out_dtype,
+            offset_factor=1,
+            scope="warp",
+        )
+
+        with T.sblock("root"):
+            T.reads(
+                A[0:warp_size, 0:local_size],
+                B[0:warp_size, 0:local_size],
+                C[0:warp_size, 0:local_size_out],
+            )
+            T.writes(C[0:warp_size, 0:local_size_out])
+
+            tx = T.env_thread("threadIdx.x")
+            T.launch_thread(tx, warp_size)
+
+            C[tx, 0:local_size_out] = T.call_intrin(
+                "float32x4",
+                "tirx.maca.func_call",
+                "tvm_maca_mma_16x16x16f16",
+                A[tx, 0:local_size],
+                B[tx, 0:local_size],
+                C[tx, 0:local_size_out],
+                MACA_MMA_F16F16F32_SOURCE,
+            )
+
+    return maca_mma_sync_desc, maca_mma_sync_impl
+
+
+MACA_MMA_LOAD_16x16_A_SHARED_F16_INTRIN = "maca_mma_load_16x16_a_shared_f16"
+
+TensorIntrin.register(
+    MACA_MMA_LOAD_16x16_A_SHARED_F16_INTRIN,
+    *get_maca_mma_load_intrin(
+        16,
+        "float16",
+        "shared",
+        is_b=False,
+    ),
+)
+
+
+MACA_MMA_LOAD_16x16_B_SHARED_F16_INTRIN = "maca_mma_load_16x16_b_shared_f16"
+
+TensorIntrin.register(
+    MACA_MMA_LOAD_16x16_B_SHARED_F16_INTRIN,
+    *get_maca_mma_load_intrin(
+        16,
+        "float16",
+        "shared",
+        is_b=True,
+    ),
+)
+
+
+MACA_MMA_FILL_16x16_F32_INTRIN = "maca_mma_fill_16x16_f32"
+
+TensorIntrin.register(
+    MACA_MMA_FILL_16x16_F32_INTRIN,
+    *get_maca_mma_fill_intrin(
+        "float32",
+        4,
+    ),
+)
+
+
+MACA_MMA_STORE_16x16_F32_INTRIN = "maca_mma_store_16x16_f32"
+
+TensorIntrin.register(
+    MACA_MMA_STORE_16x16_F32_INTRIN,
+    *get_maca_mma_store_intrin(
+        4,
+        "float32",
+        "global",
+    ),
+)
+
+
+MACA_MMA_F16F16F32_INTRIN = "maca_mma_f16f16f32"
+
+TensorIntrin.register(
+    MACA_MMA_F16F16F32_INTRIN,
+    *get_maca_mma_intrin(
+        16,
+        "float16",
+        "float32",
+    ),
+)
+
+
 ######## WMMA intrinsics ########
 
 
