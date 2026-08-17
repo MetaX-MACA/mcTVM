@@ -15,5 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from .copy import *
-from .elementwise import *
+"""C500 MACA elementwise tile-primitive dispatch.
+
+The dispatches use scalar C500 arithmetic and keep their operation parsing,
+layout analysis, and emitters local to the MACA backend.
+"""
+
+from .register import *
+
+__all__: list[str] = []

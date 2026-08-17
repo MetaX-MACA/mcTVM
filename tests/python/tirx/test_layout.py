@@ -163,7 +163,7 @@ def test_constructor_multi_term_offset():
 
 def test_wg_local_layout_helper():
     layout = wg_local_layout(16)
-    expected = TileLayout(S[(128, 16) : (1 @ tid_in_wg, 1)])
+    expected = TileLayout(S[(256, 16) : (1 @ tid_in_wg, 1)])
     assert_structural_equal(layout.canonicalize(), expected.canonicalize())
 
     layout_rows = wg_local_layout(8, rows=64)
@@ -271,13 +271,6 @@ def test_verify_well_formed():
     test_scope_connected()
 
 
-@pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [tirx-layout] update tile layout canonicalization expectations "
-        "for fused device axes"
-    ),
-    strict=False,
-)
 def test_normalize_tile_layout():
     def case1():
         layout = TileLayout(S[(8, 8, 8, 4, 2) : (512, 64, 8, 2, 1)])
@@ -468,13 +461,13 @@ def test_normalize_tile_layout():
     def case_fuse_axis():
         with tvm.target.Target("maca"):
             layout = TileLayout(S[(2, 8, 2, 4) : (2 @ warpid, 4 @ laneid, 1 @ warpid, 1 @ laneid)])
-            layout_expected = TileLayout(S[(2, 8, 2, 4) : (64 @ tx, 4 @ tx, 32 @ tx, 1 @ tx)])
+            layout_expected = TileLayout(S[(2, 8, 2, 4) : (128 @ tx, 4 @ tx, 64 @ tx, 1 @ tx)])
             assert layout.verify_well_formed()
             assert layout_expected.verify_well_formed()
             assert_structural_equal(layout_expected, layout.canonicalize())
 
             layout = TileLayout(S[(2, 2, 8, 4) : (2 @ warpid, 1 @ warpid, 4 @ laneid, 1 @ laneid)])
-            layout_expected = TileLayout(S[128 : 1 @ tx])
+            layout_expected = TileLayout(S[(4, 32) : (64 @ tx, 1 @ tx)])
             assert layout.verify_well_formed()
             assert layout_expected.verify_well_formed()
             assert_structural_equal(layout_expected, layout.canonicalize())
@@ -492,7 +485,7 @@ def test_normalize_tile_layout():
                 ]
             )
             layout_expected = TileLayout(
-                S[(2, 2, 8, 2, 2, 4) : (256 @ tx, 64 @ tx, 4 @ tx, 128 @ tx, 32 @ tx, 1 @ tx)]
+                S[(2, 2, 8, 2, 2, 4) : (512 @ tx, 128 @ tx, 4 @ tx, 256 @ tx, 64 @ tx, 1 @ tx)]
             )
             assert layout.verify_well_formed()
             assert layout_expected.verify_well_formed()
@@ -502,7 +495,7 @@ def test_normalize_tile_layout():
                 S[(2, 8, 2, 4) : (2 @ wid_in_wg, 4 @ laneid, 1 @ wid_in_wg, 1 @ laneid)]
             )
             layout_expected = TileLayout(
-                S[(2, 8, 2, 4) : (64 @ tid_in_wg, 4 @ tid_in_wg, 32 @ tid_in_wg, 1 @ tid_in_wg)]
+                S[(2, 8, 2, 4) : (128 @ tid_in_wg, 4 @ tid_in_wg, 64 @ tid_in_wg, 1 @ tid_in_wg)]
             )
             assert layout.verify_well_formed()
             assert layout_expected.verify_well_formed()
@@ -511,7 +504,7 @@ def test_normalize_tile_layout():
             layout = TileLayout(
                 S[(2, 2, 4, 32) : (2 @ wgid, 1 @ wgid, 32 @ tid_in_wg, 1 @ tid_in_wg)]
             )
-            layout_expected = TileLayout(S[512 : 1 @ tx])
+            layout_expected = TileLayout(S[(4, 128) : (256 @ tx, 1 @ tx)])
             assert layout.verify_well_formed()
             assert layout_expected.verify_well_formed()
             assert_structural_equal(layout_expected, layout.canonicalize())

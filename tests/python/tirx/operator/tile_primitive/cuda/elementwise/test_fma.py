@@ -56,12 +56,7 @@ def _xfail_packed_feature(feature, sm):
 # ---------------------------------------------------------------------------
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 def test_fma_scalar_scalar():
-    sm = _get_sm_version()
-    if sm < 100:
-        _xfail_packed_feature("packed fma scalar-scale/scalar-bias lowering on sm_100+", sm)
-
     N = 128
     dtype = "float32"
     target = tvm.target.Target("maca")
@@ -100,12 +95,7 @@ def test_fma_scalar_scalar():
 # ---------------------------------------------------------------------------
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 def test_fma_buffer_scale_scalar_bias():
-    sm = _get_sm_version()
-    if sm < 100:
-        _xfail_packed_feature("packed fma buffer-scale/scalar-bias lowering on sm_100+", sm)
-
     N = 2
     dtype = "float32"
     target = tvm.target.Target("maca")
@@ -148,12 +138,7 @@ def test_fma_buffer_scale_scalar_bias():
 # ---------------------------------------------------------------------------
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 def test_mul_scalar_broadcast():
-    sm = _get_sm_version()
-    if sm < 100:
-        _xfail_packed_feature("packed mul scalar-broadcast lowering on sm_100+", sm)
-
     N = 16
     dtype = "float32"
     target = tvm.target.Target("maca")
@@ -242,14 +227,7 @@ def test_add_rounding_mode():
 # ---------------------------------------------------------------------------
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 def test_fma_no_layout():
-    sm = _get_sm_version()
-    if sm < 100:
-        _xfail_packed_feature(
-            "packed fma lowering for local buffers without TileLayout on sm_100+", sm
-        )
-
     N = 4
     dtype = "float32"
     target = tvm.target.Target("maca")
@@ -337,9 +315,8 @@ def test_sub_buffer_buffer_rounding():
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 def test_fma_warpgroup_wg_local_layout():
-    rows, cols = 128, 8
+    rows, cols = 256, 8
     dtype = "float32"
     scale_val = 1.5
     bias_val = -0.25
