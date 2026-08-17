@@ -908,14 +908,14 @@ def tvm_warp_shuffle_xor(mask, value, lane_mask, width, warp_size):
 
 
 def tvm_warp_activemask():
-    """Return a 32-bit mask indicates currently active threads in a calling warp.
+    """Return a 64-bit mask indicating active threads in a calling warp.
 
     Returns
     -------
     call : Expr
         The call expression.
     """
-    return call_intrin("uint32", "tirx.tvm_warp_activemask")
+    return call_intrin("uint64", "tirx.tvm_warp_activemask")
 
 
 def type_annotation(dtype):

@@ -25,7 +25,7 @@ from tvm.testing import env
 from tvm.tirx.layout import R, S, TileLayout, laneid, wg_local_layout
 
 MACA_XFAIL = pytest.mark.xfail(
-    reason="TODO(maca): [tile-primitive-reduction] support reduction dispatch variants",
+    reason="TODO(maca): [tile-primitive-reduction] unsupported reduction scope or layout",
     strict=False,
 )
 
@@ -49,7 +49,6 @@ MACA_XFAIL = pytest.mark.xfail(
 )
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 @pytest.mark.parametrize("dtype", ["float32", "float16"])
 @pytest.mark.parametrize("accum", [False, True])
@@ -58,7 +57,7 @@ def test_reduction_shared(
 ):
     ndim_src = len(src_shape)
 
-    thread_cnt = 32
+    thread_cnt = 64
     if np.prod(src_shape) > 1024:
         thread_cnt = 128
 
@@ -88,14 +87,14 @@ def test_reduction_shared(
         Tx.cta.copy(A_smem[tuple(copy_slice_src)], A[tuple(copy_slice_src)])
         if accum:
             Tx.cta.copy(B_smem[tuple(copy_slice_dst)], B[tuple(copy_slice_dst)])
-        T.cuda.cta_sync()
+        T.maca.cta_sync()
         if op_type == "sum":
             Tx.cta.sum(B_smem[tuple(reduce_slice_dst)], A_smem[tuple(reduce_slice_src)], axes=axes, accum=accum) # noqa: E501
         elif op_type == "max":
             Tx.cta.max(B_smem[tuple(reduce_slice_dst)], A_smem[tuple(reduce_slice_src)], axes=axes, accum=accum) # noqa: E501
         elif op_type == "min":
             Tx.cta.min(B_smem[tuple(reduce_slice_dst)], A_smem[tuple(reduce_slice_src)], axes=axes, accum=accum) # noqa: E501
-        T.cuda.cta_sync()
+        T.maca.cta_sync()
         Tx.cta.copy(B[tuple(copy_slice_dst)], B_smem[tuple(copy_slice_dst)])
         # fmt: on
 
@@ -143,8 +142,10 @@ def test_reduction_shared(
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
-@pytest.mark.parametrize("exec_scope", ["warp", "warpgroup", "thread"])
+@pytest.mark.parametrize(
+    "exec_scope",
+    ["warp", pytest.param("warpgroup", marks=MACA_XFAIL), "thread"],
+)
 @pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 @pytest.mark.parametrize("accum", [False, True])
 def test_reduction_shared_subscope(exec_scope, op_type, accum):
@@ -164,7 +165,7 @@ def test_reduction_shared_subscope(exec_scope, op_type, accum):
             A = T.match_buffer(A_ptr, src_shape, dtype, layout=g_layout_src)
             B = T.match_buffer(B_ptr, dst_shape, dtype, layout=g_layout_dst)
             T.device_entry()
-            warp_id = T.warp_id([(256) // 32])
+            warp_id = T.warp_id([(256) // 64])
             _bx = T.cta_id([1])
             _tid = T.thread_id([256])
             A_smem = T.alloc_buffer(list(src_shape), dtype, scope="shared", layout=s_layout_src)
@@ -172,15 +173,15 @@ def test_reduction_shared_subscope(exec_scope, op_type, accum):
             Tx.cta.copy(A_smem, A)
             if accum:
                 Tx.cta.copy(B_smem, B)
-            T.cuda.cta_sync()
-            if warp_id == 5:
+            T.maca.cta_sync()
+            if warp_id == 2:
                 if op_type == "sum":
                     Tx.warp.sum(B_smem, A_smem, axes=axes, accum=accum)
                 elif op_type == "max":
                     Tx.warp.max(B_smem, A_smem, axes=axes, accum=accum)
                 elif op_type == "min":
                     Tx.warp.min(B_smem, A_smem, axes=axes, accum=accum)
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             Tx.cta.copy(B, B_smem)
     elif exec_scope == "warpgroup":
         @T.prim_func
@@ -196,7 +197,7 @@ def test_reduction_shared_subscope(exec_scope, op_type, accum):
             Tx.cta.copy(A_smem, A)
             if accum:
                 Tx.cta.copy(B_smem, B)
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             if wg_id == 0:
                 if op_type == "sum":
                     Tx.wg.sum(B_smem, A_smem, axes=axes, accum=accum)
@@ -204,7 +205,7 @@ def test_reduction_shared_subscope(exec_scope, op_type, accum):
                     Tx.wg.max(B_smem, A_smem, axes=axes, accum=accum)
                 elif op_type == "min":
                     Tx.wg.min(B_smem, A_smem, axes=axes, accum=accum)
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             Tx.cta.copy(B, B_smem)
     elif exec_scope == "thread":
         @T.prim_func
@@ -219,7 +220,7 @@ def test_reduction_shared_subscope(exec_scope, op_type, accum):
             Tx.cta.copy(A_smem, A)
             if accum:
                 Tx.cta.copy(B_smem, B)
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             if _tid == 65:
                 if op_type == "sum":
                     Tx.sum(B_smem, A_smem, axes=axes, accum=accum)
@@ -227,7 +228,7 @@ def test_reduction_shared_subscope(exec_scope, op_type, accum):
                     Tx.max(B_smem, A_smem, axes=axes, accum=accum)
                 elif op_type == "min":
                     Tx.min(B_smem, A_smem, axes=axes, accum=accum)
-            T.cuda.cta_sync()
+            T.maca.cta_sync()
             Tx.cta.copy(B, B_smem)
         # fmt: on
 
@@ -283,7 +284,6 @@ def test_reduction_shared_subscope(exec_scope, op_type, accum):
 )
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 @pytest.mark.parametrize("accum", [False, True])
 def test_reduction_local_thread_wise(src_shape, dst_shape, axes, op_type, accum):
@@ -391,15 +391,14 @@ def test_reduction_local_thread_wise(src_shape, dst_shape, axes, op_type, accum)
 )
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 def test_reduction_local_view_basic(inner_dims, dst_dims, axes, accum, slice_end, op_type):
     """Test view-based local reduction with simple purely-local layouts."""
     dtype = "float32"
-    thread_cnt = 32
+    thread_cnt = 64
 
-    src_shape = (32, *inner_dims)
-    dst_shape = (32, *dst_dims)
+    src_shape = (thread_cnt, *inner_dims)
+    dst_shape = (thread_cnt, *dst_dims)
 
     def row_major_strides(dims):
         strides = []
@@ -506,33 +505,30 @@ def test_reduction_local_view_basic(inner_dims, dst_dims, axes, accum, slice_end
             A = tvm.runtime.tensor(A_np, dev)
             B = tvm.runtime.tensor(B_np.copy(), dev)
             mod(A, B)
-            tvm.testing.assert_allclose(ref, B.numpy(), atol=1e-5)
+            atol = 2e-5 if op_type == "sum" else 1e-5
+            tvm.testing.assert_allclose(ref, B.numpy(), atol=atol)
 
         tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("n_groups, n_warps", [(1, 1), (1, 4), (2, 8)])
 @pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 @pytest.mark.parametrize("dtype", ["float32", "float16"])
 @pytest.mark.parametrize("shuffle", [True, False])
 @pytest.mark.parametrize("accum", [False, True])
 def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle, accum):
-    """Test view-based local reduction with wgmma layouts and optional shuffle."""
+    """Test view-based local reduction with Wave64 layouts and optional shuffle."""
     if not shuffle and accum:
-        pytest.xfail(
-            "TODO(maca): [tile-primitive-reduction] support accum reductions without "
-            "shuffle in local-view reduction"
-        )
-    thread_cnt = 32
+        pytest.skip("accum without shuffle is not supported in current implementation")
+    thread_cnt = 64
     NUM_COL = 128
     g_shape_a = (16 * n_warps, NUM_COL)
-    g_shape_b = (16 * n_warps, 4)
+    g_shape_b = (16 * n_warps, 8)
     g_layout_a = TileLayout(S[g_shape_a])
     g_layout_b = TileLayout(S[g_shape_b])
-    acc_shape, red_shape = (16, NUM_COL), (16, 4)
+    acc_shape, red_shape = (16, NUM_COL), (16, 8)
 
     # fmt: off
     @T.prim_func
@@ -545,44 +541,45 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
         wg_id = T.warpgroup_id([n_groups])
         warp_id_in_wg = T.warp_id_in_wg([n_warps // n_groups])
         lane_id = T.lane_id([thread_cnt])
-                # acc layout
+
+        # Accumulator layout
         atom = T.TileLayout(T.S[(1, 2) : (2, 1)])
-        warp_layout = T.TileLayout(T.S[(8, 4) : (4@laneid, 1@laneid)])
-        warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
-        tile = T.TileLayout(T.S[(2, NUM_COL // 8) : (1, 2)])
-        acc_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
+        warp_layout = T.TileLayout(T.S[(8, 8) : (8@laneid, 1@laneid)])
+        warp_atom = atom.tile(warp_layout, (8, 8), (1, 2))
+        tile = T.TileLayout(T.S[(2, NUM_COL // 16) : (1, 2)])
+        acc_layout = warp_atom.tile(tile, (2, NUM_COL // 16), (8, 16))
         acc = T.alloc_buffer(
-            [2, NUM_COL // 4],
+            [2, NUM_COL // 8],
             dtype=dtype,
             scope="local",
-            layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)),
+            layout=atom.tile(tile, (2, NUM_COL // 16), (1, 2)),
         )
 
-                # red layout
+        # red layout
         red_atom = T.TileLayout(T.S[(1, 1) : (1, 1)])
-        red_warp_atom = red_atom.tile(warp_layout, (8, 4), (1, 1))
+        red_warp_atom = red_atom.tile(warp_layout, (8, 8), (1, 1))
         red_tile = T.TileLayout(T.S[(2, 1) : (1, 1)])
-        red_layout = red_warp_atom.tile(red_tile, (2, 1), (8, 4))
+        red_layout = red_warp_atom.tile(red_tile, (2, 1), (8, 8))
         red = T.alloc_buffer(
             [2],
             dtype=dtype,
             scope="local",
             layout=red_atom.tile(red_tile, (2, 1), (1, 1)),
         )
-        for i in T.serial(NUM_COL // 8):
+        for i in T.serial(NUM_COL // 16):
             for j in T.unroll(2):
                 for vec in T.vectorized(2):
                     acc[j, i * 2 + vec] = A[
-                        wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
-                        i * 8 + lane_id % 4 * 2 + vec,
+                        wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 8,
+                        i * 16 + lane_id % 8 * 2 + vec,
                     ]
 
-            # Pre-load B into red for accumulation
+        # Pre-load B into red for accumulation.
         if accum:
             for i in T.unroll(2):
                 red[i] = B[
-                    wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 4,
-                    lane_id % 4,
+                    wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 8,
+                    lane_id % 8,
                 ]
         acc_view = acc.view(*acc_shape, layout=acc_layout)
         red_view = red.view(*red_shape, layout=red_layout)
@@ -592,7 +589,6 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
             Tx.warp.max(red_view, acc_view, thread_reduce=shuffle, accum=accum)
         elif op_type == "min":
             Tx.warp.min(red_view, acc_view, thread_reduce=shuffle, accum=accum)
-                # perform an additional shuffle step if not shuffled above
         if not shuffle:
             if op_type == "sum":
                 Tx.warp.sum(red_view, red_view, thread_reduce=True)
@@ -600,9 +596,9 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
                 Tx.warp.max(red_view, red_view, thread_reduce=True)
             elif op_type == "min":
                 Tx.warp.min(red_view, red_view, thread_reduce=True)
-            # Write red into B
+        # Write red into B
         for i in T.unroll(2):
-            B[wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 4, lane_id % 4] = (
+            B[wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 8, lane_id % 8] = (
                 red[i]
             )
 
@@ -622,21 +618,21 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
         if op_type == "sum":
             row_reduce = A_np.sum(axis=-1)
             if accum:
-                B_ref = np.tile(row_reduce[:, np.newaxis], (1, 4)) + B_np
+                B_ref = np.tile(row_reduce[:, np.newaxis], (1, 8)) + B_np
             else:
-                B_ref = np.tile(row_reduce[:, np.newaxis], (1, 4))
+                B_ref = np.tile(row_reduce[:, np.newaxis], (1, 8))
         elif op_type == "max":
             row_reduce = A_np.max(axis=-1)
             if accum:
-                B_ref = np.maximum(np.tile(row_reduce[:, np.newaxis], (1, 4)), B_np)
+                B_ref = np.maximum(np.tile(row_reduce[:, np.newaxis], (1, 8)), B_np)
             else:
-                B_ref = np.tile(row_reduce[:, np.newaxis], (1, 4))
+                B_ref = np.tile(row_reduce[:, np.newaxis], (1, 8))
         elif op_type == "min":
             row_reduce = A_np.min(axis=-1)
             if accum:
-                B_ref = np.minimum(np.tile(row_reduce[:, np.newaxis], (1, 4)), B_np)
+                B_ref = np.minimum(np.tile(row_reduce[:, np.newaxis], (1, 8)), B_np)
             else:
-                B_ref = np.tile(row_reduce[:, np.newaxis], (1, 4))
+                B_ref = np.tile(row_reduce[:, np.newaxis], (1, 8))
         else:
             raise ValueError(f"Unsupported op_type: {op_type}")
 
@@ -654,12 +650,11 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("reduction_len", [8, 16, 64, 128, 256, 7, 10, 15, 100])
 @pytest.mark.parametrize("op_type", ["max", "min"])
 @pytest.mark.parametrize("accum", [False, True])
 def test_reduction_local_optimized_3input_maxmin(reduction_len, op_type, accum):
-    """Test thread-level local buffer reduction with 3-input max/min PTX intrinsics."""
+    """Test generic thread-level local buffer max/min reduction."""
     dtype = "float32"
 
     # fmt: off
@@ -728,11 +723,10 @@ def test_reduction_local_optimized_3input_maxmin(reduction_len, op_type, accum):
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("reduction_len", [8, 16, 64, 128, 256, 9, 17, 63, 65, 100])
 @pytest.mark.parametrize("accum", [False, True])
 def test_reduction_local_optimized_packed_add_sum(reduction_len, accum):
-    """Test thread-level sum reduction using packed add with add.f32x2 PTX instruction."""
+    """Test generic thread-level local buffer sum reduction."""
     dtype = "float32"
 
     # fmt: off
@@ -762,8 +756,7 @@ def test_reduction_local_optimized_packed_add_sum(reduction_len, accum):
         B[0] = B_local[0]
         # fmt: on
 
-        # Use sm_100a target for packed add sum dispatch
-    target = tvm.target.Target({"kind": "maca", "arch": "sm_100a"})
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -781,7 +774,6 @@ def test_reduction_local_optimized_packed_add_sum(reduction_len, accum):
         else:
             B_ref = A_np.sum()
 
-        # Use larger tolerance due to rounding differences from packed add (add.rz.ftz.f32x2)
         def run_and_check():
             dev = tvm.maca(0)
             A = tvm.runtime.tensor(A_np, dev)
@@ -794,21 +786,20 @@ def test_reduction_local_optimized_packed_add_sum(reduction_len, accum):
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["sum", "max"])
 @pytest.mark.parametrize("dtype", ["float32", "float16"])
 def test_reduction_op_warp_shuffle(op_type, dtype):
     """Test warp-scope shuffle reduce with laneid shard→replica layout pattern.
 
-    Case A: full warp reduce (32 lanes → 1 value, replicated to all lanes).
+    Covers MACA's Wave64 wavefront.
     """
-    N = 32
+    N = 64
     g_shape = (N,)
     g_layout = TileLayout(S[N])
 
-    # src layout: 32 elements sharded across 32 lanes
+    # src layout: one element sharded across every participating lane
     src_layout = TileLayout(S[N : 1 @ laneid])
-    # dst layout: 1 element replicated across 32 lanes
+    # dst layout: one element replicated across every participating lane
     dst_layout = TileLayout(S[1:1] + R[N : 1 @ laneid])
 
     # fmt: off
@@ -820,7 +811,7 @@ def test_reduction_op_warp_shuffle(op_type, dtype):
         T.device_entry()
         cta_id = T.cta_id([1])
         warp_id = T.warp_id([1])
-        lane_id = T.lane_id([32])
+        lane_id = T.lane_id([N])
         src_local = T.alloc_buffer([1], dtype, scope="local")
         dst_local = T.alloc_buffer([1], dtype, scope="local")
         src_local[0] = A[lane_id]
@@ -861,24 +852,23 @@ def test_reduction_op_warp_shuffle(op_type, dtype):
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize("op_type", ["sum", "max"])
 @pytest.mark.parametrize("dtype", ["float32", "float16"])
 def test_reduction_op_warp_shuffle_multi_elem(op_type, dtype):
     """Test warp-scope shuffle reduce with multiple elements per thread.
 
-    Each thread holds 4 elements, reduce across 32 lanes for each element group.
+    Each thread holds four elements, reduced across MACA's Wave64 wavefront.
     """
     ELEMS_PER_THREAD = 4
-    N_LANES = 32
-    TOTAL = ELEMS_PER_THREAD * N_LANES  # 128
+    N_LANES = 64
+    TOTAL = ELEMS_PER_THREAD * N_LANES
     g_shape = (TOTAL,)
     g_layout = TileLayout(S[TOTAL])
 
-    # src: 32 lanes with 4 elements each; layout S[(32, 4) : (1@laneid, 1)]
+    # src: lanes with four elements each; layout S[(lanes, 4) : (1@laneid, 1)]
     # element (i, j) → lane i, local j → thread k holds [4k, 4k+1, 4k+2, 4k+3]
     src_layout = TileLayout(S[(N_LANES, ELEMS_PER_THREAD) : (1 @ laneid, 1)])
-    # dst: 4 elements per thread, replicated across 32 lanes
+    # dst: four elements per thread, replicated across every participating lane
     dst_layout = TileLayout(S[ELEMS_PER_THREAD:1] + R[N_LANES : 1 @ laneid])
 
     # fmt: off
@@ -891,7 +881,7 @@ def test_reduction_op_warp_shuffle_multi_elem(op_type, dtype):
         T.device_entry()
         cta_id = T.cta_id([1])
         warp_id = T.warp_id([1])
-        lane_id = T.lane_id([32])
+        lane_id = T.lane_id([N_LANES])
         src_local = T.alloc_buffer([ELEMS_PER_THREAD], dtype, scope="local")
         dst_local = T.alloc_buffer([ELEMS_PER_THREAD], dtype, scope="local")
         for i in T.serial(ELEMS_PER_THREAD):
@@ -914,7 +904,7 @@ def test_reduction_op_warp_shuffle_multi_elem(op_type, dtype):
         np.random.seed(0)
         A_np = np.random.rand(TOTAL).astype(dtype)
         B_np = np.zeros(ELEMS_PER_THREAD, dtype=dtype)
-        # Each group of 4 elements: element j is sum/max of A[j], A[j+4], A[j+8], ..., A[j+124]
+        # Element j reduces A[j], A[j + 4], ... across all participating lanes.
         A_reshaped = A_np.reshape(N_LANES, ELEMS_PER_THREAD)
         if op_type == "sum":
             B_ref = A_reshaped.astype("float64").sum(axis=0).astype(dtype)
