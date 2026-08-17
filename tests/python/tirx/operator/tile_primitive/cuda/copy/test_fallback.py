@@ -19,8 +19,8 @@
 emit picked when every higher-priority variant rejects.
 
 The cases here are *intentionally* shaped so the ``vec_auto`` global ↔ shared
-path rejects (region element count doesn't divide ``thread_cnt``) and register / ``ld_stmatrix`` /
-... don't apply (scope pair mismatch). The dispatcher should land on
+path rejects (region element count doesn't divide ``thread_cnt``) and the
+remaining vector paths don't apply (scope pair mismatch). The dispatcher should land on
 fallback, the emit should pick one active thread, and the round-trip
 ``A_gmem → A_smem → B_gmem`` should match.
 """

@@ -23,6 +23,19 @@ from tvm.tirx.stmt import TilePrimitiveCall
 
 from ..common import match_scope, validate_copy_op
 
+_CUDA_CACHE_CONFIG_KEYS = ("cache", "l1_evict", "l2_evict", "prefetch_size")
+
+
+def _cache_config_supported(op_call: TilePrimitiveCall, _sctx: DispatchContext):
+    """Reject CUDA-specific cache controls that MACA cannot preserve."""
+    unsupported = []
+    for key in _CUDA_CACHE_CONFIG_KEYS:
+        if key in op_call.config:
+            unsupported.append(key)
+    if unsupported:
+        return False, "MACA copy does not support cache config: " + ", ".join(unsupported)
+    return True, None
+
 
 def _single_thread_exec(op_call: TilePrimitiveCall, sctx: DispatchContext):
     """Predicate: exec scope must be single-thread."""
@@ -66,4 +79,6 @@ def _scope_allowed(
 
 
 def _is_valid_copy(op_call: TilePrimitiveCall, sctx: DispatchContext):
-    return (validate_copy_op(op_call, sctx), "validate_copy_op failed")
+    if not validate_copy_op(op_call, sctx):
+        return False, "validate_copy_op failed"
+    return _cache_config_supported(op_call, sctx)

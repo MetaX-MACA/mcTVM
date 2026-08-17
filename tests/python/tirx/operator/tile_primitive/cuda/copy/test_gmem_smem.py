@@ -50,9 +50,9 @@ def _build_kernel(scope, n_threads, shape, dtype):
             T.thread_id_in_wg([256])
             T.thread_id([n_threads])
             A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
-            Tx.wg.copy(A_smem[full_slices], A[full_slices], dispatch="gmem_smem")
+            Tx.wg.copy(A_smem[full_slices], A[full_slices])
             T.maca.cta_sync()
-            Tx.wg.copy(B[full_slices], A_smem[full_slices], dispatch="gmem_smem")
+            Tx.wg.copy(B[full_slices], A_smem[full_slices])
 
     elif scope == "warp":
 
@@ -65,9 +65,9 @@ def _build_kernel(scope, n_threads, shape, dtype):
             T.lane_id([64])
             T.thread_id([n_threads])
             A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
-            Tx.warp.copy(A_smem[full_slices], A[full_slices], dispatch="gmem_smem")
+            Tx.warp.copy(A_smem[full_slices], A[full_slices])
             T.maca.cta_sync()
-            Tx.warp.copy(B[full_slices], A_smem[full_slices], dispatch="gmem_smem")
+            Tx.warp.copy(B[full_slices], A_smem[full_slices])
 
     elif scope == "cta":
 
@@ -81,9 +81,9 @@ def _build_kernel(scope, n_threads, shape, dtype):
             T.lane_id([64])
             T.thread_id([n_threads])
             A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
-            Tx.cta.copy(A_smem[full_slices], A[full_slices], dispatch="gmem_smem")
+            Tx.cta.copy(A_smem[full_slices], A[full_slices])
             T.maca.cta_sync()
-            Tx.cta.copy(B[full_slices], A_smem[full_slices], dispatch="gmem_smem")
+            Tx.cta.copy(B[full_slices], A_smem[full_slices])
     else:
         raise ValueError(f"unsupported scope {scope!r}")
 
@@ -222,9 +222,9 @@ def test_copy_g2s_s2g(task, dtype, scope):
         A_smem = T.alloc_buffer(s_shape, dtype, scope="shared", layout=layoutS)
         # `scope` is parametrized at runtime; select the scope namespace
         # dynamically (T.cta / T.thread) instead of a literal prefix.
-        getattr(Tx, scope).copy(A_smem[r_smem], A[r_gmem], dispatch="gmem_smem")
+        getattr(Tx, scope).copy(A_smem[r_smem], A[r_gmem])
         T.maca.cta_sync()
-        getattr(Tx, scope).copy(B[r_gmem], A_smem[r_smem], dispatch="gmem_smem")
+        getattr(Tx, scope).copy(B[r_gmem], A_smem[r_smem])
 
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
     target = tvm.target.Target("maca")
@@ -365,7 +365,7 @@ def test_swizzled_smem_emit_must_be_swizzle_aware():
         T.thread_id_in_wg([256])
         T.thread_id([256])
         A_smem = T.alloc_buffer(shape, "float16", scope="shared", layout=s_layout)
-        Tx.wg.copy(A_smem[0:128, 0:32], A[0:128, 0:32], dispatch="gmem_smem")
+        Tx.wg.copy(A_smem[0:128, 0:32], A[0:128, 0:32])
 
     target = tvm.target.Target("maca")
     with target:
@@ -518,9 +518,9 @@ def test_gmem_smem_swizzle_uses_structured_compose_apply():
         T.lane_id([64])
         T.thread_id([64])
         smem = T.alloc_buffer(shape, "float16", scope="shared", layout=s_layout)
-        Tx.warp.copy(smem, A[:, :], dispatch="gmem_smem")
+        Tx.warp.copy(smem, A[:, :])
         T.maca.cta_sync()
-        Tx.warp.copy(B[:, :], smem, dispatch="gmem_smem")
+        Tx.warp.copy(B[:, :], smem)
 
     target = tvm.target.Target("maca")
     with target:
@@ -536,8 +536,8 @@ def test_gmem_smem_swizzle_uses_structured_compose_apply():
     assert all("/" not in line and "%" not in line for line in s_off_lines), (
         "structured hot-loop offsets must not contain full quotient/mod decomposition"
     )
-    assert all("* v_" in line for line in s_off_lines), (
-        "the atom-aligned outer contribution must remain a direct add"
+    assert all("f * 512" in line or "f_1 * 512" in line for line in s_off_lines), (
+        "the outer coordinate must participate in the structured swizzle address"
     )
 
     # Round-trip correctness.

@@ -15,43 +15,31 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""MACA copy dispatch for ``global ↔ shared`` (no register side).
+"""Auto-vectorized MACA copy implementation for ``global ↔ shared``.
 
 There's no per-thread register side to inherit a partition from — both sides
 are cross-thread storage. The partition is synthesized from the surrounding
-scope context (warp / cta / thread; warpgroup is currently unsupported):
+scope context (warp / warpgroup / cta / thread):
 ``thread_cnt`` is derived from ``sctx.intra`` and each thread takes
 ``n_elements / thread_cnt`` consecutive fused-index slots. Layout / partition
 algorithm lives in ``_common.py`` and is shared with ``ldgsts.py``.
 """
 
-import tvm
 from tvm.runtime import DataType
 from tvm.script import tirx as T
 from tvm.tirx import Buffer, PrimFunc
-from tvm.tirx import Var as _TirVar
 from tvm.tirx.expr import IntImm as _IntImm
-from tvm.tirx.operator.tile_primitive.dispatcher import (
-    predicate,
-    register_dispatch,
-)
 from tvm.tirx.operator.tile_primitive.registry import DispatchContext
 from tvm.tirx.stmt import TilePrimitiveCall
 
+from ..layout_utils import recompose_swizzle
 from ._common import (
     _TID_AXIS_FOR_SCOPE,
     _thread_cnt,
     align_layouts_gs,
 )
-from ._swizzle_iter import (
-    apply_swizzle,
-    emit_init,
-    emit_iter_offset,
-    get_swizzle,
-    try_recognize,
-)
-from .reg import _all_threads_active, _axis_decl, _ptr_off
 from .utils import _is_valid_copy, _scope_allowed
+from .vec_auto_reg import _all_threads_active, _axis_decl, _ptr_off
 
 _GMEM_SMEM_PAIRS = [
     ("global", "shared*"),
@@ -132,6 +120,7 @@ def _emit_gmem_smem(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFu
             elem_bits,
             thread_cnt,
         )
+        s_apply_layout = recompose_swizzle(s_buf.layout, s_p)
 
     # vec_len=1 is the scalar fallback — uses the same unified
     # [outer x thread x vec] coord scheme below.
@@ -165,102 +154,10 @@ def _emit_gmem_smem(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFu
 
     tid_axis_name = _TID_AXIS_FOR_SCOPE[sctx.scope_kind] if thread_cnt > 1 else None
 
-    # Walk shard from the vec iter backward to find the prefix that covers
-    # the T region exactly (∏ext == thread_cnt). The iters consumed are T
-    # iters; the leading prefix is the outer iter list — handed to
-    # ``try_recognize`` so the swizzle fast path can decide whether the
-    # outer iter strides match a pattern it can lower to signed_strides.
-    if thread_cnt > 1:
-        acc, _i = 1, len(s_p.shard) - 2
-        while _i >= 0 and acc < thread_cnt:
-            _ext = int(s_p.shard[_i].extent)
-            if acc * _ext > thread_cnt:
-                break
-            acc *= _ext
-            _i -= 1
-        outer_iters_s = list(s_p.shard[: _i + 1]) if acc == thread_cnt else []
-    else:
-        outer_iters_s = list(s_p.shard[:-1])
-
-    # ComposeLayout on s_buf: try the closed-form signed-strides pattern
-    # (precomputed once per thread, then per-iter is a sum of register
-    # adds); fall back to per-iter ``swizzle.apply`` (one full XOR +
-    # decompose per iter). Closure picked at parse time so the TIRx parser
-    # doesn't AST-evaluate a "dead" ternary branch.
-    swizzle = get_swizzle(s_buf.layout)
-    swizzle_pattern = None
-    if swizzle is not None and outer_iters_s:
-        if tid_axis_name is not None:
-            _tid_placeholder = _TirVar(tid_axis_name, "int32")
-        else:
-            _tid_placeholder = _IntImm("int32", 0)
-        s_off_template = s_p.apply(
-            _IntImm("int32", 0),
-            _tid_placeholder,
-            _IntImm("int32", 0),
-            shape=apply_shape,
-        )["m"]
-        # Bind the tid placeholder's range so the (C1) analyzer check can
-        # discharge ``bit_bj(s_off // C) == 0`` for high bj's. Outer iter
-        # stride here is ``thread_cnt * vec_len`` ⇒ bj ∈ [log2(thread_cnt),
-        # ...]; without bounds the analyzer can't prove the lane's high bits
-        # are 0 and rejects.
-        var_bounds = {}
-        if tid_axis_name is not None:
-            var_bounds[_tid_placeholder] = tvm.ir.Range.from_min_extent(0, thread_cnt)
-        swizzle_pattern = try_recognize(
-            swizzle,
-            [int(it.extent) for it in outer_iters_s],
-            [int(it.stride) for it in outer_iters_s],
-            s_off_template,
-            var_bounds=var_bounds or None,
-        )
-
-    class _SwizzleState:
-        def __init__(self):
-            self.signed_strides = None
-            self.base_off = None
-
-    state = _SwizzleState()
-
     def _decl_tid():
         if tid_axis_name is not None:
             return _axis_decl(tid_axis_name, sctx)
         return _IntImm("int32", 0)
-
-    def _setup_swizzle(tid):
-        if swizzle_pattern is None:
-            return
-        s_off_resolved = s_p.apply(
-            _IntImm("int32", 0),
-            tid,
-            _IntImm("int32", 0),
-            shape=apply_shape,
-        )["m"]
-        state.signed_strides, state.base_off = emit_init(
-            swizzle_pattern,
-            s_off_resolved,
-        )
-
-    if swizzle_pattern is not None:
-
-        def _s_off(f, s_lin):
-            return emit_iter_offset(
-                swizzle_pattern,
-                state.signed_strides,
-                state.base_off,
-                f,
-            )
-    elif swizzle is not None:
-        _sw = swizzle
-
-        def _s_off(f, s_lin):
-            del f
-            return apply_swizzle(_sw, s_lin)
-    else:
-
-        def _s_off(f, s_lin):
-            return s_lin
 
     v0 = _IntImm("int32", 0)
 
@@ -268,22 +165,20 @@ def _emit_gmem_smem(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFu
     @T.prim_func(check_well_formed=False)
     def impl():
         tid = _decl_tid()
-        _setup_swizzle(tid)
         # NB: pass typed ptr_to(...) directly to _ptr_off; caching in a
         # local var turns it into void* + offset = byte arithmetic →
         # misaligned vector ops.
         #
         # Use a serial TIR loop and let the backend compiler unroll downstream. Mirrors
-        # the reg.py rationale in commit ac7ecf70f0: explicit ``T.unroll``
-        # materializes the per-iter scratch (s_lin/g_lin/s_off/s_ptr/g_ptr)
+        # the vec_auto_reg rationale in commit ac7ecf70f0: explicit ``T.unroll``
+        # materializes the per-iter scratch (s_off/g_lin/s_ptr/g_ptr)
         # as N copies of each ``alignas(64)`` declaration. For large
         # ``total_outer`` (e.g. thread-scope fp32 swizzled copies of 32x256
         # at vec=4 ⇒ 2048 iters; ldgsts test4 ⇒ ~4k iters once both
         # g2s/s2g sites add up) this floods the kernel and backend compilation times out.
         for f in range(total_outer):
-            s_lin = s_p.apply(f, tid, v0, shape=apply_shape)["m"]
+            s_off = s_apply_layout.apply(f, tid, v0, shape=apply_shape)["m"]
             g_lin = g_p.apply(f, tid, v0, shape=apply_shape)["m"]
-            s_off = _s_off(f, s_lin)
             # Pointer-valued calls are general Exprs after the IR type
             # migration. Bind them explicitly so the TIRx parser does not
             # try to infer a scalar constant type for the call result.
@@ -295,14 +190,3 @@ def _emit_gmem_smem(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFu
                 copy_op(g_ptr, s_ptr)
     # fmt: on
     return impl
-
-
-@register_dispatch(
-    "copy",
-    "maca",
-    variant="gmem_smem",
-    priority=10,
-    when=[predicate("gmem_smem_applicable", _is_gmem_smem)],
-)
-def copy_schedule_gmem_smem(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc:
-    return _emit_gmem_smem(op_call, sctx)
