@@ -22,21 +22,19 @@ import tvm
 import tvm.testing
 from tvm import te
 from tvm.s_tir.tensor_intrin.maca import (
-    WMMA_FILL_16x16x4_F32_INTRIN,
-    WMMA_FILL_16x16x16_F32_INTRIN,
-    WMMA_FILL_16x16x16_S32_INTRIN,
-    WMMA_LOAD_16x16x4_F32_A_DYN_INTRIN,
-    WMMA_LOAD_16x16x4_F32_B_DYN_INTRIN,
-    WMMA_LOAD_16x16x16_F16_A_INTRIN,
-    WMMA_LOAD_16x16x16_F16_B_INTRIN,
-    WMMA_LOAD_16x16x16_S8_A_INTRIN,
-    WMMA_LOAD_16x16x16_S8_B_INTRIN,
-    WMMA_STORE_16x16x4_F32_GLOBAL_INTRIN,
-    WMMA_STORE_16x16x16_F32_GLOBAL_INTRIN,
-    WMMA_STORE_16x16x16_S32_GLOBAL_INTRIN,
-    WMMA_SYNC_16x16x4_f32f32f32_INTRIN,
-    WMMA_SYNC_16x16x16_f16f16f32_INTRIN,
-    WMMA_SYNC_16x16x16_s8s8s32_INTRIN,
+    MACA_MMA_F16F16F32_INTRIN,
+    MACA_MMA_F32F32F32_INTRIN,
+    MACA_MMA_S8S8S32_INTRIN,
+    MACA_MMA_FILL_16x16_F32_INTRIN,
+    MACA_MMA_FILL_16x16_S32_INTRIN,
+    MACA_MMA_LOAD_4x16_B_SHARED_F32_INTRIN,
+    MACA_MMA_LOAD_16x4_A_SHARED_F32_INTRIN,
+    MACA_MMA_LOAD_16x16_A_SHARED_F16_INTRIN,
+    MACA_MMA_LOAD_16x16_A_SHARED_S8_INTRIN,
+    MACA_MMA_LOAD_16x16_B_SHARED_F16_INTRIN,
+    MACA_MMA_LOAD_16x16_B_SHARED_S8_INTRIN,
+    MACA_MMA_STORE_16x16_F32_INTRIN,
+    MACA_MMA_STORE_16x16_S32_INTRIN,
     shared_4x16_to_local_64x1_layout_B,
     shared_16x4_to_local_64x1_layout_A,
     shared_16x16_to_local_64x4_layout_A,
@@ -93,7 +91,6 @@ def run_test(
     mma_intrin,
     mma_fill_intrin,
     mma_store_intrin,
-    shared_scope="shared",
 ):
     sch = mfma_schedule(
         te.create_prim_func(matmul(M, N, K, in_dtype, out_dtype, b_transposed)),
@@ -111,7 +108,6 @@ def run_test(
         mma_intrin,
         mma_fill_intrin,
         mma_store_intrin,
-        shared_scope=shared_scope,
     )
 
     f = tvm.compile(sch.mod["main"], target="maca")
@@ -165,7 +161,6 @@ def run_test(
     tvm.testing.run_with_gpu_lock(run_and_check)
     return lambda: tvm.testing.run_with_gpu_lock(run_and_check, True)
 
-
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_i8i8i32_m16n16k16():
@@ -206,12 +201,11 @@ def test_i8i8i32_m16n16k16():
         index_map_A,
         index_map_B,
         index_map_C,
-        WMMA_LOAD_16x16x16_S8_A_INTRIN,
-        WMMA_LOAD_16x16x16_S8_B_INTRIN,
-        WMMA_SYNC_16x16x16_s8s8s32_INTRIN,
-        WMMA_FILL_16x16x16_S32_INTRIN,
-        WMMA_STORE_16x16x16_S32_GLOBAL_INTRIN,
-        shared_scope="shared",
+        MACA_MMA_LOAD_16x16_A_SHARED_S8_INTRIN,
+        MACA_MMA_LOAD_16x16_B_SHARED_S8_INTRIN,
+        MACA_MMA_S8S8S32_INTRIN,
+        MACA_MMA_FILL_16x16_S32_INTRIN,
+        MACA_MMA_STORE_16x16_S32_INTRIN,
     )
 
     if measure_perf and timer:
@@ -258,12 +252,11 @@ def test_f16f16f32_m16n16k16():
         index_map_A,
         index_map_B,
         index_map_C,
-        WMMA_LOAD_16x16x16_F16_A_INTRIN,
-        WMMA_LOAD_16x16x16_F16_B_INTRIN,
-        WMMA_SYNC_16x16x16_f16f16f32_INTRIN,
-        WMMA_FILL_16x16x16_F32_INTRIN,
-        WMMA_STORE_16x16x16_F32_GLOBAL_INTRIN,
-        shared_scope="shared",
+        MACA_MMA_LOAD_16x16_A_SHARED_F16_INTRIN,
+        MACA_MMA_LOAD_16x16_B_SHARED_F16_INTRIN,
+        MACA_MMA_F16F16F32_INTRIN,
+        MACA_MMA_FILL_16x16_F32_INTRIN,
+        MACA_MMA_STORE_16x16_F32_INTRIN,
     )
 
     if measure_perf and timer:
@@ -272,24 +265,16 @@ def test_f16f16f32_m16n16k16():
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.skipif(
-    env.has_maca_compute(16, 0, exact=True),
-    reason="m16n16k4 f32 MMA is not supported on xcore1600",
-)
 def test_f32f32f32_m16n16k4():
     def index_map_A(i, j):
-        return (
-            i // 16,
-            j // 16,
-            *shared_16x4_to_local_64x1_layout_A(i % 16, j % 16),
-        )
+        return (i // 16,
+                j // 4,
+                *shared_16x4_to_local_64x1_layout_A(i % 16, j % 4))
 
     def index_map_B(i, j):
-        return (
-            i // 16,
-            j // 16,
-            *shared_4x16_to_local_64x1_layout_B(i % 16, j % 16),
-        )
+        return (i // 4,
+                j // 16,
+                *shared_4x16_to_local_64x1_layout_B(i % 4, j % 16))
 
     def index_map_C(i, j):
         return (
@@ -314,12 +299,11 @@ def test_f32f32f32_m16n16k4():
         index_map_A,
         index_map_B,
         index_map_C,
-        WMMA_LOAD_16x16x4_F32_A_DYN_INTRIN,
-        WMMA_LOAD_16x16x4_F32_B_DYN_INTRIN,
-        WMMA_SYNC_16x16x4_f32f32f32_INTRIN,
-        WMMA_FILL_16x16x4_F32_INTRIN,
-        WMMA_STORE_16x16x4_F32_GLOBAL_INTRIN,
-        shared_scope="shared.dyn",
+        MACA_MMA_LOAD_16x4_A_SHARED_F32_INTRIN,
+        MACA_MMA_LOAD_4x16_B_SHARED_F32_INTRIN,
+        MACA_MMA_F32F32F32_INTRIN,
+        MACA_MMA_FILL_16x16_F32_INTRIN,
+        MACA_MMA_STORE_16x16_F32_INTRIN,
     )
 
     if measure_perf and timer:
