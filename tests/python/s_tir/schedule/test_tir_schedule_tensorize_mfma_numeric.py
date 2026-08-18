@@ -161,6 +161,7 @@ def run_test(
     tvm.testing.run_with_gpu_lock(run_and_check)
     return lambda: tvm.testing.run_with_gpu_lock(run_and_check, True)
 
+
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_i8i8i32_m16n16k16():
@@ -267,14 +268,10 @@ def test_f16f16f32_m16n16k16():
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_f32f32f32_m16n16k4():
     def index_map_A(i, j):
-        return (i // 16,
-                j // 4,
-                *shared_16x4_to_local_64x1_layout_A(i % 16, j % 4))
+        return (i // 16, j // 4, *shared_16x4_to_local_64x1_layout_A(i % 16, j % 4))
 
     def index_map_B(i, j):
-        return (i // 4,
-                j // 16,
-                *shared_4x16_to_local_64x1_layout_B(i % 4, j % 16))
+        return (i // 4, j // 16, *shared_4x16_to_local_64x1_layout_B(i % 4, j % 16))
 
     def index_map_C(i, j):
         return (
