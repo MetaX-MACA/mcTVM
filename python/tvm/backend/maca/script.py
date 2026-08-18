@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 from tvm.backend.maca import op as _maca_op
+from tvm.tirx import is_buffer_var
+from tvm.tirx import op as _tir_op
 from tvm.tirx.script.builder.ir import _op_wrapper
 
 # pylint: disable=protected-access
@@ -38,6 +40,20 @@ class MACANamespace:
         self.copy_32b = _op_wrapper(_maca_op.maca_copy_32b)
         self.copy_16b = _op_wrapper(_maca_op.maca_copy_16b)
         self.copy_8b = _op_wrapper(_maca_op.maca_copy_8b)
+        setattr(self, "__activemask", self._activemask)
+        setattr(self, "__shfl_xor_sync", self._shfl_xor_sync)
+
+    @staticmethod
+    def _activemask():
+        return _tir_op.call_intrin("uint64", "tirx.maca.__activemask")
+
+    @staticmethod
+    def _shfl_xor_sync(mask, value, lane_mask, width):
+        if is_buffer_var(value):
+            value = value[0]
+        return _tir_op.call_intrin(
+            value.ty, "tirx.maca.__shfl_xor_sync", mask, value, lane_mask, width
+        )
 
 
 __all__ = ["MACANamespace"]

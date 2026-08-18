@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from .copy import *
-from .elementwise import *
-from .reduction import *
+"""MACA reduction tile-primitive dispatch registrations."""
+
+from .local import *
+from .shared import *
