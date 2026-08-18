@@ -589,7 +589,8 @@ def get_maca_mma_intrin(
 
 
 MACA_MMA_LOAD_16x16_A_SHARED_F16_INTRIN = "maca_mma_load_16x16_a_shared_f16"
-TensorIntrin.register(MACA_MMA_LOAD_16x16_A_SHARED_F16_INTRIN,
+TensorIntrin.register(
+    MACA_MMA_LOAD_16x16_A_SHARED_F16_INTRIN,
     *get_maca_mma_load_intrin(16, "float16", "shared", is_b=False),
 )
 
