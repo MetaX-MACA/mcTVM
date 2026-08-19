@@ -36,11 +36,7 @@ except ImportError:
 
 @pytest.mark.parametrize("promoted_dtype", ["float32x2", "float16x2"])
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason="TODO(maca): [fp4] support float4_e2m1fn vector type lowering and conversions",
-    strict=False,
-)
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_e2m1_vector_conversions(promoted_dtype):
     native_dtype = "float4_e2m1fnx2"
     vector_length = 64
@@ -65,7 +61,7 @@ def test_e2m1_vector_conversions(promoted_dtype):
                             T.Cast(promoted_dtype, A[v_i]) + T.Cast(promoted_dtype, B[v_i]),
                         )
 
-    target = "maca"
+    target = "cuda"
     fadd = tvm.compile(Module, target=target)
 
     if "x" in native_dtype:
@@ -92,7 +88,7 @@ def test_e2m1_vector_conversions(promoted_dtype):
         b_np = np.random.choice(valid_fp4_values, size=np_shape).astype(np.int8)
 
     def run_and_check():
-        dev = tvm.device(target, 0)
+        dev = tvm.cuda(0)
         a = tvm.runtime.empty(shape=(vector_length,), dtype=native_dtype, device=dev)
         a.copyfrom(a_np)
         b = tvm.runtime.empty(shape=(vector_length,), dtype=native_dtype, device=dev)
@@ -188,15 +184,11 @@ def _scalar_reinterpret_module(n, num_blocks, vector_length, num_elem_per_storag
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason="TODO(maca): [fp4] support float4_e2m1fn reinterpret/dequantize lowering",
-    strict=False,
-)
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_e2m1_dequantize():
     n = 128
 
-    dev = tvm.device("maca", 0)
+    dev = tvm.cuda(0)
     target = tvm.target.Target.from_device(dev)
     num_elem_per_storage = 32 // 4
 
@@ -217,11 +209,7 @@ def test_e2m1_dequantize():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason="TODO(maca): [fp4] support packed float4_e2m1fn scalar buffer loads and conversion",
-    strict=False,
-)
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_e2m1_scalar_buffer_offset():
     """Regression test: float4_e2m1fn scalar buffer access uses correct byte offset.
 
@@ -254,7 +242,7 @@ def test_e2m1_scalar_buffer_offset():
     sch.bind(bx, "blockIdx.x")
     sch.bind(tx, "threadIdx.x")
 
-    target = "maca"
+    target = "cuda"
     fadd = tvm.compile(sch.mod, target=target)
 
     # float4_e2m1fn: 4-bit values 0..15, two packed per byte.
@@ -276,7 +264,7 @@ def test_e2m1_scalar_buffer_offset():
     expected = fp4_to_fp16[fp4_elements]
 
     def run_and_check():
-        dev = tvm.device(target, 0)
+        dev = tvm.cuda(0)
         a = tvm.runtime.empty(shape=(n // 2,), dtype="uint8", device=dev)
         a.copyfrom(packed)
         b = tvm.runtime.empty(shape=(n,), dtype="float16", device=dev)

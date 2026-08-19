@@ -41,13 +41,7 @@ def vector_add(A: T.Buffer((16), "float32"), B: T.Buffer((32), "float32")) -> No
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [ptx-ldg32] support PTX ldg32-style load injection or an equivalent MACA pass"
-    ),
-    strict=False,
-)
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_inject_ptx_intrin():
     f = vector_add
     arch = tvm.support.nvcc.get_target_compute_version()
@@ -56,7 +50,7 @@ def test_inject_ptx_intrin():
         # Require at least SM80
         return
     with tvm.transform.PassContext(config={"tirx.s_tir.ldg32": True}):
-        mod = tvm.compile(f, target="maca")
+        mod = tvm.compile(f, target="cuda")
     A_np = np.random.rand(16).astype("float32")
     B_np = np.zeros(32).astype("float32")
     C_np = np.zeros(32).astype("float32")
@@ -67,7 +61,7 @@ def test_inject_ptx_intrin():
         C_np[i] += 1.0
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A_nd = tvm.runtime.tensor(A_np, device=dev)
         B_nd = tvm.runtime.tensor(B_np, device=dev)
         mod(A_nd, B_nd)
