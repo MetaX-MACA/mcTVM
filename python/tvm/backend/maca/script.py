@@ -42,6 +42,9 @@ class MACANamespace:
         self.copy_8b = _op_wrapper(_maca_op.maca_copy_8b)
         setattr(self, "__activemask", self._activemask)
         setattr(self, "__shfl_xor_sync", self._shfl_xor_sync)
+        setattr(self, "__shfl_sync", self._shfl_sync)
+        setattr(self, "__shfl_up_sync", self._shfl_up_sync)
+        setattr(self, "__shfl_down_sync", self._shfl_down_sync)
 
     @staticmethod
     def _activemask():
@@ -53,6 +56,26 @@ class MACANamespace:
             value = value[0]
         return _tir_op.call_intrin(
             value.ty, "tirx.maca.__shfl_xor_sync", mask, value, lane_mask, width
+        )
+
+    @staticmethod
+    def _shfl_sync(mask, value, lane, width):
+        if is_buffer_var(value):
+            value = value[0]
+        return _tir_op.call_intrin(value.ty, "tirx.maca.__shfl_sync", mask, value, lane, width)
+
+    @staticmethod
+    def _shfl_up_sync(mask, value, delta, width):
+        if is_buffer_var(value):
+            value = value[0]
+        return _tir_op.call_intrin(value.ty, "tirx.maca.__shfl_up_sync", mask, value, delta, width)
+
+    @staticmethod
+    def _shfl_down_sync(mask, value, delta, width):
+        if is_buffer_var(value):
+            value = value[0]
+        return _tir_op.call_intrin(
+            value.ty, "tirx.maca.__shfl_down_sync", mask, value, delta, width
         )
 
 
