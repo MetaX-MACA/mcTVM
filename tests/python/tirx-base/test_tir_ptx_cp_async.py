@@ -23,10 +23,6 @@ import tvm.testing
 from tvm.script import tirx as T
 from tvm.testing import env
 
-MACA_PTX_CP_ASYNC_XFAIL_REASON = (
-    "TODO(maca): [ptx-cp-async] support PTX cp.async legacy, commit_group, and wait_group lowering"
-)
-
 
 @T.prim_func(s_tir=True)
 def ptx_cp_async(A: T.Buffer((32, 128), "float16"), B: T.Buffer((32, 128), "float16")) -> None:
@@ -56,17 +52,16 @@ def ptx_cp_async(A: T.Buffer((32, 128), "float16"), B: T.Buffer((32, 128), "floa
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(reason=MACA_PTX_CP_ASYNC_XFAIL_REASON, strict=False)
+@pytest.mark.skipif(not env.has_cuda_compute(8), reason="need cuda compute >= 8.0")
 def test_ptx_cp_async():
     f = ptx_cp_async
 
-    mod = tvm.compile(f, target="maca")
+    mod = tvm.compile(f, target="cuda")
     A_np = np.random.rand(32, 128).astype("float16")
     B_np = np.zeros((32, 128)).astype("float16")
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A_nd = tvm.runtime.tensor(A_np, device=dev)
         B_nd = tvm.runtime.tensor(B_np, device=dev)
         mod(A_nd, B_nd)
