@@ -1,5 +1,5 @@
 # Licensed to the Apache Software Foundation (ASF) under one
-# ruff: noqa: E501, E741, F841
+# ruff: noqa: E501, E741, F401, F841
 
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -27,6 +27,31 @@ from tvm.script import ir as I
 from tvm.script import tirx as T
 from tvm.support.mxcc import have_bf16, have_fp16, have_int8
 from tvm.testing import env
+
+
+@pytest.fixture(autouse=True, params=["nvcc", "nvrtc"])
+def setup_cuda_compile_mode(request):
+    mode = request.param
+    if mode == "nvrtc":
+        try:
+            from cuda.bindings import nvrtc
+        except ImportError:
+            pytest.skip("cuda-python not available, skipping nvrtc tests")
+
+    orig_func = tvm.support.nvcc.tvm_callback_cuda_compile
+
+    def compile_mode_wrapper(code):
+        if mode == "nvcc":
+            return tvm.support.nvcc.compile_cuda(code, target_format="fatbin", compiler="nvcc")
+        elif mode == "nvrtc":
+            return tvm.support.nvcc.compile_cuda(code, target_format="cubin", compiler="nvrtc")
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
+
+    tvm.register_global_func("tvm_callback_cuda_compile", compile_mode_wrapper, override=True)
+    # yield back to the original function so that each test runs twice
+    yield
+    tvm.register_global_func("tvm_callback_cuda_compile", orig_func, override=True)
 
 
 @pytest.mark.gpu
@@ -148,16 +173,12 @@ def test_cuda_bf16_vectorize_add():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason="TODO(maca): [int8-dot] support __dp4a-style int8 dot-product intrinsic lowering",
-    strict=False,
-)
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_cuda_multiply_add():
     num_thread = 8
 
     def check_cuda(dtype, n, lanes):
-        if dtype == "int8" and not have_int8(tvm.maca(0).compute_version):
+        if dtype == "int8" and not have_int8(tvm.cuda(0).compute_version):
             print("skip because gpu does not support int8")
             return
         vec_dtype = f"{dtype}x{lanes}"
@@ -181,7 +202,7 @@ def test_cuda_multiply_add():
                             T.writes(D[v_i])
                             D[v_i] = T.call_pure_extern("int32", "__dp4a", A[v_i], B[v_i], C[v_i])
 
-        fun = tvm.compile(Module, target="maca")
+        fun = tvm.compile(Module, target="cuda")
 
         np_a = np.random.randint(low=-128, high=127, size=(n, lanes))
         np_b = np.random.randint(low=-128, high=127, size=(n, lanes))
@@ -189,7 +210,7 @@ def test_cuda_multiply_add():
         np_d = [sum(x * y) + z for x, y, z in zip(np_a, np_b, np_c)]
 
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             a = tvm.runtime.empty((n,), vec_dtype, dev).copyfrom(np_a)
             b = tvm.runtime.empty((n,), vec_dtype, dev).copyfrom(np_b)
             c = tvm.runtime.empty((n,), "int32", dev).copyfrom(np_c)
@@ -981,11 +1002,7 @@ def test_invalid_reinterpret():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason="TODO(maca): [tensormap-abi] support TensorMap-style kernel parameters and grid-constant ABI",
-    strict=False,
-)
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 def test_cuda_tensormap():
     # fmt: off
     @T.prim_func(s_tir=True)
@@ -1003,7 +1020,7 @@ def test_cuda_tensormap():
     # fmt: on
 
     mod = tvm.IRModule({"main": main})
-    mod = tvm.compile(mod, target="maca")
+    mod = tvm.compile(mod, target="cuda")
     assert (
         """
 extern "C" __global__ void __launch_bounds__(128) main_kernel(float* __restrict__ A_ptr, const __grid_constant__ CUtensorMap A_map) {
