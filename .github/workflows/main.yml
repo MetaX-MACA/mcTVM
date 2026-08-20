@@ -170,14 +170,41 @@ jobs:
           mkdir -p "${TVM_PYTEST_RESULT_DIR}"
           uv pip install -v --target=python ./3rdparty/tvm-ffi/
 
-      - name: Run unit tests
+      - name: Run 'Base' unittests
         if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
         run: >-
           python3 -m pytest -vvs -n 4
-          -o "junit_suite_name=python-unittest-gpu"
-          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu.xml"
+          -o "junit_suite_name=python-unittest-gpu-base"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-base.xml"
           --junit-prefix=cython
-          tests/python || test $? -eq 5
+          tests/python/all-platform-minimal-test tests/python/arith tests/python/ci tests/python/codegen tests/python/contrib tests/python/disco tests/python/driver tests/python/ir tests/python/runtime tests/python/support tests/python/target tests/python/te tests/python/testing tests/python/tvmscript || test $? -eq 5
+
+      - name: Run 'TIRx' unittests
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 4
+          -o "junit_suite_name=python-unittest-gpu-tirx"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-tirx.xml"
+          --junit-prefix=cython
+          tests/python/tirx tests/python/tirx-analysis tests/python/tirx-base tests/python/tirx-transform || test $? -eq 5
+
+      - name: Run 's_tir' unittests
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 2
+          -o "junit_suite_name=python-unittest-gpu-s_tir"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-s_tir.xml"
+          --junit-prefix=cython
+          tests/python/s_tir || test $? -eq 5
+
+      - name: Run 'Relax' unittests
+        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
+        run: >-
+          python3 -m pytest -vvs -n 4
+          -o "junit_suite_name=python-unittest-gpu-relax"
+          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-relax.xml"
+          --junit-prefix=cython
+          tests/python/relax || test $? -eq 5
 
       - name: Test Summary
         if: ${{ always() && hashFiles('build/pytest-results/**/*.xml') != '' }}
