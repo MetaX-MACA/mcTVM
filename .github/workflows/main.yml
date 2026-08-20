@@ -170,41 +170,14 @@ jobs:
           mkdir -p "${TVM_PYTEST_RESULT_DIR}"
           uv pip install -v --target=python ./3rdparty/tvm-ffi/
 
-      - name: Run 'Core & Base' unittests
+      - name: Run unit tests
         if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
         run: >-
-          python3 -m pytest -vvs -n 2
+          python3 -m pytest -vvs -n 4
           -o "junit_suite_name=python-unittest-gpu-core"
           --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-core.xml"
           --junit-prefix=cython
-          tests/python/all-platform-minimal-test tests/python/arith tests/python/ci tests/python/ir tests/python/te tests/python/target tests/python/testing tests/python/support || test $? -eq 5
-
-      - name: Run 'TIR & Script' unittests
-        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
-        run: >-
-          python3 -m pytest -vvs -n 4
-          -o "junit_suite_name=python-unittest-gpu-tir"
-          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-tir.xml"
-          --junit-prefix=cython
-          tests/python/s_tir tests/python/tirx tests/python/tirx-analysis tests/python/tirx-base tests/python/tirx-transform tests/python/tvmscript || test $? -eq 5
-
-      - name: Run 'Hardware & Execution' unittests
-        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
-        run: >-
-          python3 -m pytest -vvs -n 2
-          -o "junit_suite_name=python-unittest-gpu-hw"
-          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-hw.xml"
-          --junit-prefix=cython
-          tests/python/codegen tests/python/contrib tests/python/disco tests/python/driver tests/python/runtime || test $? -eq 5
-
-      - name: Run 'Relax' unittests
-        if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
-        run: >-
-          python3 -m pytest -vvs -n 4
-          -o "junit_suite_name=python-unittest-gpu-relax"
-          --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-relax.xml"
-          --junit-prefix=cython
-          tests/python/relax || test $? -eq 5
+          tests/python || test $? -eq 5
 
       - name: Test Summary
         if: ${{ always() && hashFiles('build/pytest-results/**/*.xml') != '' }}
