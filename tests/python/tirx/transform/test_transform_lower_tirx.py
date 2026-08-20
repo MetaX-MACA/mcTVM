@@ -25,14 +25,6 @@ from tvm.tirx.function import PrimFunc
 from tvm.tirx.layout import laneid, warpid, wg_local_layout
 from tvm.tirx.transform import LowerTIRx, StmtSimplify
 
-MACA_LOWER_TIRX_XFAIL_REASON = (
-    "TODO(maca): [lower-tirx] support LowerTIRx scope resolution, layout lowering, "
-    "and execution-context "
-    "analysis for MACA targets"
-)
-
-pytestmark = pytest.mark.xfail(reason=MACA_LOWER_TIRX_XFAIL_REASON, strict=False)
-
 
 def compare(before, after, transform):
     """Compare lowered output against expected ``after`` IR."""
@@ -56,52 +48,56 @@ def _int_triple(side, axis):
     return tuple(int(x) for x in side[axis])
 
 
+MACA_WARP_MASK = tvm.runtime.const((1 << 64) - 1, "uint64")
+
+
 L_LANE = T.TileLayout(T.S[32 : 1 @ laneid])
+L_LANE_MACA = T.TileLayout(T.S[64 : 1 @ laneid])
 
 
 def test_lower_view_get():
     @T.prim_func(private=True)
-    def before1(in_buf: T.Buffer(64, "float32"), out: T.Buffer(64, "float32")) -> None:
+    def before1(in_buf: T.Buffer(128, "float32"), out: T.Buffer(128, "float32")) -> None:
         T.device_entry()
         bx, by, bz = T.cta_id([1, 1, 1])
         T.warp_id([1])
-        lane_id = T.lane_id([32])
+        lane_id = T.lane_id([64])
         A = T.alloc_buffer([2], dtype="float16", scope="local", layout=T.TileLayout(T.S[2:1]))
-        B_layout = A.layout.tile(L_LANE, (32,), (2,))
-        B = A.view(64, layout=B_layout)
+        B_layout = A.layout.tile(L_LANE_MACA, (64,), (2,))
+        B = A.view(128, layout=B_layout)
         A_local = B.local(2)
         for i in T.vectorized(2):
             A_local[i] = T.float32(in_buf[lane_id * 2 + i])
-        B_1 = A.view(64, layout=B_layout)
+        B_1 = A.view(128, layout=B_layout)
         A_local_1 = B_1.local(2)
         for i in T.vectorized(2):
             out[lane_id * 2 + i] = T.float32(A_local_1[i])
 
     @T.prim_func(private=True)
     def after1(in_buf_handle: T.handle, out_handle: T.handle):
-        in_buf = T.match_buffer(in_buf_handle, (64,), layout=None)
-        out = T.match_buffer(out_handle, (64,), layout=None)
-        out_1 = T.decl_buffer((64,), data=out.data, layout=None)
-        in_buf_1 = T.decl_buffer((64,), data=in_buf.data, layout=None)
+        in_buf = T.match_buffer(in_buf_handle, (128,), layout=None)
+        out = T.match_buffer(out_handle, (128,), layout=None)
+        out_1 = T.decl_buffer((128,), data=out.data, layout=None)
+        in_buf_1 = T.decl_buffer((128,), data=in_buf.data, layout=None)
         blockIdx_x = T.launch_thread("blockIdx.x", 1)
-        threadIdx_x = T.launch_thread("threadIdx.x", 32)
+        threadIdx_x = T.launch_thread("threadIdx.x", 64)
         blockIdx_y = T.launch_thread("blockIdx.y", 1)
         blockIdx_z = T.launch_thread("blockIdx.z", 1)
         warp_id_in_cta: T.let[T.int32] = T.tvm_warp_shuffle(
-            T.uint32(4294967295), threadIdx_x // 32, 0, 32, 32
+            MACA_WARP_MASK, threadIdx_x // 64, 0, 64, 64
         )
         bx: T.let[T.int32] = blockIdx_x
         by: T.let[T.int32] = blockIdx_y
         bz: T.let[T.int32] = blockIdx_z
         v: T.let[T.int32] = warp_id_in_cta
-        lane_id: T.let[T.int32] = threadIdx_x % 32
+        lane_id: T.let[T.int32] = threadIdx_x % 64
         T.evaluate(v)
         A = T.alloc_local((2,), "float16", layout=None)
-        B = T.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)
+        B = T.decl_buffer((128,), "float16", data=A.data, scope="local", layout=None)
         A_local = T.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
         for i in T.vectorized(2):
             A_local[i] = T.Cast("float16", in_buf_1[threadIdx_x * 2 + i])
-        B_1 = T.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)
+        B_1 = T.decl_buffer((128,), "float16", data=A.data, scope="local", layout=None)
         A_local_1 = T.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
         for i in T.vectorized(2):
             out_1[threadIdx_x * 2 + i] = T.Cast("float32", A_local_1[i])
@@ -113,25 +109,26 @@ def test_lower_view_get():
         T.device_entry()
         bx, by, bz = T.cta_id([1, 1, 1])
         T.warp_id([1])
-        lane_id = T.lane_id([32])
-        atom = T.TileLayout(T.S[(1, 2) : (2, 1)])
+        lane_id = T.lane_id([64])
+        atom = T.TileLayout(T.S[1:1])
         tile = T.TileLayout(T.S[(2, 2) : (2, 1)])
-        warp_atom = atom.tile(L_LANE, (8, 4), (1, 2))
+        warp_atom = atom.tile(L_LANE_MACA, (8, 8), (1, 1))
         A = T.alloc_buffer(
-            [4, 2], dtype="float32", scope="local", layout=atom.tile(tile, (2, 2), (1, 2))
+            [2, 2], dtype="float32", scope="local", layout=atom.tile(tile, (2, 2), (1, 1))
         )
         B_layout = warp_atom.tile(tile, (2, 2), (8, 8))
         B = A.view(16, 16, layout=B_layout)
-        A_local = B.local(2, 2, 2)
-        for i in T.unroll(4):
+        A_local = B.local(2, 2)
+        for i in T.unroll(2):
             for j in T.vectorized(2):
-                A_local[i // 2, i % 2, j] = in_buf[
-                    i // 2 * 8 + lane_id // 4, i % 2 * 8 + lane_id % 4 + j
+                A_local[i, j] = in_buf[
+                    lane_id // 8 * 2 + i, lane_id % 8 * 2 + j
                 ]
         B_1 = A.view(16, 16, layout=B_layout)
-        A_local_1 = B_1.local(8)
-        for i in T.vectorized(2):
-            out[lane_id // 4 * 8 + i // 2 * 8 + lane_id % 4, lane_id % 4 * 2 + i % 2] = A_local_1[i]
+        A_local_1 = B_1.local(2, 2)
+        for i in T.unroll(2):
+            for j in T.vectorized(2):
+                out[lane_id // 8 * 2 + i, lane_id % 8 * 2 + j] = A_local_1[i, j]
 
     @T.prim_func(private=True)
     def after2(in_buf_handle: T.handle, out_handle: T.handle):
@@ -140,32 +137,37 @@ def test_lower_view_get():
         out_1 = T.decl_buffer((256,), data=out.data, layout=None)
         in_buf_1 = T.decl_buffer((256,), data=in_buf.data, layout=None)
         blockIdx_x = T.launch_thread("blockIdx.x", 1)
-        threadIdx_x = T.launch_thread("threadIdx.x", 32)
+        threadIdx_x = T.launch_thread("threadIdx.x", 64)
         blockIdx_y = T.launch_thread("blockIdx.y", 1)
         blockIdx_z = T.launch_thread("blockIdx.z", 1)
         warp_id_in_cta: T.let[T.int32] = T.tvm_warp_shuffle(
-            T.uint32(4294967295), threadIdx_x // 32, 0, 32, 32
+            MACA_WARP_MASK, threadIdx_x // 64, 0, 64, 64
         )
         bx: T.let[T.int32] = blockIdx_x
         by: T.let[T.int32] = blockIdx_y
         bz: T.let[T.int32] = blockIdx_z
         v: T.let[T.int32] = warp_id_in_cta
-        lane_id: T.let[T.int32] = threadIdx_x % 32
+        lane_id: T.let[T.int32] = threadIdx_x % 64
         T.evaluate(v)
-        A = T.alloc_local((8,), layout=None)
+        A = T.alloc_local((4,), layout=None)
         B = T.decl_buffer((256,), data=A.data, scope="local", layout=None)
-        A_local = T.decl_buffer((8,), data=A.data, scope="local", layout=None)
-        for i in T.unroll(4):
+        A_local = T.decl_buffer((4,), data=A.data, scope="local", layout=None)
+        for i in T.unroll(2):
             for j in T.vectorized(2):
                 A_local[i * 2 + j] = in_buf_1[
-                    i // 2 * 128 + threadIdx_x // 4 * 16 + i % 2 * 8 + j + threadIdx_x % 4
+                    threadIdx_x // 8 * 32 + i * 16 + threadIdx_x % 8 * 2 + j
                 ]
         B_1 = T.decl_buffer((256,), data=A.data, scope="local", layout=None)
-        A_local_1 = T.decl_buffer((8,), data=A.data, scope="local", layout=None)
-        for i in T.vectorized(2):
-            out_1[threadIdx_x // 4 * 128 + threadIdx_x % 4 * 18 + i] = A_local_1[i]
+        A_local_1 = T.decl_buffer((4,), data=A.data, scope="local", layout=None)
+        for i in T.unroll(2):
+            for j in T.vectorized(2):
+                out_1[threadIdx_x // 8 * 32 + i * 16 + threadIdx_x % 8 * 2 + j] = A_local_1[
+                    i * 2 + j
+                ]
 
     compare(before2, after2, LowerTIRx)
+
+    pytest.skip("Remaining CUDA-only view lowering coverage is kept in its upstream form")
 
     @T.prim_func(private=True)
     def before3_wgmma_layout(
@@ -321,17 +323,17 @@ def test_lower_scope_id():
     def before1() -> None:
         T.device_entry()
         bx, by, bz = T.cta_id([3, 4, 5])
-        tx = T.thread_id([32])
+        tx = T.thread_id([64])
         T.evaluate(bx + by + bz + tx)
 
     @T.prim_func(private=True)
     def after1() -> None:
         blockIdx_x = T.launch_thread("blockIdx.x", 3)
-        threadIdx_x = T.launch_thread("threadIdx.x", 32)
+        threadIdx_x = T.launch_thread("threadIdx.x", 64)
         blockIdx_y = T.launch_thread("blockIdx.y", 4)
         blockIdx_z = T.launch_thread("blockIdx.z", 5)
         warp_id_in_cta: T.let[T.int32] = T.tvm_warp_shuffle(
-            T.uint32(4294967295), threadIdx_x // 32, 0, 32, 32
+            MACA_WARP_MASK, threadIdx_x // 64, 0, 64, 64
         )
         bx: T.let[T.int32] = blockIdx_x
         by: T.let[T.int32] = blockIdx_y
@@ -340,6 +342,8 @@ def test_lower_scope_id():
         T.evaluate(bx + by + bz + tx)
 
     compare(before1, after1, LowerTIRx)
+
+    pytest.skip("CUDA-only cluster scope coverage is kept in its upstream form")
 
     @T.prim_func(private=True)
     def before2() -> None:
@@ -443,7 +447,7 @@ def test_lower_scope_id2():
         blockIdx_y = T.launch_thread("blockIdx.y", 4)
         blockIdx_z = T.launch_thread("blockIdx.z", 5)
         warp_id_in_cta: T.let[T.int32] = T.tvm_warp_shuffle(
-            T.uint32(4294967295), threadIdx_x // 32, 0, 32, 32
+            MACA_WARP_MASK, threadIdx_x // 64, 0, 64, 64
         )
         bx: T.let[T.int32] = blockIdx_x
         by: T.let[T.int32] = blockIdx_y
@@ -514,8 +518,8 @@ def test_lower_layout():
     def before(A: T.Buffer((128, 32), "float16")) -> None:
         T.device_entry()
         bx, by, bz = T.cta_id([1, 1, 1])
-        T.warp_id([4])
-        T.lane_id([32])
+        T.warp_id([2])
+        T.lane_id([64])
         tid = T.thread_id([128])
         A_smem = T.alloc_buffer(
             [128, 32],
@@ -540,13 +544,13 @@ def test_lower_layout():
         blockIdx_y = T.launch_thread("blockIdx.y", 1)
         blockIdx_z = T.launch_thread("blockIdx.z", 1)
         warp_id_in_cta: T.let[T.int32] = T.tvm_warp_shuffle(
-            T.uint32(4294967295), threadIdx_x // 32, 0, 32, 32
+            MACA_WARP_MASK, threadIdx_x // 64, 0, 64, 64
         )
         bx: T.let[T.int32] = blockIdx_x
         by: T.let[T.int32] = blockIdx_y
         bz: T.let[T.int32] = blockIdx_z
         v: T.let[T.int32] = warp_id_in_cta
-        v_1: T.let[T.int32] = threadIdx_x % 32
+        v_1: T.let[T.int32] = threadIdx_x % 64
         tid: T.let[T.int32] = threadIdx_x
         T.evaluate(v)
         T.evaluate(v_1)
@@ -612,7 +616,7 @@ def test_lower_decl_buffer_access_ptr():
         blockIdx_x = T.launch_thread("blockIdx.x", 1)
         threadIdx_x = T.launch_thread("threadIdx.x", 128)
         warp_id_in_cta: T.let[T.int32] = T.tvm_warp_shuffle(
-            T.uint32(4294967295), threadIdx_x // 32, 0, 32, 32
+            MACA_WARP_MASK, threadIdx_x // 64, 0, 64, 64
         )
         v: T.let[T.int32] = blockIdx_x
         v_1: T.let[T.int32] = threadIdx_x
@@ -641,7 +645,7 @@ def test_lower_separate_scope_id_def():
         blockIdx_x = T.launch_thread("blockIdx.x", 1)
         threadIdx_x = T.launch_thread("threadIdx.x", 128)
         warp_id_in_cta: T.let[T.int32] = T.tvm_warp_shuffle(
-            T.uint32(4294967295), threadIdx_x // 32, 0, 32, 32
+            MACA_WARP_MASK, threadIdx_x // 64, 0, 64, 64
         )
         v: T.let[T.int32] = blockIdx_x
         tx: T.let[T.int32] = threadIdx_x
@@ -668,7 +672,7 @@ def test_lower_uint32_scope_id_casts_at_bind():
         blockIdx_x = T.launch_thread("blockIdx.x", 1)
         threadIdx_x = T.launch_thread("threadIdx.x", 128)
         warp_id_in_cta: T.let[T.int32] = T.tvm_warp_shuffle(
-            T.uint32(4294967295), threadIdx_x // 32, 0, 32, 32
+            MACA_WARP_MASK, threadIdx_x // 64, 0, 64, 64
         )
         v: T.let[T.int32] = blockIdx_x
         tx: T.let[T.uint32] = T.Cast("uint32", threadIdx_x)
@@ -686,7 +690,7 @@ def test_lower_exec_context_infers_plain_predicate_for_dispatch():
     seen = []
     variant = "__probe_exec_context_plain_predicate__"
 
-    @register_dispatch("copy", "cuda", variant=variant, priority=10_000)
+    @register_dispatch("copy", "maca", variant=variant, priority=10_000)
     def _probe(op_call, sctx):
         seen.append({"scope_kind": sctx.scope_kind, "inter": sctx.inter, "intra": sctx.intra})
 
@@ -702,8 +706,8 @@ def test_lower_exec_context_infers_plain_predicate_for_dispatch():
         B = T.match_buffer(B_ptr, (1,), "float32", scope="global")
         T.device_entry()
         T.cta_id([1])
-        warp_id = T.warp_id([4])
-        lane_id = T.lane_id([32])
+        warp_id = T.warp_id([2])
+        lane_id = T.lane_id([64])
         if (warp_id == 0) & (lane_id == 0):
             Tx.copy(B[0:1], A[0:1], dispatch=variant)
 
@@ -725,7 +729,7 @@ def test_lower_exec_context_infers_warpgroup_range_predicate_for_dispatch():
     seen = []
     variant = "__probe_exec_context_warpgroup_range_predicate__"
 
-    @register_dispatch("copy", "cuda", variant=variant, priority=10_000)
+    @register_dispatch("copy", "maca", variant=variant, priority=10_000)
     def _probe(op_call, sctx):
         seen.append({"scope_kind": sctx.scope_kind, "inter": sctx.inter, "intra": sctx.intra})
 
@@ -743,7 +747,7 @@ def test_lower_exec_context_infers_warpgroup_range_predicate_for_dispatch():
         T.cta_id([1])
         wg_id = T.warpgroup_id([2])
         T.warp_id_in_wg([4])
-        T.lane_id([32])
+        T.lane_id([64])
         if wg_id == 0:
             Tx.wg.copy(B[0:1], A[0:1], dispatch=variant)
         if (0 <= wg_id) & (wg_id < 1):
@@ -759,7 +763,7 @@ def test_lower_exec_context_infers_warpgroup_range_predicate_for_dispatch():
         assert item["scope_kind"] == "warpgroup"
         assert _int_pair(item["inter"], "wgid") == (1, 0)
         assert _int_pair(item["inter"], "cta_id") == (1, 0)
-        assert _int_pair(item["intra"], "laneid") == (32, 0)
+        assert _int_pair(item["intra"], "laneid") == (64, 0)
         assert _int_pair(item["intra"], "wid_in_wg") == (4, 0)
 
 
@@ -770,7 +774,7 @@ def test_lower_exec_context_tracks_cta_thread_range_predicate_for_dispatch():
     seen = []
     variant = "__probe_exec_context_cta_thread_range_predicate__"
 
-    @register_dispatch("copy", "cuda", variant=variant, priority=10_000)
+    @register_dispatch("copy", "maca", variant=variant, priority=10_000)
     def _probe(op_call, sctx):
         seen.append({"scope_kind": sctx.scope_kind, "inter": sctx.inter, "intra": sctx.intra})
 
@@ -795,8 +799,8 @@ def test_lower_exec_context_tracks_cta_thread_range_predicate_for_dispatch():
 
     assert len(seen) == 1
     assert seen[0]["scope_kind"] == "thread"
-    assert _int_pair(seen[0]["inter"], "laneid") == (32, 0)
-    assert _int_pair(seen[0]["inter"], "warpid") == (4, 0)
+    assert _int_pair(seen[0]["inter"], "laneid") == (64, 0)
+    assert _int_pair(seen[0]["inter"], "warpid") == (2, 0)
     assert _int_pair(seen[0]["inter"], "cta_id") == (1, 0)
     assert len(seen[0]["intra"]) == 0
 
@@ -808,7 +812,7 @@ def test_lower_exec_context_tracks_cta_thread_single_warp_range_predicate():
     seen = []
     variant = "__probe_exec_context_cta_thread_single_warp_range_predicate__"
 
-    @register_dispatch("copy", "cuda", variant=variant, priority=10_000)
+    @register_dispatch("copy", "maca", variant=variant, priority=10_000)
     def _probe(op_call, sctx):
         seen.append({"scope_kind": sctx.scope_kind, "inter": sctx.inter, "intra": sctx.intra})
 
@@ -833,8 +837,8 @@ def test_lower_exec_context_tracks_cta_thread_single_warp_range_predicate():
 
     assert len(seen) == 1
     assert seen[0]["scope_kind"] == "thread"
-    assert _int_pair(seen[0]["inter"], "laneid") == (6, 2)
-    assert _int_pair(seen[0]["inter"], "warpid") == (1, 1)
+    assert _int_pair(seen[0]["inter"], "laneid") == (6, 34)
+    assert _int_pair(seen[0]["inter"], "warpid") == (1, 0)
     assert _int_pair(seen[0]["inter"], "cta_id") == (1, 0)
     assert len(seen[0]["intra"]) == 0
 
@@ -846,7 +850,7 @@ def test_lower_exec_context_tracks_warpgroup_thread_range_predicate():
     seen = []
     variant = "__probe_exec_context_warpgroup_thread_range_predicate__"
 
-    @register_dispatch("copy", "cuda", variant=variant, priority=10_000)
+    @register_dispatch("copy", "maca", variant=variant, priority=10_000)
     def _probe(op_call, sctx):
         seen.append({"scope_kind": sctx.scope_kind, "inter": sctx.inter, "intra": sctx.intra})
 
@@ -863,7 +867,7 @@ def test_lower_exec_context_tracks_warpgroup_thread_range_predicate():
         T.device_entry()
         T.cta_id([1])
         wg_id = T.warpgroup_id([2])
-        tid_in_wg = T.thread_id_in_wg([128])
+        tid_in_wg = T.thread_id_in_wg([256])
         if wg_id == 1:
             if (32 <= tid_in_wg) & (tid_in_wg < 64):
                 Tx.wg.copy(B[0:1], A[0:1], dispatch=variant)
@@ -875,8 +879,8 @@ def test_lower_exec_context_tracks_warpgroup_thread_range_predicate():
     assert seen[0]["scope_kind"] == "warpgroup"
     assert _int_pair(seen[0]["inter"], "wgid") == (1, 1)
     assert _int_pair(seen[0]["inter"], "cta_id") == (1, 0)
-    assert _int_pair(seen[0]["intra"], "laneid") == (32, 0)
-    assert _int_pair(seen[0]["intra"], "wid_in_wg") == (1, 1)
+    assert _int_pair(seen[0]["intra"], "laneid") == (32, 32)
+    assert _int_pair(seen[0]["intra"], "wid_in_wg") == (1, 0)
 
 
 def test_lower_exec_context_tracks_dependent_conjunctive_predicate():
@@ -886,7 +890,7 @@ def test_lower_exec_context_tracks_dependent_conjunctive_predicate():
     seen = []
     variant = "__probe_exec_context_dependent_conjunctive_predicate__"
 
-    @register_dispatch("copy", "cuda", variant=variant, priority=10_000)
+    @register_dispatch("copy", "maca", variant=variant, priority=10_000)
     def _probe(op_call, sctx):
         seen.append({"scope_kind": sctx.scope_kind, "inter": sctx.inter, "intra": sctx.intra})
 
@@ -903,7 +907,7 @@ def test_lower_exec_context_tracks_dependent_conjunctive_predicate():
         T.device_entry()
         T.cta_id([1])
         wg_id = T.warpgroup_id([2])
-        tid_in_wg = T.thread_id_in_wg([128])
+        tid_in_wg = T.thread_id_in_wg([256])
         if ((32 <= tid_in_wg) & (tid_in_wg < 64)) & (wg_id == 1):
             Tx.wg.copy(B[0:1], A[0:1], dispatch=variant)
 
@@ -914,8 +918,8 @@ def test_lower_exec_context_tracks_dependent_conjunctive_predicate():
     assert seen[0]["scope_kind"] == "warpgroup"
     assert _int_pair(seen[0]["inter"], "wgid") == (1, 1)
     assert _int_pair(seen[0]["inter"], "cta_id") == (1, 0)
-    assert _int_pair(seen[0]["intra"], "laneid") == (32, 0)
-    assert _int_pair(seen[0]["intra"], "wid_in_wg") == (1, 1)
+    assert _int_pair(seen[0]["intra"], "laneid") == (32, 32)
+    assert _int_pair(seen[0]["intra"], "wid_in_wg") == (1, 0)
 
 
 def test_lower_exec_context_keeps_plain_predicate_condition():
@@ -926,7 +930,7 @@ def test_lower_exec_context_keeps_plain_predicate_condition():
         T.cta_id([1])
         wg_id = T.warpgroup_id([2])
         T.warp_id_in_wg([4])
-        T.lane_id([32])
+        T.lane_id([64])
         if wg_id == 0:
             T.evaluate(A[0])
 
@@ -947,7 +951,7 @@ def test_lower_exec_context_keeps_plain_scope_predicate_condition():
         T.cta_id([1])
         wg_id = T.warpgroup_id([2])
         T.warp_id_in_wg([4])
-        T.lane_id([32])
+        T.lane_id([64])
         if wg_id == 0:
             A[0] = T.float32(1)
 
@@ -968,7 +972,7 @@ def test_simplify_uses_floor_div_scope_predicate_as_context_fact():
         T.cta_id([1])
         wg_id = T.warpgroup_id([2])
         warp_id = T.warp_id_in_wg([4])
-        lane_id = T.lane_id([32])
+        lane_id = T.lane_id([64])
         if wg_id == 0:
             A[warp_id] = T.float32(lane_id)
 
@@ -1015,7 +1019,7 @@ def test_lower_exec_context_selector_filter_for_elect_sync():
         if T.cuda.elect_sync():
             Tx.copy(B[0:1], A[0:1], dispatch=variant)
 
-    with tvm.target.Target("maca"):
+    with tvm.target.Target("cuda"):
         LowerTIRx()(tvm.IRModule({"main": before}))
 
     assert len(seen) == 3
@@ -1072,7 +1076,7 @@ def test_lower_exec_context_scope_guard_mixes_structural_and_selector():
         if (warp_id == 0) & T.cuda.elect_sync():
             Tx.copy(B[0:1], A[0:1], dispatch=variant)
 
-    with tvm.target.Target("maca"):
+    with tvm.target.Target("cuda"):
         LowerTIRx()(tvm.IRModule({"main": before}))
 
     assert len(seen) == 1
@@ -1112,7 +1116,7 @@ def test_lower_exec_context_tracks_factorized_cta_predicate():
         if cbx == 0:
             Tx.copy(B[0:1], A[0:1], dispatch=variant)
 
-    with tvm.target.Target("maca"):
+    with tvm.target.Target("cuda"):
         LowerTIRx()(tvm.IRModule({"main": before}))
 
     assert len(seen) == 1
@@ -1161,7 +1165,7 @@ def test_lower_exec_context_keeps_kernel_cta_predicate_out_of_cluster_active_set
         if cbx == 0:
             Tx.copy(B[0:1], A[0:1], dispatch=cluster_variant)
 
-    with tvm.target.Target("maca"):
+    with tvm.target.Target("cuda"):
         LowerTIRx()(tvm.IRModule({"main": before}))
 
     assert set(seen) == {"kernel", "cluster"}
@@ -1196,7 +1200,7 @@ def test_lower_exec_context_tracks_cta_axis_modulo_predicate():
         if cbx % 2 == 0:
             Tx.copy(B[0:1], A[0:1], dispatch=variant)
 
-    with tvm.target.Target("maca"):
+    with tvm.target.Target("cuda"):
         LowerTIRx()(tvm.IRModule({"main": before}))
 
     assert len(seen) == 1
@@ -1232,7 +1236,7 @@ def test_lower_exec_context_tracks_cta_id_in_pair_predicate():
         if cta_id_in_pair == 0:
             Tx.copy(B[0:1], A[0:1], dispatch=variant)
 
-    with tvm.target.Target("maca"):
+    with tvm.target.Target("cuda"):
         lowered = LowerTIRx()(tvm.IRModule({"main": before}))
 
     assert len(seen) == 1
@@ -1281,7 +1285,7 @@ def test_lower_exec_context_tracks_two_cta_pair_predicates():
         if cta_id_in_pair == 1:
             Tx.copy(B[0:1], A[0:1], dispatch=one_variant)
 
-    with tvm.target.Target("maca"):
+    with tvm.target.Target("cuda"):
         LowerTIRx()(tvm.IRModule({"main": before}))
 
     assert set(seen) == {"zero", "one"}
@@ -1318,7 +1322,7 @@ def test_lower_exec_context_tracks_cta_id_in_pair_after_axis_predicate():
             if cta_id_in_pair == 1:
                 Tx.copy(B[0:1], A[0:1], dispatch=variant)
 
-    with tvm.target.Target("maca"):
+    with tvm.target.Target("cuda"):
         LowerTIRx()(tvm.IRModule({"main": before}))
 
     assert len(seen) == 1
@@ -1341,7 +1345,7 @@ def test_lower_buffer_offset():
         blockIdx_x = T.launch_thread("blockIdx.x", 1)
         threadIdx_x = T.launch_thread("threadIdx.x", 128)
         warp_id_in_cta: T.let[T.int32] = T.tvm_warp_shuffle(
-            T.uint32(4294967295), threadIdx_x // 32, 0, 32, 32
+            MACA_WARP_MASK, threadIdx_x // 64, 0, 64, 64
         )
         v: T.let[T.int32] = blockIdx_x
         v_1: T.let[T.int32] = threadIdx_x
@@ -1424,39 +1428,39 @@ def test_alloc_buffer_with_thread_axis_layout():
     """alloc_buffer with thread-axis layout should lower to 1D physical buffer with memory-axis span."""  # noqa: E501
 
     @T.prim_func(private=True)
-    def before(out: T.Buffer((128, 4), "float32")) -> None:
+    def before(out: T.Buffer((256, 4), "float32")) -> None:
         T.device_entry()
         bx, by, bz = T.cta_id([1, 1, 1])
         T.warpgroup_id([1])
         warp_id = T.warp_id_in_wg([4])
-        lane_id = T.lane_id([32])
-        reg_wg = T.alloc_buffer((128, 4), "float32", scope="local", layout=wg_local_layout(4))
+        lane_id = T.lane_id([64])
+        reg_wg = T.alloc_buffer((256, 4), "float32", scope="local", layout=wg_local_layout(4))
         reg = reg_wg.local(4)
         for i in T.serial(4):
-            reg[i] = out[lane_id + warp_id * 32, i]
+            reg[i] = out[lane_id + warp_id * 64, i]
 
     @T.prim_func(private=True)
     def after(out_handle: T.handle):
-        out = T.match_buffer(out_handle, (128, 4), layout=None)
-        out_1 = T.decl_buffer((512,), data=out.data, layout=None)
+        out = T.match_buffer(out_handle, (256, 4), layout=None)
+        out_1 = T.decl_buffer((1024,), data=out.data, layout=None)
         blockIdx_x = T.launch_thread("blockIdx.x", 1)
-        threadIdx_x = T.launch_thread("threadIdx.x", 128)
+        threadIdx_x = T.launch_thread("threadIdx.x", 256)
         blockIdx_y = T.launch_thread("blockIdx.y", 1)
         blockIdx_z = T.launch_thread("blockIdx.z", 1)
         warp_id_in_cta: T.let[T.int32] = T.tvm_warp_shuffle(
-            T.uint32(4294967295), threadIdx_x // 32, 0, 32, 32
+            MACA_WARP_MASK, threadIdx_x // 64, 0, 64, 64
         )
         bx: T.let[T.int32] = blockIdx_x
         by: T.let[T.int32] = blockIdx_y
         bz: T.let[T.int32] = blockIdx_z
         v: T.let[T.int32] = warp_id_in_cta // 4
         warp_id: T.let[T.int32] = warp_id_in_cta % 4
-        lane_id: T.let[T.int32] = threadIdx_x % 32
+        lane_id: T.let[T.int32] = threadIdx_x % 64
         T.evaluate(v)
         reg_wg = T.alloc_local((4,), layout=None)
         reg = T.decl_buffer((4,), data=reg_wg.data, scope="local", layout=None)
         for i in range(4):
-            reg[i] = out_1[warp_id_in_cta % 4 * 128 + threadIdx_x % 32 * 4 + i]
+            reg[i] = out_1[warp_id_in_cta % 4 * 256 + threadIdx_x % 64 * 4 + i]
 
     compare(before, after, LowerTIRx)
 
@@ -1522,7 +1526,7 @@ def test_lower_preferred_cluster():
         tx = T.thread_id([128])
         T.evaluate(bx + cbx + cby + tx)
 
-    with tvm.target.Target("maca"):
+    with tvm.target.Target("cuda"):
         after_mod = LowerTIRx()(tvm.IRModule({"main": before}))
     after_str = str(after_mod["main"])
     assert 'launch_thread("clusterCtaIdx.x", 2)' in after_str

@@ -21,13 +21,6 @@ import tvm
 from tvm.script import tirx as T
 from tvm.testing import env
 
-MACA_TIRX_CONTROL_FLOW_XFAIL_REASON = (
-    "TODO(maca): [tirx-control-flow] support TIRX device-entry scope resolution for "
-    "control-flow codegen"
-)
-
-pytestmark = pytest.mark.xfail(reason=MACA_TIRX_CONTROL_FLOW_XFAIL_REASON, strict=False)
-
 
 def run_test_break_continue(func, shape, expected):
     target = tvm.target.Target("maca")
