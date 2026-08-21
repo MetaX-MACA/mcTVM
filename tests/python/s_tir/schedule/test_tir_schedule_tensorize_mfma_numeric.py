@@ -316,19 +316,43 @@ def test_f32f32f32_m16n16k4():
 
     if is_xcore1600:
 
-        def index_map_A(i, j):
-            return (
+        def inverse_index_map_A(tile_i, tile_k, thread_id, local_id):
+            inner_i = thread_id % 16
+            thread_group = thread_id // 16
+            inner_k = 7 - thread_group * 2 - local_id
+            return (tile_i * 16 + inner_i, tile_k * 8 + inner_k)
+
+        def inverse_index_map_B(tile_k, tile_j, thread_id, local_id):
+            inner_j = thread_id % 16
+            thread_group = thread_id // 16
+            inner_k = 7 - thread_group * 2 - local_id
+            return (tile_k * 8 + inner_k, tile_j * 16 + inner_j)
+
+        index_map_A = tvm.tirx.IndexMap.from_func(
+            lambda i, j: (
                 i // 16,
                 j // 8,
                 *shared_16x8_to_local_64x2_layout_A(i % 16, j % 8),
-            )
+            ),
+            inverse_index_map=tvm.tirx.IndexMap.from_func(
+                inverse_index_map_A,
+                index_dtype="int32",
+            ),
+            index_dtype="int32",
+        )
 
-        def index_map_B(i, j):
-            return (
+        index_map_B = tvm.tirx.IndexMap.from_func(
+            lambda i, j: (
                 i // 8,
                 j // 16,
                 *shared_8x16_to_local_64x2_layout_B(i % 8, j % 16),
-            )
+            ),
+            inverse_index_map=tvm.tirx.IndexMap.from_func(
+                inverse_index_map_B,
+                index_dtype="int32",
+            ),
+            index_dtype="int32",
+        )
 
         k_inner = 8
         k_factors = [64, 2, 1]
