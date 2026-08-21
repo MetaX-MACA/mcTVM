@@ -1404,7 +1404,7 @@ def test_cast_vec2_packed_dispatch(src_dtype, dst_dtype, intrinsic):
     ],
 )
 def test_cast_vec2_packed_runtime(src_dtype, dst_dtype, intrinsic):
-    """C500 runtime coverage for all packed pair conversions."""
+    """MACA runtime coverage for all packed pair conversions."""
     shape = (64, 32)
     lay = TileLayout(S[shape])
     values = np.linspace(-2.75, 1.5, num=np.prod(shape), dtype="float32").reshape(shape)

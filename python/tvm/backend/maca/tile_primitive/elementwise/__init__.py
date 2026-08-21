@@ -15,9 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""C500 MACA elementwise tile-primitive dispatch.
+"""MACA elementwise tile-primitive dispatch.
 
-The dispatches use scalar C500 arithmetic and keep their operation parsing,
+The dispatches use scalar arithmetic and keep their operation parsing,
 layout analysis, and emitters local to the MACA backend.
 """
 
