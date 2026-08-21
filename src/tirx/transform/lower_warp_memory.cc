@@ -153,6 +153,16 @@ class WarpStoreCoeffFinder : private StmtExprVisitor {
     StmtExprVisitor::VisitExpr_(op);
   }
 
+  void VisitStmt_(const BindNode* op) final {
+    Expr value = op->value;
+    if (!bind_map_.empty()) {
+      value = Substitute(value, bind_map_);
+    }
+
+    VisitExpr(value);
+    bind_map_.Set(op->var, value);
+  }
+
   void VisitStmt_(const BufferStoreNode* op) final {
     if (op->buffer.get() != buffer_) {
       StmtVisitor::VisitStmt_(op);
@@ -163,6 +173,9 @@ class WarpStoreCoeffFinder : private StmtExprVisitor {
                                              << "Has FlattenBuffer been run?";
 
     PrimExpr index = op->indices[0];
+    if (!bind_map_.empty()) {
+      index = Substitute(index, bind_map_);
+    }
     PrimType value_ty = op->value.ty();
     if (value_ty.lanes() != 1) {
       arith::PVar<PrimExpr> base;
@@ -200,6 +213,7 @@ class WarpStoreCoeffFinder : private StmtExprVisitor {
     }
   }
 
+  ffi::Map<Var, Expr> bind_map_;
   // The buffer variable
   const VarNode* buffer_;
   // the warp index
