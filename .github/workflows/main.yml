@@ -191,7 +191,7 @@ jobs:
       - name: Run 's_tir' unittests
         if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
         run: >-
-          python3 -m pytest -vvs -n 2
+          python3 -m pytest -vvs -n 4
           -o "junit_suite_name=python-unittest-gpu-s_tir"
           --junit-xml="${TVM_PYTEST_RESULT_DIR}/python-unittest-gpu-s_tir.xml"
           --junit-prefix=cython
