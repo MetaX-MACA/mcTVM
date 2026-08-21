@@ -459,6 +459,7 @@ def test_ldstmatrix_swizzle_multi_iter_pow2():
 
 
 @pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_ldstmatrix_tcgen05_warpgroup_atom_emits_ldmatrix():
     """Regression: a warpgroup ``.16x256b`` tcgen05 register atom loaded from a
     128B-swizzled SMEM tile must dispatch to ``ldmatrix.x4``.
