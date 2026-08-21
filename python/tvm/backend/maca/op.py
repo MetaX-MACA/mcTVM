@@ -89,6 +89,46 @@ def maca_copy_bytes(dst, src, num_bytes):
     return call_intrin("void", "tirx.maca.copy_bytes", dst, src, num_bytes)
 
 
+def maca_copy_async_32b(dst, src):
+    """Issue an asynchronous 32-bit global-to-shared BSM copy."""
+    return call_intrin("void", "tirx.maca.copy_async_32b", dst, src)
+
+
+def maca_copy_async_64b(dst, src):
+    """Issue an asynchronous 64-bit global-to-shared BSM copy."""
+    return call_intrin("void", "tirx.maca.copy_async_64b", dst, src)
+
+
+def maca_copy_async_128b(dst, src):
+    """Issue an asynchronous 128-bit global-to-shared BSM copy."""
+    return call_intrin("void", "tirx.maca.copy_async_128b", dst, src)
+
+
+def maca_copy_async_32b_zfill(dst, src, predicate):
+    """Issue a predicated asynchronous 32-bit BSM copy with zero fill."""
+    return call_intrin("void", "tirx.maca.copy_async_32b_zfill", dst, src, predicate)
+
+
+def maca_copy_async_64b_zfill(dst, src, predicate):
+    """Issue a predicated asynchronous 64-bit BSM copy with zero fill."""
+    return call_intrin("void", "tirx.maca.copy_async_64b_zfill", dst, src, predicate)
+
+
+def maca_copy_async_128b_zfill(dst, src, predicate):
+    """Issue a predicated asynchronous 128-bit BSM copy with zero fill."""
+    return call_intrin("void", "tirx.maca.copy_async_128b_zfill", dst, src, predicate)
+
+
+def maca_async_wait_gvmcnt(count):
+    """Wait for the requested number of outstanding global-memory transfers."""
+    return call_intrin("void", "tirx.maca.async_wait_gvmcnt", count)
+
+
+def maca_barrier_inst():
+    """Issue the instruction barrier used after a GVM wait."""
+    return call_intrin("void", "tirx.maca.barrier_inst")
+
+
 def maca_copy_128b(dst, src):
     """Copy 128 bits from ``src`` to ``dst``."""
     return maca_copy_bytes(dst, src, 16)

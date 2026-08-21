@@ -99,6 +99,14 @@ const DeviceIntrinsicRegistration kDeviceIntrinsics[] = {
     TIRX_DEVICE_INTRIN_ALIAS(maca_warp_sync, maca, kOpaque),
     TIRX_DEVICE_INTRIN_ALIAS(maca_cta_sync, maca, kOpaque),
     TIRX_DEVICE_INTRIN_ALIAS(maca_copy_bytes, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_copy_async_32b, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_copy_async_64b, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_copy_async_128b, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_copy_async_32b_zfill, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_copy_async_64b_zfill, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_copy_async_128b_zfill, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_async_wait_gvmcnt, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_barrier_inst, maca, kOpaque),
 };
 
 void RegisterDeviceIntrinsicAliases() {
