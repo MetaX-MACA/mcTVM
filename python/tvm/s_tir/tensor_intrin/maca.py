@@ -79,6 +79,31 @@ tvm_maca_mma_16x16x16i8(
 }
 """
 
+MACA_MMA_S8S8S32_K32_SOURCE = r"""
+static __device__ __forceinline__ int4
+tvm_maca_mma_16x16x32i8(
+    int2 a,
+    int2 b,
+    int4 c) {
+    typedef __NATIVE_VECTOR__(2, int) native_i32x2;
+    typedef __NATIVE_VECTOR__(4, int) native_i32x4;
+    native_i32x2 a_native =
+        *reinterpret_cast<const native_i32x2*>(&a);
+    native_i32x2 b_native =
+        *reinterpret_cast<const native_i32x2*>(&b);
+    native_i32x4 c_native =
+        *reinterpret_cast<const native_i32x4*>(&c);
+
+    native_i32x4 d_native =
+        __builtin_mxc_mma_16x16x32i8(
+            a_native,
+            b_native,
+            c_native);
+
+    return *reinterpret_cast<int4*>(&d_native);
+}
+"""
+
 MACA_MMA_F32F32F32_SOURCE = r"""
 static __device__ __forceinline__ float4
 tvm_maca_mma_16x16x4f32(
@@ -93,6 +118,38 @@ tvm_maca_mma_16x16x4f32(
         __builtin_mxc_mma_16x16x4f32(
             a,
             b,
+            c_native);
+
+    return *reinterpret_cast<float4*>(&d_native);
+}
+"""
+
+MACA_MMA_TF32TF32F32_SOURCE = r"""
+static __device__ __forceinline__ float4
+tvm_maca_mma_16x16x8tf32(
+    float2 a,
+    float2 b,
+    float4 c) {
+    typedef __NATIVE_VECTOR__(2, unsigned int) native_u32x2;
+    typedef __NATIVE_VECTOR__(4, float) native_f32x4;
+    native_u32x2 a_native =
+        *reinterpret_cast<const native_u32x2*>(&a);
+    native_u32x2 b_native =
+        *reinterpret_cast<const native_u32x2*>(&b);
+    native_f32x4 c_native =
+        *reinterpret_cast<const native_f32x4*>(&c);
+
+    // Follow MACA optimized TF32 kernels:
+    // round FP32 bit-pattern before TF32 MMA.
+    a_native[0] += 0x1000u;
+    a_native[1] += 0x1000u;
+    b_native[0] += 0x1000u;
+    b_native[1] += 0x1000u;
+
+    native_f32x4 d_native =
+        __builtin_mxc_mma_16x16x8tf32(
+            a_native,
+            b_native,
             c_native);
 
     return *reinterpret_cast<float4*>(&d_native);
@@ -116,6 +173,30 @@ def shared_16x16_to_local_64x4_layout_C(i, j):
     thread_id = j + (i // 4) * 16
     local_id = i % 4
     return thread_id, local_id
+
+
+def shared_16x32_to_local_64x8_layout_A(i, j):
+    thread_id = i + 16 * (j // 8)
+    local_id = j % 8
+    return thread_id, local_id
+
+
+def shared_32x16_to_local_64x8_layout_B(i, j):
+    thread_id = j + 16 * (i // 8)
+    local_id = i % 8
+    return thread_id, local_id
+
+
+def local_64x8_to_shared_16x32_layout_A(thread_id, local_id):
+    i = thread_id % 16
+    j = (thread_id // 16) * 8 + local_id
+    return i, j
+
+
+def local_64x8_to_shared_32x16_layout_B(thread_id, local_id):
+    i = (thread_id // 16) * 8 + local_id
+    j = thread_id % 16
+    return i, j
 
 
 def local_64x4_to_shared_16x16_layout_A(thread_id, local_id):
@@ -160,6 +241,34 @@ def local_64x1_to_shared_4x16_layout_B(thread_id, local_id):
     return i, j
 
 
+def shared_16x8_to_local_64x2_layout_A(i, j):
+    thread_group = 3 - j // 2
+    thread_id = i + 16 * thread_group
+    local_id = 1 - j % 2
+    return thread_id, local_id
+
+
+def shared_8x16_to_local_64x2_layout_B(i, j):
+    thread_group = 3 - i // 2
+    thread_id = j + 16 * thread_group
+    local_id = 1 - i % 2
+    return thread_id, local_id
+
+
+def local_64x2_to_shared_16x8_layout_A(thread_id, local_id):
+    i = thread_id % 16
+    thread_group = thread_id // 16
+    j = 7 - thread_group * 2 - local_id
+    return i, j
+
+
+def local_64x2_to_shared_8x16_layout_B(thread_id, local_id):
+    j = thread_id % 16
+    thread_group = thread_id // 16
+    i = 7 - thread_group * 2 - local_id
+    return i, j
+
+
 def get_maca_mma_load_intrin(
     k_dim=16,
     dtype="float16",
@@ -167,24 +276,44 @@ def get_maca_mma_load_intrin(
     is_b=False,
 ):
     warp_size = MACA_MMA_WARP_SIZE
-
     if k_dim == 16:
         if dtype not in ("float16", "int8"):
             raise ValueError(f"MACA MMA k_dim=16 does not support dtype={dtype}")
-
         memory_shape = (16, 16)
-
         if is_b:
             index_map = shared_16x16_to_local_64x4_layout_B
             reverse_index_map = local_64x4_to_shared_16x16_layout_B
         else:
             index_map = shared_16x16_to_local_64x4_layout_A
             reverse_index_map = local_64x4_to_shared_16x16_layout_A
-
+    elif k_dim == 32:
+        if dtype != "int8":
+            raise ValueError(f"MACA MMA k_dim=32 currently only supports int8, but got {dtype}")
+        if is_b:
+            memory_shape = (32, 16)
+            index_map = shared_32x16_to_local_64x8_layout_B
+            reverse_index_map = local_64x8_to_shared_32x16_layout_B
+        else:
+            memory_shape = (16, 32)
+            index_map = shared_16x32_to_local_64x8_layout_A
+            reverse_index_map = local_64x8_to_shared_16x32_layout_A
+    elif k_dim == 8:
+        if dtype != "float32":
+            raise ValueError(
+                f"MACA MMA k_dim=8 currently only supports "
+                f"TF32 with float32 storage, but got {dtype}"
+            )
+        if is_b:
+            memory_shape = (8, 16)
+            index_map = shared_8x16_to_local_64x2_layout_B
+            reverse_index_map = local_64x2_to_shared_8x16_layout_B
+        else:
+            memory_shape = (16, 8)
+            index_map = shared_16x8_to_local_64x2_layout_A
+            reverse_index_map = local_64x2_to_shared_16x8_layout_A
     elif k_dim == 4:
         if dtype != "float32":
             raise ValueError(f"MACA MMA k_dim=4 currently only supports float32, but got {dtype}")
-
         if is_b:
             memory_shape = (4, 16)
             index_map = shared_4x16_to_local_64x1_layout_B
@@ -193,7 +322,6 @@ def get_maca_mma_load_intrin(
             memory_shape = (16, 4)
             index_map = shared_16x4_to_local_64x1_layout_A
             reverse_index_map = local_64x1_to_shared_16x4_layout_A
-
     else:
         raise ValueError(f"Unsupported MACA MMA k_dim: {k_dim}")
 
@@ -201,8 +329,8 @@ def get_maca_mma_load_intrin(
 
     if num_elements % warp_size != 0:
         raise ValueError(
-            f"Memory tile shape {memory_shape} cannot be evenly distributed "
-            f"across {warp_size} threads"
+            f"Memory tile shape {memory_shape} cannot be evenly "
+            f"distributed across {warp_size} threads"
         )
 
     local_size = num_elements // warp_size
@@ -231,13 +359,10 @@ def get_maca_mma_load_intrin(
         with T.sblock("root"):
             T.reads(memory[0 : memory_shape[0], 0 : memory_shape[1]])
             T.writes(reg[0:warp_size, 0:local_size])
-
             for i, j in T.grid(memory_shape[0], memory_shape[1]):
                 with T.sblock("memory_reg"):
                     vi, vj = T.axis.remap("SS", [i, j])
-
                     thread_id, local_id = T.meta_var(index_map(vi, vj))
-
                     T.reads(memory[vi, vj])
                     T.writes(reg[thread_id, local_id])
 
@@ -273,10 +398,8 @@ def get_maca_mma_load_intrin(
         with T.sblock("root"):
             T.reads(memory[0 : memory_shape[0], 0 : memory_shape[1]])
             T.writes(reg[0:warp_size, 0:local_size])
-
             tx = T.env_thread("threadIdx.x")
             T.launch_thread(tx, warp_size)
-
             for local_id in T.serial(0, local_size):
                 row, col = T.meta_var(reverse_index_map(tx, local_id))
                 reg[tx, local_id] = memory[row, col]
@@ -289,9 +412,7 @@ def get_maca_mma_fill_intrin(
     local_size=4,
 ):
     warp_size = MACA_MMA_WARP_SIZE
-
     zero = IntImm("int32", 0).astype(dtype)
-
     index_map = shared_16x16_to_local_64x4_layout_C
 
     @T.prim_func(s_tir=True)
@@ -310,12 +431,9 @@ def get_maca_mma_fill_intrin(
             for i0, i1 in T.grid(16, 16):
                 with T.sblock("C_warp"):
                     i, j = T.axis.remap("SS", [i0, i1])
-
                     thread_id, local_id = T.meta_var(index_map(i, j))
-
                     T.reads()
                     T.writes(C_warp[thread_id, local_id])
-
                     C_warp[thread_id, local_id] = zero
 
     @T.prim_func(s_tir=True)
@@ -331,10 +449,8 @@ def get_maca_mma_fill_intrin(
         with T.sblock("root"):
             T.reads()
             T.writes(C_warp[0:warp_size, 0:local_size])
-
             tx = T.env_thread("threadIdx.x")
             T.launch_thread(tx, warp_size)
-
             for local_id in T.serial(0, local_size):
                 C_warp[tx, local_id] = zero
 
@@ -373,16 +489,12 @@ def get_maca_mma_store_intrin(
         with T.sblock("root"):
             T.reads(C_warp[0:warp_size, 0:local_size])
             T.writes(C[0:MACA_MMA_M_DIM, 0:MACA_MMA_N_DIM])
-
             for i0, i1 in T.grid(MACA_MMA_M_DIM, MACA_MMA_N_DIM):
                 with T.sblock("C_warp"):
                     i, j = T.axis.remap("SS", [i0, i1])
-
                     thread_id, local_id = T.meta_var(index_map(i, j))
-
                     T.reads(C_warp[thread_id, local_id])
                     T.writes(C[i, j])
-
                     C[i, j] = C_warp[thread_id, local_id]
 
     @T.prim_func(s_tir=True)
@@ -429,8 +541,8 @@ def get_maca_mma_intrin(
     in_dtype="float16",
     out_dtype="float32",
 ):
-    if k_dim not in (4, 16):
-        raise ValueError("MACA MMA currently only supports k_dim=4 or 16")
+    if k_dim not in (4, 8, 16, 32):
+        raise ValueError("MACA MMA currently only supports k_dim=4, 8, 16 or 32")
 
     if (in_dtype, out_dtype) == ("float16", "float32"):
         if k_dim != 16:
@@ -439,16 +551,24 @@ def get_maca_mma_intrin(
         builtin_source = MACA_MMA_F16F16F32_SOURCE
         cast_dtype = "float32"
     elif (in_dtype, out_dtype) == ("int8", "int32"):
-        if k_dim != 16:
-            raise ValueError("MACA MMA int8 path currently only supports k_dim=16")
-        builtin_name = "tvm_maca_mma_16x16x16i8"
-        builtin_source = MACA_MMA_S8S8S32_SOURCE
+        if k_dim == 16:
+            builtin_name = "tvm_maca_mma_16x16x16i8"
+            builtin_source = MACA_MMA_S8S8S32_SOURCE
+        elif k_dim == 32:
+            builtin_name = "tvm_maca_mma_16x16x32i8"
+            builtin_source = MACA_MMA_S8S8S32_K32_SOURCE
+        else:
+            raise ValueError("MACA MMA int8 path only supports k_dim=16 or k_dim=32")
         cast_dtype = "int32"
     elif (in_dtype, out_dtype) == ("float32", "float32"):
-        if k_dim != 4:
-            raise ValueError("MACA MMA float32 path currently only supports k_dim=4")
-        builtin_name = "tvm_maca_mma_16x16x4f32"
-        builtin_source = MACA_MMA_F32F32F32_SOURCE
+        if k_dim == 4:
+            builtin_name = "tvm_maca_mma_16x16x4f32"
+            builtin_source = MACA_MMA_F32F32F32_SOURCE
+        elif k_dim == 8:
+            builtin_name = "tvm_maca_mma_16x16x8tf32"
+            builtin_source = MACA_MMA_TF32TF32F32_SOURCE
+        else:
+            raise ValueError("MACA float32 path only supports k_dim=4 FP32 or k_dim=8 TF32")
         cast_dtype = "float32"
     else:
         raise ValueError(
@@ -465,6 +585,12 @@ def get_maca_mma_intrin(
     if k_dim == 4:
         index_map_A = shared_16x4_to_local_64x1_layout_A
         index_map_B = shared_4x16_to_local_64x1_layout_B
+    elif k_dim == 8:
+        index_map_A = shared_16x8_to_local_64x2_layout_A
+        index_map_B = shared_8x16_to_local_64x2_layout_B
+    elif k_dim == 32:
+        index_map_A = shared_16x32_to_local_64x8_layout_A
+        index_map_B = shared_32x16_to_local_64x8_layout_B
     else:
         index_map_A = shared_16x16_to_local_64x4_layout_A
         index_map_B = shared_16x16_to_local_64x4_layout_B
@@ -510,22 +636,16 @@ def get_maca_mma_intrin(
 
             for i, j, k in T.grid(m_dim, n_dim, k_dim):
                 with T.sblock("C"):
-                    vi, vj, vk = T.axis.remap(
-                        "SSR",
-                        [i, j, k],
-                    )
-
+                    vi, vj, vk = T.axis.remap("SSR", [i, j, k])
                     thread_id_C, local_id_C = T.meta_var(index_map_C(vi, vj))
                     thread_id_A, local_id_A = T.meta_var(index_map_A(vi, vk))
                     thread_id_B, local_id_B = T.meta_var(index_map_B(vk, vj))
-
                     T.reads(
                         C[thread_id_C, local_id_C],
                         A[thread_id_A, local_id_A],
                         B[thread_id_B, local_id_B],
                     )
                     T.writes(C[thread_id_C, local_id_C])
-
                     C[thread_id_C, local_id_C] += Cast(
                         out_dtype,
                         A[thread_id_A, local_id_A],
@@ -571,7 +691,6 @@ def get_maca_mma_intrin(
                 C[0:warp_size, 0:local_size_out],
             )
             T.writes(C[0:warp_size, 0:local_size_out])
-
             tx = T.env_thread("threadIdx.x")
             T.launch_thread(tx, warp_size)
 
@@ -664,6 +783,42 @@ MACA_MMA_F32F32F32_INTRIN = "maca_mma_f32f32f32"
 TensorIntrin.register(
     MACA_MMA_F32F32F32_INTRIN,
     *get_maca_mma_intrin(4, "float32", "float32"),
+)
+
+MACA_MMA_TF32TF32F32_INTRIN = "maca_mma_tf32tf32f32_m16n16k8"
+TensorIntrin.register(
+    MACA_MMA_TF32TF32F32_INTRIN,
+    *get_maca_mma_intrin(8, "float32", "float32"),
+)
+
+MACA_MMA_LOAD_16x32_A_SHARED_S8_INTRIN = "maca_mma_load_16x32_a_shared_s8"
+TensorIntrin.register(
+    MACA_MMA_LOAD_16x32_A_SHARED_S8_INTRIN,
+    *get_maca_mma_load_intrin(32, "int8", "shared", is_b=False),
+)
+
+MACA_MMA_LOAD_32x16_B_SHARED_S8_INTRIN = "maca_mma_load_32x16_b_shared_s8"
+TensorIntrin.register(
+    MACA_MMA_LOAD_32x16_B_SHARED_S8_INTRIN,
+    *get_maca_mma_load_intrin(32, "int8", "shared", is_b=True),
+)
+
+MACA_MMA_S8S8S32_K32_INTRIN = "maca_mma_s8s8s32_m16n16k32"
+TensorIntrin.register(
+    MACA_MMA_S8S8S32_K32_INTRIN,
+    *get_maca_mma_intrin(32, "int8", "int32"),
+)
+
+MACA_MMA_LOAD_16x8_A_SHARED_TF32_INTRIN = "maca_mma_load_16x8_a_shared_tf32"
+TensorIntrin.register(
+    MACA_MMA_LOAD_16x8_A_SHARED_TF32_INTRIN,
+    *get_maca_mma_load_intrin(8, "float32", "shared", is_b=False),
+)
+
+MACA_MMA_LOAD_8x16_B_SHARED_TF32_INTRIN = "maca_mma_load_8x16_b_shared_tf32"
+TensorIntrin.register(
+    MACA_MMA_LOAD_8x16_B_SHARED_TF32_INTRIN,
+    *get_maca_mma_load_intrin(8, "float32", "shared", is_b=True),
 )
 
 ######## WMMA intrinsics ########
