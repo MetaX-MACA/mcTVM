@@ -252,9 +252,9 @@ def test_copy_g2s_s2g(task, dtype, scope):
 # ----------------------------------------------------------------------------
 # Regression tests for known correctness gaps in ``align_layouts_gs``.
 #
-    # These are intentionally algorithm-level (no GPU runtime) and currently
-    # XFAIL; flipping them to passing is the contract for the upcoming swizzle /
-    # alignment fix.
+# These are intentionally algorithm-level (no GPU runtime) and currently
+# XFAIL; flipping them to passing is the contract for the upcoming swizzle /
+# alignment fix.
 # ----------------------------------------------------------------------------
 
 

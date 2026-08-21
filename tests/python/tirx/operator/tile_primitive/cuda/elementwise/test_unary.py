@@ -1291,7 +1291,7 @@ def test_cast_joint_decomposition_extents_order():
 
 
 def test_cast_validate_extent_mismatch_rejected():
-    """Validation rejects source and destination layouts with mismatched thread partitions."""  # noqa: E501
+    """Validation rejects source and destination layouts with mismatched thread partitions."""
 
     view_shape = (2, 8, 4, 8)
     g_layout = TileLayout(S[view_shape])
