@@ -95,6 +95,8 @@ void RegisterDeviceIntrinsic(const DeviceIntrinsicRegistration& reg) {
 
 const DeviceIntrinsicRegistration kDeviceIntrinsics[] = {
     TIRX_DEVICE_INTRIN_ALIAS(maca_func_call, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_warp_reduce, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_cta_reduce, maca, kOpaque),
     TIRX_DEVICE_INTRIN_ALIAS(maca_thread_fence, maca, kOpaque),
     TIRX_DEVICE_INTRIN_ALIAS(maca_warp_sync, maca, kOpaque),
     TIRX_DEVICE_INTRIN_ALIAS(maca_cta_sync, maca, kOpaque),

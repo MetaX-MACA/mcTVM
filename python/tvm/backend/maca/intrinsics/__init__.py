@@ -22,7 +22,7 @@
 """
 
 # Import op modules to register their codegen functions.
-from . import memory, sync
+from . import math, memory, sync
 from .registry import CODEGEN_REGISTRY, get_codegen, register_codegen
 
 __all__ = [

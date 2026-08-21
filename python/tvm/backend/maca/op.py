@@ -49,6 +49,50 @@ def maca_func_call(func_name, *args, source_code, return_type="void"):
     return call_intrin(return_type, "tirx.maca.func_call", func_name, *args, source_code)
 
 
+def maca_warp_reduce(value, op, width=64):
+    """Reduce a scalar over a MACA Wave64 power-of-two subgroup.
+
+    ``width`` must be a power of two in ``[2, 64]``. The code generator
+    validates this constraint and emits a full-Wave64-mask XOR butterfly.
+    """
+    return call_intrin(value.ty, "tirx.maca.warp_reduce", value, op, width)
+
+
+def maca_warp_sum(value, width=64):
+    """Reduce a scalar sum over a MACA Wave64 subgroup."""
+    return maca_warp_reduce(value, "sum", width)
+
+
+def maca_warp_max(value, width=64):
+    """Reduce a scalar maximum over a MACA Wave64 subgroup."""
+    return maca_warp_reduce(value, "max", width)
+
+
+def maca_warp_min(value, width=64):
+    """Reduce a scalar minimum over a MACA Wave64 subgroup."""
+    return maca_warp_reduce(value, "min", width)
+
+
+def maca_cta_reduce(value, op, num_waves, scratch):
+    """Reduce a scalar over a CTA of one to sixteen MACA Wave64 groups."""
+    return call_intrin(value.ty, "tirx.maca.cta_reduce", value, op, num_waves, scratch)
+
+
+def maca_cta_sum(value, num_waves, scratch):
+    """Reduce a scalar sum over MACA waves in a CTA."""
+    return maca_cta_reduce(value, "sum", num_waves, scratch)
+
+
+def maca_cta_max(value, num_waves, scratch):
+    """Reduce a scalar maximum over MACA waves in a CTA."""
+    return maca_cta_reduce(value, "max", num_waves, scratch)
+
+
+def maca_cta_min(value, num_waves, scratch):
+    """Reduce a scalar minimum over MACA waves in a CTA."""
+    return maca_cta_reduce(value, "min", num_waves, scratch)
+
+
 def maca_thread_fence():
     """TVM intrinsic to call maca thread fence instruction
 
