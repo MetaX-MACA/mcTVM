@@ -17,23 +17,14 @@
 # pylint: disable=missing-function-docstring
 """Tests for cp.async.bulk.shared::cluster.shared::cta PTX instruction codegen."""
 
-import pytest
-
 import tvm
 import tvm.testing
 from tvm.ir import PointerType, PrimType, assert_structural_equal
 from tvm.script import tirx as T
 
-MACA_DSMEM_BULK_COPY_XFAIL_REASON = (
-    "TODO(maca): [dsmem] support cluster shared-memory bulk async copy and address "
-    "conversion lowering"
-)
-
-pytestmark = pytest.mark.xfail(reason=MACA_DSMEM_BULK_COPY_XFAIL_REASON, strict=False)
-
 
 def _get_source(func: tvm.tirx.PrimFunc) -> str:
-    target = tvm.target.Target({"kind": "maca"})
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_90a"})
     mod = tvm.IRModule({"main": func})
     with target:
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")

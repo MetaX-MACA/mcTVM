@@ -25,14 +25,7 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.cuda.tile_primitive.copy._common import copy_ptx_form
 
-MACA_TIRX_COPY_INTRIN_XFAIL_REASON = (
-    "TODO(maca): [tirx-copy] support TIRX shared-memory scope resolution and PTX ld/st "
-    "byte-copy intrinsics"
-)
-
-pytestmark = pytest.mark.xfail(reason=MACA_TIRX_COPY_INTRIN_XFAIL_REASON, strict=False)
-
-TARGET = tvm.target.Target("maca")
+TARGET = tvm.target.Target("cuda")
 
 # num_bytes → kernel layout. ``fill_offset`` fills lane i with ``i + fill_offset``.
 _SHARED_COPY_CASES = {
@@ -48,7 +41,7 @@ def _build_and_run(func, *np_args):
     mod = tvm.compile(tvm.IRModule({"main": func}), target=TARGET, tir_pipeline="tirx")
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         rt_args = [tvm.runtime.tensor(a, device=dev) for a in np_args]
         mod(*rt_args)
         return tuple(a.numpy() for a in rt_args)
@@ -135,7 +128,7 @@ def test_ptx_ld_st_codegen_emits_shared_asm():
         Tx.copy(D[0:4], reg[:])
     # fmt: on
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.compile(tvm.IRModule({"main": copy_kernel}), target=target, tir_pipeline="tirx")
     src = mod.mod.imports[0].inspect_source("cuda")
@@ -249,7 +242,7 @@ def test_ptx_ld_vector_scatter_dst_codegen():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.parametrize(
     "num_bytes",
     [16, 8, 4, 2, 1],

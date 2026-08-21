@@ -25,16 +25,9 @@ from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 
-MACA_BLACKWELL_TMEM_XFAIL_REASON = (
-    "TODO(maca): [blackwell-codegen] support Blackwell-style tcgen05 TMEM, mbarrier, "
-    "copy, and MMA lowering"
-)
-
-pytestmark = pytest.mark.xfail(reason=MACA_BLACKWELL_TMEM_XFAIL_REASON, strict=False)
-
 
 def _get_source(func: tvm.tirx.PrimFunc) -> str:
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
     src = mod.mod.imports[0].inspect_source()
@@ -84,7 +77,7 @@ def _assert_remote_mbarrier_ir(func, arrive_op_name, n_arrives=1):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_tmem_alloc_dealloc_relinquish():
     N_COLS = 512
     cta_group = 1
@@ -115,7 +108,7 @@ def test_tmem_alloc_dealloc_relinquish():
             )
     # fmt: on
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         src, _ = _get_source(test_tmem)
         assert f"tcgen05.alloc.cta_group::{cta_group}.sync.aligned.shared::cta.b32" in src
@@ -124,7 +117,7 @@ def test_tmem_alloc_dealloc_relinquish():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_mbarrier_try_wait_once_codegen():
     # fmt: off
     @T.prim_func
@@ -139,7 +132,7 @@ def test_mbarrier_try_wait_once_codegen():
         )
     # fmt: on
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         src, _ = _get_source(test_try_wait_once)
         assert "mbarrier.try_wait.parity.shared::cta.b64 pd0, [%1], %2, %3;" in src
@@ -278,7 +271,7 @@ def test_mbarrier_remote_view_rejects_invalid_operations():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_fence_before_after_thread_sync():
     # fmt: off
     @T.prim_func
@@ -293,7 +286,7 @@ def test_fence_before_after_thread_sync():
         T.ptx.tcgen05.fence__after_thread_sync()
     # fmt: on
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         src, _ = _get_source(test_fence)
         assert "tcgen05.fence::after_thread_sync" in src
@@ -301,7 +294,7 @@ def test_fence_before_after_thread_sync():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_tcgen05_ld_st_roundtrip():
     HEIGHT = 128
     WIDTH = 256
@@ -356,14 +349,14 @@ def test_tcgen05_ld_st_roundtrip():
             )
     # fmt: on
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         src, mod = _get_source(test_ld_st)
         assert "tcgen05.ld.sync.aligned.32x32b.x1.b32" in src
         assert "tcgen05.st.sync.aligned.32x32b.x1.b32" in src
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A_np = np.random.randn(HEIGHT, WIDTH).astype("float32")
         B_np = np.zeros((HEIGHT, WIDTH), dtype="float32")
         A = tvm.runtime.tensor(A_np, device=dev)
@@ -375,7 +368,7 @@ def test_tcgen05_ld_st_roundtrip():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_tcgen05_cp_ld_roundtrip():
     dtype = "float32"
     dtype_bits = tvm.DataType(dtype).bits
@@ -445,14 +438,14 @@ def test_tcgen05_cp_ld_roundtrip():
             )
     # fmt: on
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         src, mod = _get_source(test_cp_ld)
         assert "tcgen05.cp.cta_group::1.128x256b" in src
         assert "tcgen05.ld.sync.aligned.32x32b.x1.b32" in src
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A_np = np.random.randn(HEIGHT, WIDTH).astype(dtype)
         B_np = np.zeros((HEIGHT, WIDTH), dtype=dtype)
         A = tvm.runtime.tensor(A_np, device=dev)
@@ -465,7 +458,7 @@ def test_tcgen05_cp_ld_roundtrip():
 
 @pytest.mark.parametrize("swizzle", [0, 1, 2, 3])
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_tcgen05_mma_ss_no_tma(swizzle):
     d_type, a_type, b_type = "float32", "float16", "float16"
     M, N, K = 128, 128, 64
@@ -571,7 +564,7 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
     import torch
 
     torch.manual_seed(42)
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         src, mod = _get_source(test_mma_ss_no_tma)
         print(src)
@@ -581,7 +574,7 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
         assert "tcgen05.wait::ld.sync.aligned" in src
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A_torch = torch.rand((M, K), dtype=torch.float16)
         B_torch = torch.rand((N, K), dtype=torch.float16)
         C_torch = torch.zeros((M, N), dtype=torch.float32)
