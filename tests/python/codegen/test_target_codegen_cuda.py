@@ -500,7 +500,8 @@ def test_cuda_reduction_binding():
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_cuda_const_float_to_half():
-    # The module-level mxcc import registers MACA codegen callbacks used by this test.
+    # This import is required to use nvcc to perform code gen;
+    # otherwise it is found that the code gen is done by nvrtc.
 
     half_const = tvm.tirx.const(0.5, dtype="float16")
 
@@ -1099,6 +1100,8 @@ def test_device_host_call_same_func():
     # 1. If we set host to llvm, it will raise an error of
     #    "Return should be transformed to return zero before LLVM code generation."
     #    Need to revisit this.
+    # 2. We set a dummy mcpu value for testing purpose,
+    #    in order to avoid checking a function is host or device based on the "cpu" substring.
     target = tvm.target.Target({"kind": "maca"}, host="c")
     lib = tvm.compile(Module, target=target)
     cuda_code = lib.mod.imports[0].inspect_source()

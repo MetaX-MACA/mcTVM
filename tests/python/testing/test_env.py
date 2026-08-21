@@ -77,7 +77,7 @@ def test_has_gpu_is_raw_any_device():
         or env._device_exists("opencl")  # pylint: disable=protected-access
         or env._device_exists("metal")  # pylint: disable=protected-access
         or env._device_exists("vulkan")  # pylint: disable=protected-access
-        or env._device_exists("maca")  # pylint: disable=protected-access
+        or env._device_exists("maca")
     )
     assert env.has_gpu() == any_device
 
@@ -98,7 +98,7 @@ def test_target_enabled_respects_tvm_test_targets(monkeypatch):
 def test_maca_compute_is_monotonic():
     """has_maca_compute is monotone in the requested version."""
     if not env.has_maca():
-        # Without a MACA device every query is False, including the (0, 0) floor.
+        # Without a CUDA device every query is False, including the (0, 0) floor.
         assert not env.has_maca_compute(1, 0)
         assert not env.has_maca_compute(0, 0)
         return

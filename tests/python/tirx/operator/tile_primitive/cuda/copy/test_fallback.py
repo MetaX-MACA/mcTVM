@@ -49,13 +49,13 @@ def _round_trip_shapes_and_threads():
     variants can't accept it (size doesn't divide thread_cnt).
     """
     return [
-        # warp scope, 64 threads, 24 elements (4x6) → 24 % 64 != 0.
+        # warp scope, 32 threads, 24 elements (4x6) → 24 % 32 != 0.
         ("warp", 64, (4, 6), "4*6=24 ∤ 64"),
-        # warp scope, 64 threads, 8 elements (1x8) → 8 % 64 != 0.
+        # warp scope, 32 threads, 8 elements (1x8) → 8 % 32 != 0.
         ("warp", 64, (1, 8), "1*8=8 ∤ 64"),
-        # warpgroup scope, 256 threads, 24 elements (4x6) → 24 % 256 != 0.
+        # warpgroup scope, 128 threads, 24 elements (4x6) → 24 % 128 != 0.
         ("warpgroup", 256, (4, 6), "4*6=24 ∤ 256"),
-        # warpgroup scope, 256 threads, 32 elements (4x8) → 32 % 256 != 0.
+        # warpgroup scope, 128 threads, 32 elements (4x8) → 32 % 128 != 0.
         ("warpgroup", 256, (4, 8), "4*8=32 ∤ 256"),
         # cta scope, 256 threads, 32 elements (4x8) → 32 % 256 != 0.
         ("cta", 256, (4, 8), "4*8=32 ∤ 256"),
@@ -223,7 +223,7 @@ def test_fallback_emits_gate():
         B = T.match_buffer(B_ptr, shape, dtype)
         T.device_entry()
         T.cta_id([1])
-        T.warp_id([4])  # 256 threads => 4 Wave64 warps
+        T.warp_id([4])  # 256 threads => 8 warps
         T.lane_id([64])
         T.thread_id([256])
         A_smem = T.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)

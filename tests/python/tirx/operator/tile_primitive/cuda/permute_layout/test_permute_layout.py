@@ -151,7 +151,7 @@ def test_dtype_widths_choose_xor_k():
 
 
 # ---------------------------------------------------------------------------
-# End-to-end compiled-kernel tests on MACA.
+# End-to-end compiled-kernel tests on CUDA.
 # ---------------------------------------------------------------------------
 
 

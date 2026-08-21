@@ -93,8 +93,8 @@ def test_tir_triton_integration():
                 R.output(output)
             return output
 
-    # MetaX Triton elides constexpr parameters, appends two scratch pointers,
-    # and uses 64 lanes per warp.
+    # Constexpr parameters (BLOCK_SIZE) stay in the kernel arguments, and the
+    # thread extent is 256 because the kernel is compiled with num_warps=8.
     @I.ir_module(s_tir=True)
     class Parsed:
         @T.prim_func(s_tir=True)

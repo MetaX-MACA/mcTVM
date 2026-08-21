@@ -33,7 +33,7 @@ def test_cuda_multi_lib():
     pytest.importorskip("cloudpickle")
 
     # test combining two system lib together
-    # each contains a fatbin component in maca
+    # each contains a fatbin component in cuda
     for device in ["llvm", "maca"]:
         if not tvm.testing.device_enabled(device):
             print(f"skip because {device} is not enabled...")
@@ -74,21 +74,17 @@ def test_cuda_multi_lib():
     libA.export_library(pathA, fcompile=tar.tar)
     libB.export_library(pathB, fcompile=tar.tar)
     cc.create_staticlib(pathAll, [pathA, pathB])
-    # package two static libs together
     cc.create_shared(path_dso, ["-Wl,--whole-archive", pathAll, "-Wl,--no-whole-archive"])
 
     def popen_check():
         def run_and_check():
-            # Load dll, will trigger system library registration
             ctypes.CDLL(path_dso)
-            # Load the system wide library
             dev = tvm.maca()
             a_np = np.random.uniform(size=12).astype("float32")
             a_nd = tvm.runtime.tensor(a_np, dev)
             b_nd = tvm.runtime.tensor(a_np, dev)
             syslibA = tvm.runtime.system_lib("modA_")
             syslibB = tvm.runtime.system_lib("modB_")
-            # reload same lib twice
             syslibA = tvm.runtime.system_lib("modA_")
             syslibA["my_inplace_update"](a_nd)
             syslibB["my_inplace_update"](b_nd)
@@ -97,7 +93,6 @@ def test_cuda_multi_lib():
 
         tvm.testing.run_with_gpu_lock(run_and_check)
 
-    # system lib should be loaded in different process
     worker = popen_pool.PopenWorker()
     worker.send(popen_check)
     worker.recv()
@@ -105,8 +100,6 @@ def test_cuda_multi_lib():
 
 @pytest.mark.gpu
 def test_maca_multi_lib():
-    # test combining two system lib together
-    # each contains a fatbin component in maca
     for device in ["llvm", "maca"]:
         if not tvm.testing.device_enabled(device):
             print("skip because %s is not enabled..." % device)
