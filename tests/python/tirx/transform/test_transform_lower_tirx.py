@@ -121,9 +121,7 @@ def test_lower_view_get():
         A_local = B.local(2, 2)
         for i in T.unroll(2):
             for j in T.vectorized(2):
-                A_local[i, j] = in_buf[
-                    lane_id // 8 * 2 + i, lane_id % 8 * 2 + j
-                ]
+                A_local[i, j] = in_buf[lane_id // 8 * 2 + i, lane_id % 8 * 2 + j]
         B_1 = A.view(16, 16, layout=B_layout)
         A_local_1 = B_1.local(2, 2)
         for i in T.unroll(2):
