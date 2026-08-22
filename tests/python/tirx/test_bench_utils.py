@@ -23,7 +23,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-pytest.importorskip("triton.profiler")
+pytest.importorskip("triton.profiler")  # tvm.tirx.bench imports triton.profiler
 
 from tvm.testing import env
 from tvm.tirx.bench import DistributedBenchContext, bench

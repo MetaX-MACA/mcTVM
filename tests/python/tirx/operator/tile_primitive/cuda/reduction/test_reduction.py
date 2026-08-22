@@ -542,7 +542,7 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
         warp_id_in_wg = T.warp_id_in_wg([n_warps // n_groups])
         lane_id = T.lane_id([thread_cnt])
 
-        # Accumulator layout
+                # acc layout
         atom = T.TileLayout(T.S[(1, 2) : (2, 1)])
         warp_layout = T.TileLayout(T.S[(8, 8) : (8@laneid, 1@laneid)])
         warp_atom = atom.tile(warp_layout, (8, 8), (1, 2))
@@ -555,7 +555,7 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
             layout=atom.tile(tile, (2, NUM_COL // 16), (1, 2)),
         )
 
-        # red layout
+                # red layout
         red_atom = T.TileLayout(T.S[(1, 1) : (1, 1)])
         red_warp_atom = red_atom.tile(warp_layout, (8, 8), (1, 1))
         red_tile = T.TileLayout(T.S[(2, 1) : (1, 1)])
@@ -574,7 +574,7 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
                         i * 16 + lane_id % 8 * 2 + vec,
                     ]
 
-        # Pre-load B into red for accumulation.
+            # Pre-load B into red for accumulation
         if accum:
             for i in T.unroll(2):
                 red[i] = B[
@@ -589,6 +589,7 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
             Tx.warp.max(red_view, acc_view, thread_reduce=shuffle, accum=accum)
         elif op_type == "min":
             Tx.warp.min(red_view, acc_view, thread_reduce=shuffle, accum=accum)
+                # perform an additional shuffle step if not shuffled above
         if not shuffle:
             if op_type == "sum":
                 Tx.warp.sum(red_view, red_view, thread_reduce=True)
@@ -596,7 +597,7 @@ def test_reduction_local_view_complex(n_groups, n_warps, op_type, dtype, shuffle
                 Tx.warp.max(red_view, red_view, thread_reduce=True)
             elif op_type == "min":
                 Tx.warp.min(red_view, red_view, thread_reduce=True)
-        # Write red into B
+            # Write red into B
         for i in T.unroll(2):
             B[wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 8, lane_id % 8] = (
                 red[i]
@@ -687,6 +688,7 @@ def test_reduction_local_optimized_3input_maxmin(reduction_len, op_type, accum):
         B[0] = B_local[0]
         # fmt: on
 
+        # Use sm_100a target for packed add sum dispatch
     target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": test_func})
@@ -711,6 +713,7 @@ def test_reduction_local_optimized_3input_maxmin(reduction_len, op_type, accum):
             else:
                 B_ref = A_np.min()
 
+        # Use larger tolerance due to rounding differences from packed add (add.rz.ftz.f32x2)
         def run_and_check():
             dev = tvm.maca(0)
             A = tvm.runtime.tensor(A_np, dev)
@@ -797,9 +800,9 @@ def test_reduction_op_warp_shuffle(op_type, dtype):
     g_shape = (N,)
     g_layout = TileLayout(S[N])
 
-    # src layout: one element sharded across every participating lane
+    # src layout: 32 elements sharded across 32 lanes
     src_layout = TileLayout(S[N : 1 @ laneid])
-    # dst layout: one element replicated across every participating lane
+    # dst layout: 1 element replicated across 32 lanes
     dst_layout = TileLayout(S[1:1] + R[N : 1 @ laneid])
 
     # fmt: off
@@ -861,14 +864,14 @@ def test_reduction_op_warp_shuffle_multi_elem(op_type, dtype):
     """
     ELEMS_PER_THREAD = 4
     N_LANES = 64
-    TOTAL = ELEMS_PER_THREAD * N_LANES
+    TOTAL = ELEMS_PER_THREAD * N_LANES  # 128
     g_shape = (TOTAL,)
     g_layout = TileLayout(S[TOTAL])
 
-    # src: lanes with four elements each; layout S[(lanes, 4) : (1@laneid, 1)]
+    # src: 32 lanes with 4 elements each; layout S[(32, 4) : (1@laneid, 1)]
     # element (i, j) → lane i, local j → thread k holds [4k, 4k+1, 4k+2, 4k+3]
     src_layout = TileLayout(S[(N_LANES, ELEMS_PER_THREAD) : (1 @ laneid, 1)])
-    # dst: four elements per thread, replicated across every participating lane
+    # dst: 4 elements per thread, replicated across 32 lanes
     dst_layout = TileLayout(S[ELEMS_PER_THREAD:1] + R[N_LANES : 1 @ laneid])
 
     # fmt: off
@@ -904,7 +907,7 @@ def test_reduction_op_warp_shuffle_multi_elem(op_type, dtype):
         np.random.seed(0)
         A_np = np.random.rand(TOTAL).astype(dtype)
         B_np = np.zeros(ELEMS_PER_THREAD, dtype=dtype)
-        # Element j reduces A[j], A[j + 4], ... across all participating lanes.
+        # Each group of 4 elements: element j is sum/max of A[j], A[j+4], A[j+8], ..., A[j+124]
         A_reshaped = A_np.reshape(N_LANES, ELEMS_PER_THREAD)
         if op_type == "sum":
             B_ref = A_reshaped.astype("float64").sum(axis=0).astype(dtype)

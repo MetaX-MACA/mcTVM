@@ -76,7 +76,7 @@ def _assert_loads_reference_defined_buffers(func):
 
 def _flatten(func):
     mod = tvm.IRModule({"main": func})
-    with tvm.target.Target("cuda"):
+    with tvm.target.Target("maca"):
         return next(iter(FlattenBuffer()(mod).functions_items()))[1]
 
 

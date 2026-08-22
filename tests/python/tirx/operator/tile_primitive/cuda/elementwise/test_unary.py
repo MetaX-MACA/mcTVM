@@ -1206,7 +1206,6 @@ def test_cast_mixed_axes_and_subregion(slice_start, slice_end):
 
     N_WARPS, LANES = 2, 64
     LOCAL_LEN = 4
-    # Each lane owns one (j, k) pair: j = lane_id // 4 and k = lane_id % 4.
     full_shape = (LANES // 4, N_WARPS, 4, LOCAL_LEN)
     g_layout = TileLayout(S[full_shape])
     cast_layout = TileLayout(S[full_shape : (4 @ laneid, 1 @ warpid, 1 @ laneid, 1)])
@@ -1297,7 +1296,7 @@ def test_cast_validate_extent_mismatch_rejected():
     view_shape = (2, 8, 4, 8)
     g_layout = TileLayout(S[view_shape])
     src_layout = TileLayout(S[view_shape : (2 @ tx, 4 @ tx, 8 @ tx, 1)])
-    dst_layout = TileLayout(S[view_shape : (32 @ tx, 1 @ tx, 8 @ tx, 1)])
+    dst_layout = TileLayout(S[view_shape : (32 @ tx, 1 @ tx, 8 @ tx, 1)])  # dim1 extent 8 != 4
 
     @T.prim_func
     def kernel(A_ptr: T.handle, B_ptr: T.handle) -> None:
@@ -1321,12 +1320,14 @@ def test_cast_validate_extent_mismatch_rejected():
     target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
+        # The mismatched dst also fails the scope-level check (thread axes don't
+        # span the full CTA), which fires first — either rejection is fine.
         with pytest.raises(Exception, match="thread part mismatch"):
             tvm.compile(mod, target=target, tir_pipeline="tirx")
 
 
 # -----------------------------------------------------------------------------
-# Dispatch codegen checks (no GPU runtime).
+# Dispatch codegen checks (no GPU runtime — explicit target arch).
 # -----------------------------------------------------------------------------
 def test_unary_exp_f16_shared_scalar_fallback_dispatch():
     """exp f16 + shared cta → smem.py + scalar (T.vectorized) — no exp packed."""
@@ -1403,7 +1404,7 @@ def test_cast_vec2_packed_dispatch(src_dtype, dst_dtype, intrinsic):
     ],
 )
 def test_cast_vec2_packed_runtime(src_dtype, dst_dtype, intrinsic):
-    """C500 runtime coverage for all packed pair conversions."""
+    """MACA runtime coverage for all packed pair conversions."""
     shape = (64, 32)
     lay = TileLayout(S[shape])
     values = np.linspace(-2.75, 1.5, num=np.prod(shape), dtype="float32").reshape(shape)

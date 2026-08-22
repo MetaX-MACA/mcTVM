@@ -549,13 +549,12 @@ def test_reg_copy_wg_local_to_swizzled_shared_uses_structured_compose_apply():
         ex = tvm.compile(mod, target=target, tir_pipeline="tirx")
         src = ex.mod.imports[0].inspect_source()
 
-    # MACA lowers a 128-bit register copy through its native helper rather
-    # than CUDA's inline PTX ``st.shared.v4`` instruction.
+    # (1) Widest variant: 8 fp16 elements per call (16 bytes → v4.u32 st).
     assert "tvm_builtin_copy_128b" in src, (
         "expected the widest MACA copy helper; vector-width selection fell back"
     )
-    # (2) Structured address fingerprint: ComposeLayout applies the swizzle
-    # to the complete thread base plus outer coordinate before pointer use.
+    # (2) Structured address fingerprint: tid contributes one atom-aligned
+    # add, while the bounded outer coordinate is XORed with the phase.
     assert "s_off[0] =" in src and "* 64" in src
     s_ptr_lines = [
         line for line in src.splitlines() if "s_ptr" in line and "pointer_offset" in line
@@ -644,8 +643,6 @@ def test_copy_forced_vec_width_codegen(variant, dtype, n_elements):
         T.device_entry()
         T.cta_id([1])
         T.thread_id([1])
-        # The MACA widths require the same 16-byte base alignment as CUDA's
-        # widest forced-vector path.
         smem = T.alloc_buffer((n_elements,), dtype, scope="shared", align=16)
         reg = T.alloc_local((n_elements,), dtype, align=16)
         out = T.alloc_local((n_elements,), dtype, align=16)
@@ -901,8 +898,6 @@ def test_reg_synthetic_tile_matches_thread_base_plus_outer_delta(case):
     vec_len = _choose_vec_len(elem_bits, atoms, r_p, s_p, max_vec_len)
     outer = _split_atoms_for_vec(atoms, vec_len)
     placeholders = _make_thread_placeholders(r_p)
-    # The synthetic builder is shared with CUDA; provide MACA's full
-    # 256-thread warpgroup range explicitly.
     sctx = DispatchContext(
         target,
         ExecScope("warpgroup"),

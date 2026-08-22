@@ -15,9 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""C500-native packed vec_len=2 cast implementations.
+"""MACA-native packed vec_len=2 cast implementations.
 
-The C500 SDK exposes pair conversions for the four dtype combinations used by
+The MACA SDK exposes pair conversions for the four dtype combinations used by
 the CUDA ``cast_vec2`` emitter.  The dispatcher only reaches this emitter
 after proving that both operands have a contiguous two-element tail.
 """

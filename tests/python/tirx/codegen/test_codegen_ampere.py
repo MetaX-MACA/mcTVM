@@ -37,16 +37,9 @@ import tvm.testing
 from tvm.script import tirx as T
 from tvm.testing import env
 
-MACA_AMPERE_MMA_XFAIL_REASON = (
-    "TODO(maca): [ptx-mma] support T.ptx.mma tile scope resolution and lowering for "
-    "m16n8k8/k16 tensor cores"
-)
-
-pytestmark = pytest.mark.xfail(reason=MACA_AMPERE_MMA_XFAIL_REASON, strict=False)
-
 
 def _get_source(func: tvm.tirx.PrimFunc):
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
     src = mod.mod.imports[0].inspect_source()
@@ -70,7 +63,7 @@ def _run_mma(mod, K, no_c_ptr, np_in):
         ref = ref + C_np
 
     def run_and_check():
-        dev = tvm.maca()
+        dev = tvm.cuda()
         D = tvm.runtime.tensor(np.zeros((16, 8), np.float32), device=dev)
         A = tvm.runtime.tensor(A_np, device=dev)
         B = tvm.runtime.tensor(B_np, device=dev)
@@ -82,7 +75,7 @@ def _run_mma(mod, K, no_c_ptr, np_in):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.parametrize("a_type", ["float16", "bfloat16"])
 @pytest.mark.parametrize("no_c_ptr", [False, True])
 def test_ptx_mma_m16n8k16(a_type, no_c_ptr):
@@ -159,7 +152,7 @@ def test_ptx_mma_m16n8k16(a_type, no_c_ptr):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.parametrize("a_type", ["float16", "bfloat16"])
 @pytest.mark.parametrize("no_c_ptr", [False, True])
 def test_ptx_mma_m16n8k8(a_type, no_c_ptr):

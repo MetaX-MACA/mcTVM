@@ -17,7 +17,7 @@
 
 """MACA-local layout and scalar emit helpers for elementwise dispatch.
 
-Uses the MACA copy primitives for C500 thread partitions and extends them to
+Uses the MACA copy primitives for thread partitions and extends them to
 multiple elementwise operands.
 
 The dispatch split mirrors copy:
