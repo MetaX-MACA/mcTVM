@@ -16,6 +16,8 @@
 # under the License.
 """MACA typed memory-copy intrinsic codegens."""
 
+from numbers import Integral
+
 from ._schema import device_intrinsic
 from .registry import CODEGEN_REGISTRY, register_codegen
 
@@ -39,6 +41,79 @@ for _num_bytes, _cpp_type in _TYPE_MAP.items():
         ),
     )
 del _num_bytes, _cpp_type
+
+
+# MACA BSM path is an asynchronous global-to-shared transfer.  Keep the
+# width-specific helpers explicit: the compiler builtin encodes the transfer
+# width in its name and only accepts 32/64/128-bit forms here.
+_BSM_ASYNC_BITS = (32, 64, 128)
+
+for _bits in _BSM_ASYNC_BITS:
+    device_intrinsic(
+        f"maca_copy_async_{_bits}b",
+        helper_name=f"tvm_builtin_maca_copy_async_{_bits}b",
+        c_signature="(void* dst_ptr, const void* src_ptr)",
+        body=(
+            f"    __builtin_mxc_ldg_b{_bits}_bsm(\n"
+            "        dst_ptr, const_cast<void*>(src_ptr), 0, -1, true, true, false, true);"
+        ),
+    )
+
+    device_intrinsic(
+        f"maca_copy_async_{_bits}b_zfill",
+        helper_name=f"tvm_builtin_maca_copy_async_{_bits}b_zfill",
+        c_signature="(void* dst_ptr, const void* src_ptr, bool predicate)",
+        body=(
+            f"    __builtin_mxc_ldg_b{_bits}_bsm_predicator(\n"
+            "        dst_ptr, const_cast<void*>(src_ptr), 0, true, true, false, true,\n"
+            "        predicate, 1, MACA_ICMP_EQ);"
+        ),
+    )
+
+del _bits
+
+
+def _gvmcnt_wait_count(count):
+    """Return the required immediate GVM wait count."""
+    dtype = getattr(getattr(count, "ty", None), "dtype", "")
+    value = count.value if hasattr(count, "value") else count
+    if (
+        (dtype and not (dtype.startswith("int") or dtype.startswith("uint")))
+        or isinstance(value, bool)
+        or not isinstance(value, Integral)
+        or value < 0
+    ):
+        raise ValueError(
+            "maca_async_wait_gvmcnt requires a non-negative compile-time integer count"
+        )
+    return int(value)
+
+
+def _gvmcnt_wait_helper_name(count):
+    return f"tvm_builtin_maca_async_wait_gvmcnt_{_gvmcnt_wait_count(count)}"
+
+
+def _gvmcnt_wait_body(count):
+    """Inline the GVM wait count because the MACA builtin requires an immediate."""
+    count = _gvmcnt_wait_count(count)
+    return f"    __builtin_mxc_arrive_gvmcnt({count});"
+
+
+device_intrinsic(
+    "maca_async_wait_gvmcnt",
+    helper_name=_gvmcnt_wait_helper_name,
+    c_signature="()",
+    body=_gvmcnt_wait_body,
+    n_attrs=1,
+)
+
+
+device_intrinsic(
+    "maca_barrier_inst",
+    helper_name="tvm_builtin_maca_barrier_inst",
+    c_signature="()",
+    body="    __builtin_mxc_barrier_inst();",
+)
 
 
 @register_codegen("maca_copy_bytes")
