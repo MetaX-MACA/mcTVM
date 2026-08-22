@@ -23,7 +23,6 @@ from tvm.backend.maca.op import maca_func_call
 from .registry import register_codegen
 from .utils import parse_str, validate_power_of_two_range
 
-
 _WAVE_SIZE = 64
 _FULL_WAVE_MASK = "0xFFFFFFFFFFFFFFFFULL"
 _REDUCE_STEPS = {
