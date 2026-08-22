@@ -31,6 +31,14 @@ class MACANamespace:
 
     def __init__(self):
         self.func_call = _op_wrapper(_maca_op.maca_func_call)
+        self.warp_reduce = _op_wrapper(_maca_op.maca_warp_reduce)
+        self.warp_sum = _op_wrapper(_maca_op.maca_warp_sum)
+        self.warp_max = _op_wrapper(_maca_op.maca_warp_max)
+        self.warp_min = _op_wrapper(_maca_op.maca_warp_min)
+        self.cta_reduce = _op_wrapper(_maca_op.maca_cta_reduce)
+        self.cta_sum = _op_wrapper(_maca_op.maca_cta_sum)
+        self.cta_max = _op_wrapper(_maca_op.maca_cta_max)
+        self.cta_min = _op_wrapper(_maca_op.maca_cta_min)
         self.thread_fence = _op_wrapper(_maca_op.maca_thread_fence)
         self.warp_sync = _op_wrapper(_maca_op.maca_warp_sync)
         self.cta_sync = _op_wrapper(_maca_op.maca_cta_sync)
