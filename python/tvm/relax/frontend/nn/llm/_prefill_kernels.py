@@ -181,6 +181,7 @@ def _attention_prefill_cpu(
                                 S_val[0] *= sm_scale * math.log2(math.exp(1))
 
                                 # update m_val, d_val , O_local
+                                new_m[0] = m_val[0]
                                 if _causal_or_sliding_cross_mask(
                                     causal,
                                     row=q_idx,

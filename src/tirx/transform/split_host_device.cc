@@ -263,11 +263,13 @@ class HostDeviceSplitter : public StmtMutator {
       device_func =
           WithAttr(std::move(device_func), tirx::attr::kKernelLaunchParams, launch_params.value());
     }
-    if (device_target->kind->name == "cuda") {
+    if (device_target->kind->name == "cuda" || device_target->kind->name == "maca") {
       if (launch_bounds_attr.min_blocks_per_sm().has_value()) {
         device_func = WithAttr(std::move(device_func), tirx::attr::kLaunchBoundsMinBlocksPerSM,
                                launch_bounds_attr.min_blocks_per_sm().value());
       }
+    }
+    if (device_target->kind->name == "cuda") {
       if (launch_bounds_attr.max_blocks_per_cluster().has_value()) {
         device_func = WithAttr(std::move(device_func), tirx::attr::kLaunchBoundsMaxBlocksPerCluster,
                                launch_bounds_attr.max_blocks_per_cluster().value());
@@ -626,7 +628,7 @@ class DeviceKernelMutator : public StmtExprMutator {
         auto write_ptr = func.CopyOnWrite();
         write_ptr->ret_type = VoidType();
         Target target = func->GetAttr<Target>(tvm::attr::kTarget).value();
-        bool preserve_early_returns = target->kind->name == "cuda";
+        bool preserve_early_returns = target->kind->name == "cuda" || target->kind->name == "maca";
         write_ptr->body = ReturnRemover::Apply(write_ptr->body, !preserve_early_returns);
         // The dyn-smem size declaration was consumed by DeviceInfoCollector;
         // it has no meaning inside the kernel body.

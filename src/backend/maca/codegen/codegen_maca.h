@@ -106,6 +106,7 @@ class CodeGenMACA final : public CodeGenC {
   void VisitExpr_(const CallNode* op, std::ostream& os) final;
   void VisitExpr_(const CastNode* op, std::ostream& os) final;
   void VisitStmt_(const EvaluateNode* op) final;
+  void VisitStmt_(const ReturnNode* op) final;
   void VisitStmt_(const AllocBufferNode* op) final;
   void VisitStmt_(const AttrStmtNode* op) final;
   void VisitStmt_(const DeclBufferNode* op) final;
@@ -144,6 +145,9 @@ class CodeGenMACA final : public CodeGenC {
   bool need_mma_h_{false};
   // whether need cast_smem_ptr_to_int helper function
   bool need_cast_smem_ptr_to_int_{false};
+  // Whether the current function is a __global__ kernel entry rather than a
+  // __device__ subroutine.
+  bool in_kernel_launch_{false};
   // Codegen tags
   std::unordered_set<std::string> codegen_tags_;
   // Op attribute map
