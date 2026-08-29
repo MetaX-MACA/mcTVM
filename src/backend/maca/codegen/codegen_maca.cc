@@ -221,6 +221,7 @@ void CodeGenMACA::PrintFunctionSignature(const ffi::String& function_name, const
                                          std::ostream& os) {
   CallingConv calling_conv =
       func->GetAttr<CallingConv>(tvm::attr::kCallingConv, CallingConv::kDefault).value();
+  in_kernel_launch_ = (calling_conv == CallingConv::kDeviceKernelLaunch);
   if (calling_conv == CallingConv::kDeviceKernelLaunch) {
     os << "extern \"C\" __global__ ";
   } else if (calling_conv == CallingConv::kDefault) {
@@ -267,7 +268,14 @@ void CodeGenMACA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
       // unable to extract the number of threads per block, hence directly return
       return;
     }
-    os << " __launch_bounds__(" << threadIdx_ext_int->value << ")";
+    auto min_blocks_per_sm = f->GetAttr<int64_t>(tirx::attr::kLaunchBoundsMinBlocksPerSM);
+    if (min_blocks_per_sm.has_value()) {
+      TVM_FFI_ICHECK_GT(min_blocks_per_sm.value(), 0);
+      os << " __launch_bounds__(" << threadIdx_ext_int->value << ", " << min_blocks_per_sm.value()
+         << ")";
+    } else {
+      os << " __launch_bounds__(" << threadIdx_ext_int->value << ")";
+    }
   }
 }
 
@@ -557,14 +565,56 @@ struct __align__(16) fp8_e8x16_t {
 }
 
 void CodeGenMACA::VisitStmt_(const tirx::ForNode* op) {
+  // Materialize loop bounds before the pragma, because PrintExpr may emit
+  // temporaries and MACA requires the pragma to immediately precede its loop.
+  std::string begin_str = PrintExpr(op->min);
+  PrimExpr end = is_zero(op->min) ? op->extent : arith::Analyzer()->Simplify(op->min + op->extent);
+  std::string end_str = PrintExpr(end);
+  std::string step_str = op->step.has_value() ? PrintExpr(*op->step) : "";
   if (op->annotations.count("disable_unroll")) {
     PrintIndent();
     stream << "#pragma unroll 1\n";
-  } else if (op->kind == tirx::ForKind::kUnrolled || op->annotations.count("pragma_unroll")) {
+  } else if (op->kind == tirx::ForKind::kUnrolled) {
     PrintIndent();
     stream << "#pragma unroll\n";
+  } else if (auto it = op->annotations.find("pragma_unroll"); it != op->annotations.end()) {
+    PrintIndent();
+    stream << "#pragma unroll";
+    if (auto count = (*it).second.as<int64_t>()) {
+      stream << " " << count.value();
+    } else if (const auto* count = (*it).second.as<IntImmNode>()) {
+      stream << " " << count->value;
+    }
+    stream << "\n";
   }
-  CodeGenC::VisitStmt_(op);
+  PrintIndent();
+  std::string vid = AllocVarID(op->loop_var.get());
+  stream << "for (";
+  PrintType(op->loop_var.ty(), stream);
+  stream << ' ' << vid << " = " << begin_str << "; " << vid << " < " << end_str << "; ";
+  if (step_str.empty()) {
+    stream << "++" << vid;
+  } else {
+    stream << vid << " += " << step_str;
+  }
+  stream << ") {\n";
+  int for_scope = BeginScope();
+  PrintStmt(op->body);
+  this->EndScope(for_scope);
+  PrintIndent();
+  stream << "}\n";
+}
+
+void CodeGenMACA::VisitStmt_(const ReturnNode* op) {
+  if (!in_kernel_launch_) {
+    CodeGenC::VisitStmt_(op);
+    return;
+  }
+  const auto* value = op->value.as<IntImmNode>();
+  TVM_FFI_ICHECK(value && value->value == 0)
+      << "MACA device kernel may only contain a successful early return, return 0";
+  PrintIndent();
+  stream << "return;\n";
 }
 
 void CodeGenMACA::VisitStmt_(const DeclBufferNode* op) {
@@ -1506,7 +1556,11 @@ void CodeGenMACA::VisitStmt_(const AttrStmtNode* op) {
     return;
   } else if (op->attr_key == "pragma_unroll") {
     PrintIndent();
-    stream << "#pragma unroll\n";
+    stream << "#pragma unroll";
+    if (const auto* count = op->value.as<IntImmNode>(); count && count->value != 1) {
+      stream << " " << count->value;
+    }
+    stream << "\n";
     this->VisitStmt(op->body);
     return;
   }

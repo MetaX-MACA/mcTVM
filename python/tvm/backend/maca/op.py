@@ -104,6 +104,34 @@ def maca_thread_fence():
     return call_intrin("", "tirx.maca.thread_fence")
 
 
+def maca_atomic_add(address, value):
+    """Atomically add ``value`` to a MACA device-memory address."""
+    value = tir.convert(value)
+    return call_intrin(value.ty, "tirx.maca.atomic_add", address, value)
+
+
+def maca_atomic_cas(address, compare, value):
+    """Atomically compare and exchange a MACA device-memory address."""
+    compare = tir.convert(compare)
+    return call_intrin(compare.ty, "tirx.maca.atomic_cas", address, compare, value)
+
+
+def maca_ldg(address, dtype, *, dst=None, vec=""):
+    """Load through MACA's read-only global-memory path."""
+    if dst is None:
+        if vec:
+            raise ValueError("vector maca.ldg requires dst")
+        return call_intrin(dtype, "tirx.maca.ldg", address, dtype)
+    if vec not in ("v2", "v4"):
+        raise ValueError(f"maca.ldg expects vec in {{'v2', 'v4'}}, got {vec!r}")
+    if not isinstance(dst, list | tuple):
+        raise ValueError("maca.ldg requires tuple/list dst")
+    vec_len = int(vec[1:])
+    if len(dst) != vec_len:
+        raise ValueError(f"maca.ldg dst length must match {vec}: got {len(dst)}")
+    return call_intrin("", "tirx.maca.ldg", *dst, address, dtype, vec, vec_len)
+
+
 def maca_warp_sync():
     """TVM intrinsic to synchronize threads within the current warp.
 
