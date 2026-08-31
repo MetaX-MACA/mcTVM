@@ -16,7 +16,7 @@
 # under the License.
 """BF16 MACA WMMA registration, source-generation, and hardware tests."""
 
-from functools import lru_cache
+from functools import cache
 
 import numpy as np
 import pytest
@@ -84,8 +84,7 @@ def _make_maca_wmma_tile(dtype, trans_b):
     c = te.compute(
         (16, 16),
         lambda i, j: te.sum(
-            a[i, k].astype("float32")
-            * (b[j, k] if trans_b else b[k, j]).astype("float32"),
+            a[i, k].astype("float32") * (b[j, k] if trans_b else b[k, j]).astype("float32"),
             axis=k,
         ),
         name="C",
@@ -132,7 +131,7 @@ def _make_maca_wmma_tile(dtype, trans_b):
     )
 
 
-@lru_cache(maxsize=None)
+@cache
 def _compile_maca_wmma_tile(dtype, trans_b):
     target = tvm.target.Target({"kind": "maca", "mcpu": "xcore1000"})
     return tvm.compile(_make_maca_wmma_tile(dtype, trans_b).mod["main"], target=target)
@@ -152,8 +151,7 @@ def test_maca_wmma_tile_source_generation(dtype, source_type, trans_b):
     assert source_type in source
     b_layout = "col_major" if trans_b else "row_major"
     assert (
-        "fragment<mxmaca::wmma::matrix_b, 16, 16, 16, "
-        f"{source_type}, mxmaca::wmma::{b_layout}>"
+        f"fragment<mxmaca::wmma::matrix_b, 16, 16, 16, {source_type}, mxmaca::wmma::{b_layout}>"
     ) in source
     for operation in [
         "mxmaca::wmma::fragment",
@@ -166,9 +164,7 @@ def test_maca_wmma_tile_source_generation(dtype, source_type, trans_b):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(
-    not env.has_maca_compute(10, 0, exact=True), reason="need C500 (xcore1000)"
-)
+@pytest.mark.skipif(not env.has_maca_compute(10, 0, exact=True), reason="need C500 (xcore1000)")
 @pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
 def test_maca_wmma_tile_hardware(dtype):
     mod = _compile_maca_wmma_tile(dtype, False)

@@ -24,7 +24,6 @@ import tvm
 from tvm.script import tirx as T
 from tvm.tirx.compilation_pipeline import tirx_pipeline
 
-
 MACA_TARGET = tvm.target.Target({"kind": "maca", "mcpu": "xcore1000"})
 
 

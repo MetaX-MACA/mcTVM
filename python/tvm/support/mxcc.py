@@ -72,10 +72,6 @@ def compile_maca(code, target_format="mcbin", arch="xcore1000", options=None, pa
         temp_code = os.path.join(kernels_output_dir, f"{file_name}.maca")
         temp_target = os.path.join(kernels_output_dir, f"{file_name}.{target_format}")
 
-    import os
-
-    if os.getenv("SHOW_CODEGEN_MOD"):
-        print(f"\n>>>mxcc:\n{code}")
     with open(temp_code, "w") as out_file:
         out_file.write(code)
 

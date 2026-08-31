@@ -57,6 +57,12 @@ def _target_specific_passes(target):
     return []
 
 
+def _target_specific_fragment_passes(target):
+    if target is not None and tvm.target.Target(target).kind.name == "maca":
+        return [tvm.s_tir.transform.InferFragment()]
+    return []
+
+
 def default_tir_pipeline(target=None):
     """The default tirx pipeline used in tvm.tirx.build"""
 
@@ -84,6 +90,7 @@ def default_tir_pipeline(target=None):
                 tirx.transform.FP8ComputeLegalize(),
                 tirx.transform.VerifyMemory(),
                 tirx.transform.AnnotateEntryFunc(),
+                *_target_specific_fragment_passes(target),
                 tirx.transform.SplitHostDevice(),
                 *_target_specific_passes(target),
                 tirx.transform.MakePackedAPI(),
@@ -125,6 +132,7 @@ def tirx_pipeline(target=None):
                 tirx.transform.FP8ComputeLegalize(),
                 tirx.transform.VerifyMemory(),
                 tirx.transform.AnnotateEntryFunc(),
+                *_target_specific_fragment_passes(target),
                 tirx.transform.SplitHostDevice(),
                 *_target_specific_passes(target),
                 tirx.transform.MakePackedAPI(),
