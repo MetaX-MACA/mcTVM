@@ -367,6 +367,7 @@ def get_max_threads_per_block(target: Target) -> int:
 TARGET_KIND_TO_DEFAULT_MAX_SMEM = {
     "cuda": 49152,
     "rocm": 65536,
+    "maca": 65536,
     "metal": 32768,
     "opencl": 16384,
     "vulkan": 16384,
