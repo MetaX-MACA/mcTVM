@@ -459,10 +459,13 @@ def test_injected_child_auto_enable_remains_fail_closed(monkeypatch, missing_env
 )
 def test_tirx_pipelines_immediately_lower_iket(module_name, factory_name):
     factory = getattr(importlib.import_module(module_name), factory_name)
+    module = importlib.import_module(module_name)
     source = inspect.getsource(factory)
-    assert re.search(
-        r"tirx\.transform\.SplitHostDevice\(\),\s+cuda_transforms\.LowerIket\(\)", source
-    )
+    target_passes = inspect.getsource(module._target_specific_passes)
+    assert "tirx.transform.SplitHostDevice()" in source
+    assert "*_target_specific_passes(target)" in source
+    assert re.search(r'kind\.name == "cuda"', target_passes)
+    assert "return [cuda_transforms.LowerIket()]" in target_passes
 
 
 @pytest.mark.parametrize(
