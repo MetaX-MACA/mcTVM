@@ -1029,7 +1029,7 @@ void CodeGenMACA::PrintVecElemStore(const std::string& vec, const PrimType& t, i
 }
 
 void CodeGenMACA::PrintStorageSync(const CallNode* op) {
-  const std::string& sync = op->args[0].as<StringImmNode>()->value;
+  const std::string& sync = op->args[0].as<prim::StringImmNode>()->value;
   if (sync == "warp") {
     // DO nothing.
   } else if (sync == "shared" || sync == "shared.dyn") {
@@ -1107,7 +1107,7 @@ void CodeGenMACA::AddUtilFunction(const std::string& func_name, const std::strin
   this->util_funcs_.insert({func_name, code});
 }
 
-void CodeGenMACA::VisitExpr_(const CastNode* op, std::ostream& os) {
+void CodeGenMACA::VisitExpr_(const prim::CastNode* op, std::ostream& os) {
   PrimType from_ty = op->value.ty();
   PrimType target_ty = op->ty.as_or_throw<PrimType>();
   TVM_FFI_ICHECK_EQ(target_ty.lanes(), from_ty.lanes());
@@ -1241,8 +1241,8 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
     for (size_t i = 1; i < num_args + 1; i++) {
       args.push_back(this->PrintExpr(op->args[i]));
     }
-    std::string source_code = op->args[num_args + 1].as<StringImmNode>()->value;
-    std::string func_name = op->args[0].as<StringImmNode>()->value;
+    std::string source_code = op->args[num_args + 1].as<prim::StringImmNode>()->value;
+    std::string func_name = op->args[0].as<prim::StringImmNode>()->value;
     os << func_name << "(";
     for (size_t i = 0; i < num_args; i++) {
       const auto& arg = args[i];
@@ -1322,7 +1322,7 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->PrintExpr(op->args[4], os);
     os << "], ";
     this->PrintExpr(op->args[6], os);
-    if (const StringImmNode* str = op->args[7].as<StringImmNode>()) {
+    if (const prim::StringImmNode* str = op->args[7].as<prim::StringImmNode>()) {
       os << ", mxmaca::wmma::mem_" << str->value;
     } else {
       LOG(FATAL) << "Invalid parameters";
@@ -1508,11 +1508,11 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
 void CodeGenMACA::VisitStmt_(const AttrStmtNode* op) {
   if (op->attr_key == s_tir::attr::fragment_shape) {
     const VarNode* buffer = op->node.as<VarNode>();
-    const StringImmNode* shape_str = op->value.as<StringImmNode>();
+    const prim::StringImmNode* shape_str = op->value.as<prim::StringImmNode>();
     fragment_shapes[buffer] = shape_str->value;
   } else if (op->attr_key == s_tir::attr::fragment_layout) {
     const VarNode* buffer = op->node.as<VarNode>();
-    const StringImmNode* layout_str = op->value.as<StringImmNode>();
+    const prim::StringImmNode* layout_str = op->value.as<prim::StringImmNode>();
     fragment_layouts[buffer] = layout_str->value;
   } else if (op->attr_key == s_tir::attr::async_commit_queue_scope) {
     const IntImmNode* queue_id = op->value.as<IntImmNode>();
@@ -1667,7 +1667,7 @@ void CodeGenMACA::VisitStmt_(const EvaluateNode* op) {
   }
 }
 
-void CodeGenMACA::VisitExpr_(const RampNode* op, std::ostream& os) {
+void CodeGenMACA::VisitExpr_(const prim::RampNode* op, std::ostream& os) {
   PrimType op_ty = op->ty.as_or_throw<PrimType>();
   int lanes = op_ty.lanes();
   TVM_FFI_ICHECK_LE(lanes, 4) << "ValueError: Ramp of more than 4 lanes is not allowed.";
@@ -1681,7 +1681,7 @@ void CodeGenMACA::VisitExpr_(const RampNode* op, std::ostream& os) {
   os << ")";
 }
 
-void CodeGenMACA::VisitExpr_(const BroadcastNode* op, std::ostream& os) {  // NOLINT(*)
+void CodeGenMACA::VisitExpr_(const prim::BroadcastNode* op, std::ostream& os) {  // NOLINT(*)
   PrimType op_ty = op->ty.as_or_throw<PrimType>();
   int lanes = op_ty.lanes();
   if (IsIntOrUInt(op_ty) && op_ty.bits() == 8) {
@@ -1858,7 +1858,7 @@ void CodeGenMACA::VisitExpr_(const BroadcastNode* op, std::ostream& os) {  // NO
   os << ')';
 }
 
-void CodeGenMACA::VisitExpr_(const SelectNode* op, std::ostream& os) {
+void CodeGenMACA::VisitExpr_(const prim::SelectNode* op, std::ostream& os) {
   PrimType op_ty = op->ty.as_or_throw<PrimType>();
   // Non-vector cases.
   if (!op_ty.IsFixedLengthVector()) {
@@ -2031,13 +2031,14 @@ int32_t CodeGenMACA::GetWmmaFragmentSize(const std::string& scope, const VarNode
     return 0;
 }
 
-void CodeGenMACA::HandleVolatileLoads(const std::string& value, const BufferLoadNode* op,
+void CodeGenMACA::HandleVolatileLoads(const std::string& value, const TensorLoadNode* op,
                                       std::ostream& os) {
   // Cast away volatile qualifier for fp16 types. That is, only loads and
   // stores are volatile. The loaded objects are not marked as volatile.
   //
   PrimType op_ty = op->ty.as_or_throw<PrimType>();
-  if ((IsFloat16(op_ty) || IsBFloat16(op_ty)) && IsVolatile(op->buffer.get())) {
+  if ((IsFloat16(op_ty) || IsBFloat16(op_ty)) &&
+      IsVolatile(op->source.as_or_throw<tvm::tirx::BufferVar>().get())) {
     os << "(";
     PrintType(op_ty, os);
     os << ")(" << value << ")";

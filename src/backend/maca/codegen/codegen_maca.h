@@ -25,9 +25,9 @@
 #define TVM_BACKEND_MACA_CODEGEN_CODEGEN_MACA_H_
 
 #include <tvm/ffi/error.h>
+#include <tvm/ir/prim/expr.h>
 #include <tvm/s_tir/stmt.h>
 #include <tvm/target/codegen.h>
-#include <tvm/tirx/expr.h>
 #include <tvm/tirx/op.h>
 
 #include <queue>
@@ -99,12 +99,12 @@ class CodeGenMACA final : public CodeGenC {
   std::string CastFromTo(std::string value, const PrimType& from, const PrimType& target) final;
   void AddUtilFunction(const std::string& name, const std::string& code);
   // overload visitor
-  void VisitExpr_(const RampNode* op, std::ostream& os) final;       // NOLINT(*)
-  void VisitExpr_(const SelectNode* op, std::ostream& os) final;     // NOLINT(*)
-  void VisitExpr_(const BroadcastNode* op, std::ostream& os) final;  // NOLINT(*)
+  void VisitExpr_(const prim::RampNode* op, std::ostream& os) final;       // NOLINT(*)
+  void VisitExpr_(const prim::SelectNode* op, std::ostream& os) final;     // NOLINT(*)
+  void VisitExpr_(const prim::BroadcastNode* op, std::ostream& os) final;  // NOLINT(*)
   void VisitExpr_(const FloatImmNode* op, std::ostream& os) final;
   void VisitExpr_(const CallNode* op, std::ostream& os) final;
-  void VisitExpr_(const CastNode* op, std::ostream& os) final;
+  void VisitExpr_(const prim::CastNode* op, std::ostream& os) final;
   void VisitStmt_(const EvaluateNode* op) final;
   void VisitStmt_(const ReturnNode* op) final;
   void VisitStmt_(const AllocBufferNode* op) final;
@@ -117,7 +117,7 @@ class CodeGenMACA final : public CodeGenC {
 
  private:
   // Handle volatile loads
-  void HandleVolatileLoads(const std::string& value, const BufferLoadNode* op,
+  void HandleVolatileLoads(const std::string& value, const TensorLoadNode* op,
                            std::ostream& os) final;
 
   // Whether scope such as "__shared__" or "__constant__"  is part of type.
