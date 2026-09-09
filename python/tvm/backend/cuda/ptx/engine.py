@@ -40,11 +40,11 @@ per-instruction generated or hand-written code:
 from tvm.backend.cuda.codegen.registry import register_codegen
 from tvm.backend.cuda.codegen.utils import parse_str
 from tvm.backend.cuda.op import cuda_cvta_generic_to_shared, cuda_func_call
-from tvm.ir import Call
+from tvm.ir import Call, TensorLoad
 from tvm.ir.op import register_op_attr
 from tvm.ir.type import PointerType, PrimType
 from tvm.runtime import const
-from tvm.tirx.expr import BufferLoad, CallEffectKind, IntImm
+from tvm.tirx.expr import CallEffectKind, IntImm
 from tvm.tirx.op import call_intrin, reinterpret
 
 from .render import render_variant
@@ -98,7 +98,7 @@ def register_table(table: dict[str, InstructionEntry]) -> None:
         #
         # Escaped, because "a user can type it" is the whole requirement and
         # three PTX mnemonics are Python keywords: `and`, `or` and `not` (ISA
-        # 9.7.8) print as `T.ptx.and_` and are read back by `unescape_token` in
+        # 9.7.9) print as `T.ptx.and_` and are read back by `unescape_token` in
         # `PTXNamespace.__getattr__`. The escape is the identity for every
         # other family, and `gen_stubs` already spells the attribute this way.
         family = escape_token(entry.family)
@@ -228,12 +228,15 @@ def _make_codegen(entry: InstructionEntry):
         # this point, then are baked into the instruction text and NOT
         # forwarded to the helper (which has no parameter for them).
         imm_at = {i for slot, i, _ in layout if slot.kind == "imm"}
-        imm_values = [rest[at[i]] for i in sorted(imm_at)]
+        imm_layout = [(slot, i) for slot, i, _ in layout if slot.kind == "imm"]
+        imm_values = [rest[at[i]] for _, i in imm_layout]
         if any(not isinstance(value, IntImm) for value in imm_values):
             raise ValueError(
                 f"{entry.name}: immediate operands must become compile-time constants "
                 "before CUDA codegen (use an explicitly-unrolled loop)"
             )
+        for (slot, _), value in zip(imm_layout, imm_values, strict=True):
+            _validate_imm(entry, slot, int(value), mod_map)
         imms = tuple(str(int(value)) for value in imm_values)
         # ``tirx.ptx.addr`` is an expression only in the outer PTX call's IR.
         # The helper still receives the coerced base, while the signed byte
@@ -413,7 +416,7 @@ def _coerce_operand(entry, slot, values, mod_map):
     if is_pred:
         return _coerce_pred_operand(entry, slot, values)
     if slot.kind == "imm":
-        return [_coerce_imm(entry, slot, v) for v in values]
+        return [_coerce_imm(entry, slot, v, mod_map) for v in values]
     if slot.kind in ("addr", "ptr"):
         return [_coerce_address(entry, slot, v, mod_map) for v in values]
     return _coerce_typed(entry, slot, values, mod_map)
@@ -445,7 +448,7 @@ def _coerce_pred_operand(entry, slot, values):
         # The 0/1 materialization of a .pred result: a "=r" uint32 the caller
         # receives through a reference parameter, so it needs a writable
         # uint32 lvalue exactly like any other destination.
-        if not isinstance(value, BufferLoad) or arg_dtype(value) != "uint32":
+        if not isinstance(value, TensorLoad) or arg_dtype(value) != "uint32":
             raise ValueError(
                 f"{entry.name}: operand '{slot.name}' is a .pred result and must be "
                 f"a writable uint32 scalar or buffer element (declare it first, "
@@ -483,10 +486,10 @@ def _coerce_typed(entry, slot, values, mod_map):
     if slot.rw in ("w", "rw"):
         # A PTX destination is a register the caller declared, so every lane has
         # to be a writable lvalue: a scalar (`x: T.float32`) or a buffer element.
-        # Both are BufferLoad nodes, which the C codegen prints as the lvalue
+        # Both are buffer-backed TensorLoad nodes, which the C codegen prints as the lvalue
         # bound to the helper's reference parameter.
         for value in values:
-            if not isinstance(value, BufferLoad):
+            if not isinstance(value, TensorLoad):
                 raise ValueError(
                     f"{entry.name}: destination '{slot.name}' must be a writable scalar or "
                     f"buffer element (declare it first, e.g. `d: T.{allowed[0]}`), got "
@@ -576,7 +579,15 @@ def _coerce_address(entry, slot, value, mod_map):
     raise ValueError(f"{entry.name}: operand '{slot.name}' must be a pointer or uint64 handle")
 
 
-def _coerce_imm(entry, slot, value):
+def _validate_imm(entry, slot, value, mod_map):
+    if entry.imm_check is None:
+        return
+    error = entry.imm_check(mod_map, slot.name, value)
+    if error:
+        raise ValueError(f"{entry.name}: {error}")
+
+
+def _coerce_imm(entry, slot, value, mod_map):
     """A caller-passed immediate: a compile-time constant.
 
     The value lands in the instruction *text* -- the ISA gives these operands
@@ -584,8 +595,9 @@ def _coerce_imm(entry, slot, value):
     mismatch" to a register there) -- so a runtime expression has nothing to
     lower to and is rejected outright rather than silently materialized.
     With `choices` the value is additionally checked against the declared set;
-    an open slot declares no domain because the ISA declares none, so any
-    constant passes.
+    an open slot declares no enumerable domain. An instruction may still attach
+    an entry-local validator for a compact semantic constraint such as lop3's
+    one-byte LUT.
     """
     if isinstance(value, IntImm):
         value = value.value
@@ -608,6 +620,7 @@ def _coerce_imm(entry, slot, value):
             f"{entry.name}: operand '{slot.name}' is an immediate in the instruction "
             f"text; it needs a compile-time integer constant, got {type(value).__name__}"
         )
+    _validate_imm(entry, slot, value, mod_map)
     if slot.choices is not None and str(value) not in slot.choices:
         raise ValueError(
             f"{entry.name}: operand '{slot.name}' must be one of "
@@ -617,6 +630,7 @@ def _coerce_imm(entry, slot, value):
 
 
 def _coerce_pred(entry, pred):
+    pred = getattr(pred, "scalar", pred)
     # A Python bool names no dtype but is unambiguous, so type it here rather
     # than making every call site spell `T.bool(True)`.
     if isinstance(pred, bool):
@@ -669,9 +683,11 @@ def _emit(entry, filled, operands, pred=None, preserve_dst=False):
                 )
             sunk.add(i + lane)
         if lanes and all(i + lane in sunk for lane in range(lanes)):
-            # ISA 9.7.9.4 states it for mov ("provided that at least one
-            # element is a scalar register"); an instruction whose every
-            # destination is discarded has nothing left to do anyway.
+            # ISA 9.7.10.4 states it for mov ("provided that at least one
+            # element is a scalar register"). This API is deliberately the
+            # partial-lane sink facility; whole-operand bit buckets such as
+            # atom's `_` keep their memory side effect and are registered as
+            # fixed-literal siblings selected by their shorter arity.
             raise ValueError(
                 f"{entry.name}: at least one lane of '{slot.name}' must be a real register"
             )
