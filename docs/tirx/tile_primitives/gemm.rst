@@ -30,6 +30,17 @@ tile, accumulating over K in place. Source:
 ``python/tvm/backend/cuda/tile_primitive/gemm/mma_m16n8k_.py``. (For the
 Blackwell async tensor-core path see :doc:`gemm_async`.)
 
+MACA C500 / xcore1000
+---------------------
+
+MACA registers the ``mma.m16n16k16`` variant for C500/xcore1000. It is a
+Wave64 collective and requires A, B, C, and D to be non-replicated
+``local`` register fragments with the C500 ``m16n16k16`` layouts. It supports
+``float16`` or ``bfloat16`` inputs with ``float32`` accumulation, static M/N/K
+extents divisible by 16, ``alpha == 1.0``, and ``beta`` equal to 0 or 1.
+The lowering emits the direct MACA MMA builtin and does not provide
+``gemm_async``, tensor-memory, or ``tcgen05`` support.
+
 What it accepts
 ---------------
 

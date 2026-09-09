@@ -54,6 +54,8 @@ class MACANamespace:
         self.copy_async_128b_zfill = _op_wrapper(_maca_op.maca_copy_async_128b_zfill)
         self.async_wait_gvmcnt = _op_wrapper(_maca_op.maca_async_wait_gvmcnt)
         self.barrier_inst = _op_wrapper(_maca_op.maca_barrier_inst)
+        self.mma_m16n16k16_f16_f32 = _op_wrapper(_maca_op.maca_mma_m16n16k16_f16_f32)
+        self.mma_m16n16k16_bf16_f32 = _op_wrapper(_maca_op.maca_mma_m16n16k16_bf16_f32)
         self.wmma_load = _op_wrapper(_maca_op.maca_wmma_load)
         self.wmma_fill = _op_wrapper(_maca_op.maca_wmma_fill)
         self.wmma_sync = _op_wrapper(_maca_op.maca_wmma_sync)
