@@ -23,47 +23,7 @@ from tvm import tirx
 from tvm.backend.cuda import transforms as cuda_transforms
 
 
-def _verify_maca_module():
-    """Reject CUDA-only operations before lowering a MACA module."""
-
-    @tvm.transform.module_pass(opt_level=0)
-    def _verify(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext) -> tvm.ir.IRModule:
-        for gvar, func in mod.functions.items():
-            if not isinstance(func, tirx.PrimFunc):
-                continue
-
-            def _visit(node):
-                op = getattr(node, "op", None)
-                if not isinstance(op, tvm.ir.Op):
-                    return
-                op_name = op.name
-                if op_name.startswith(("tirx.ptx.", "tirx.ptx_legacy.")):
-                    raise ValueError(
-                        f"MACA function {gvar.name_hint} contains unsupported operation "
-                        f"{op_name}; replace it with the corresponding T.maca operation"
-                    )
-
-            tirx.stmt_functor.post_order_visit(func.body, _visit)
-        return mod
-
-    return _verify
-
-
-def _target_specific_passes(target):
-    if target is None or tvm.target.Target(target).kind.name == "cuda":
-        return [cuda_transforms.LowerIket()]
-    if tvm.target.Target(target).kind.name == "maca":
-        return []
-    return []
-
-
-def _target_specific_fragment_passes(target):
-    if target is not None and tvm.target.Target(target).kind.name == "maca":
-        return [tvm.s_tir.transform.InferFragment()]
-    return []
-
-
-def default_tir_pipeline(target=None):
+def default_tir_pipeline():
     """The default tirx pipeline used in tvm.tirx.build"""
 
     @tvm.transform.module_pass(opt_level=0)
@@ -72,7 +32,6 @@ def default_tir_pipeline(target=None):
         pass_ctx = tvm.transform.PassContext.current()
         config = pass_ctx.config
         passes = [
-            *([_verify_maca_module()] if target is not None and target.kind.name == "maca" else []),
             tirx.transform.LowerInitBlock(),
             tvm.s_tir.transform.UnifyThreadBinding(),
             tirx.transform.StmtSimplify(),
@@ -90,9 +49,9 @@ def default_tir_pipeline(target=None):
                 tirx.transform.FP8ComputeLegalize(),
                 tirx.transform.VerifyMemory(),
                 tirx.transform.AnnotateEntryFunc(),
-                *_target_specific_fragment_passes(target),
+                tvm.s_tir.transform.InferFragment(),
                 tirx.transform.SplitHostDevice(),
-                *_target_specific_passes(target),
+                cuda_transforms.LowerIket(),
                 tirx.transform.MakePackedAPI(),
                 tirx.transform.FP8StorageLegalize(),
                 tirx.transform.BF16StorageLegalize(),
@@ -104,7 +63,7 @@ def default_tir_pipeline(target=None):
     return _pipeline, finalize_host_passes, finalize_device_passes
 
 
-def tirx_pipeline(target=None):
+def tirx_pipeline():
     """The TIRX pipeline used in tvm.tirx.build"""
 
     @tvm.transform.module_pass(opt_level=0)
@@ -113,7 +72,6 @@ def tirx_pipeline(target=None):
         pass_ctx = tvm.transform.PassContext.current()
         config = pass_ctx.config
         passes = [
-            *([_verify_maca_module()] if target is not None and target.kind.name == "maca" else []),
             tirx.transform.LowerTIRx(),
             tvm.s_tir.transform.UnifyThreadBinding(),
             tirx.transform.StmtSimplify(),
@@ -132,9 +90,9 @@ def tirx_pipeline(target=None):
                 tirx.transform.FP8ComputeLegalize(),
                 tirx.transform.VerifyMemory(),
                 tirx.transform.AnnotateEntryFunc(),
-                *_target_specific_fragment_passes(target),
+                tvm.s_tir.transform.InferFragment(),
                 tirx.transform.SplitHostDevice(),
-                *_target_specific_passes(target),
+                cuda_transforms.LowerIket(),
                 tirx.transform.MakePackedAPI(),
                 tirx.transform.FP8StorageLegalize(),
                 tirx.transform.BF16StorageLegalize(),

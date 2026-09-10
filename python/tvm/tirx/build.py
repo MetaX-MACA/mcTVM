@@ -218,10 +218,7 @@ def build(
     if pipeline is not None:
         # custom pipeline
         assert isinstance(pipeline, str)
-        pipeline_kwargs = {"target": target_to_bind} if pipeline == "tirx" else {}
-        pipeline, finalize_host_passes, finalize_device_passes = tvm.tirx.get_tir_pipeline(
-            pipeline, **pipeline_kwargs
-        )
+        pipeline, finalize_host_passes, finalize_device_passes = tvm.tirx.get_tir_pipeline(pipeline)
     else:
         # default pipeline depends on the target
         pipeline, finalize_host_passes, finalize_device_passes = tvm.tirx.get_default_tir_pipeline(

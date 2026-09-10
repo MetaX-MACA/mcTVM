@@ -105,12 +105,23 @@ std::string FindCubridgeIncludePath() {
   return cubridge_include_path;
 }
 
-std::string MCRTCCompile(const std::string& code, const Target& target, bool include_path = false) {
+std::string MCRTCCompile(const std::string& code, bool include_path = false) {
   std::vector<std::string> compile_params;
   std::vector<const char*> param_cstrings{};
   mcrtcProgram prog;
-  const std::string arch = target->GetAttr<ffi::String>("mcpu", ffi::String("xcore1000")).value();
-  compile_params.push_back("-offload-arch=" + arch);
+  std::string cc = "30";
+  int major, minor;
+  mcError_t e1 = mcDeviceGetAttribute(&major, mcDeviceAttributeComputeCapabilityMajor, 0);
+  mcError_t e2 = mcDeviceGetAttribute(&minor, mcDeviceAttributeComputeCapabilityMinor, 0);
+
+  if (e1 == mcSuccess && e2 == mcSuccess) {
+    cc = std::to_string(major) + std::to_string(minor);
+  } else {
+    LOG(WARNING) << "cannot detect compute capability from your device, "
+                 << "fall back to compute_30.";
+  }
+  // FIXME:
+  compile_params.push_back("-arch=compute_" + cc);
 
   if (include_path) {
     std::string include_option = "--include-path=" + FindMACAIncludePath();
@@ -182,7 +193,7 @@ ffi::Module BuildMACA(IRModule mod, Target target) {
     // TODO(tqchen) more reliable checks
     if (mcir[0] != '/') fmt = "mcbin";
   } else {
-    mcir = MCRTCCompile(code, target, cg.need_include_path());
+    mcir = MCRTCCompile(code, cg.need_include_path());
   }
   return ::tvm::target::MACAModuleCreateWithFallback(ffi::Bytes(std::move(mcir)), ffi::String(fmt),
                                                      ExtractFuncInfo(mod), ffi::String(code));
