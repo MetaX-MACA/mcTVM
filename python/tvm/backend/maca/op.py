@@ -201,6 +201,35 @@ def maca_barrier_inst():
     return call_intrin("void", "tirx.maca.barrier_inst")
 
 
+def maca_wmma_load(fragment, buffer_ptr, stride, layout, index=0):
+    """Load one 16x16x16 MACA WMMA fragment from shared memory."""
+    return tir.tvm_load_matrix_sync(fragment, 16, 16, 16, index, buffer_ptr, stride, layout)
+
+
+def maca_wmma_fill(fragment, index=0):
+    """Zero one FP32 16x16x16 MACA WMMA accumulator fragment."""
+    return tir.tvm_fill_fragment(fragment, 16, 16, 16, index, 0.0)
+
+
+def maca_wmma_sync(accumulator, matrix_a, matrix_b, index=0):
+    """Accumulate one MACA 16x16x16 WMMA operation."""
+    return tir.tvm_mma_sync(
+        accumulator,
+        index,
+        matrix_a,
+        index,
+        matrix_b,
+        index,
+        accumulator,
+        index,
+    )
+
+
+def maca_wmma_store(fragment, buffer_ptr, stride, index=0):
+    """Store one FP32 16x16x16 MACA WMMA fragment to shared memory."""
+    return tir.tvm_store_matrix_sync(fragment, 16, 16, 16, index, buffer_ptr, stride, "row_major")
+
+
 def maca_copy_128b(dst, src):
     """Copy 128 bits from ``src`` to ``dst``."""
     return maca_copy_bytes(dst, src, 16)
