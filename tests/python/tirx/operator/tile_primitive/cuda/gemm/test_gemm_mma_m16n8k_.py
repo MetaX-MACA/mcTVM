@@ -676,7 +676,7 @@ def _compile(func):
         return tvm.compile(tvm.IRModule({"main": func}), target=target, tir_pipeline="tirx")
 
 
-def test_maca_gemm_mma_variant_is_registered():
+def test_cuda_gemm_mma_variant_is_registered():
     schedules = list_registered_schedules()
     maca_gemm = schedules.get("tirx.tile.gemm", {}).get("maca", [])
     assert any(variant.startswith("mma.m16n16k16") for variant in maca_gemm), (
@@ -687,7 +687,7 @@ def test_maca_gemm_mma_variant_is_registered():
 
 @pytest.mark.parametrize("dtype", ["bfloat16", "float16"])
 @pytest.mark.gpu
-def test_maca_gemm_mma_lowers_to_builtin(dtype):
+def test_cuda_gemm_mma_lowers_to_mma_sync(dtype):
     """beta=0 clears D then invokes the matching MACA MMA intrinsic."""
     script = _lower(_build_gemm(alpha=1.0, beta=0.0, dtype=dtype))["main"].script()
 
@@ -697,7 +697,7 @@ def test_maca_gemm_mma_lowers_to_builtin(dtype):
 
 
 @pytest.mark.gpu
-def test_maca_gemm_mma_accumulates_c_when_beta_one():
+def test_cuda_gemm_mma_accumulates_c_when_beta_one():
     """beta=1 initializes D from C before invoking the MACA intrinsic."""
     script = _lower(_build_gemm(alpha=1.0, beta=1.0))["main"].script()
 
@@ -742,12 +742,12 @@ def test_maca_gemm_mma_lowers_packed_atoms(dtype, atom, intrinsic):
     assert intrinsic in script
 
 
-def test_maca_gemm_mma_rejects_nonunit_alpha():
+def test_cuda_gemm_mma_rejects_nonunit_alpha():
     with pytest.raises(RuntimeError, match="dispatch failed"):
         _lower(_build_gemm(alpha=2.0, beta=0.0))
 
 
-def test_maca_gemm_mma_rejects_fractional_beta():
+def test_cuda_gemm_mma_rejects_fractional_beta():
     with pytest.raises(RuntimeError, match="dispatch failed"):
         _lower(_build_gemm(alpha=1.0, beta=0.5))
 
@@ -755,7 +755,7 @@ def test_maca_gemm_mma_rejects_fractional_beta():
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
-def test_maca_gemm_mma_numerical(dtype):
+def test_cuda_gemm_mma_numerical(dtype):
     """End-to-end D = A @ B on one Wave64 m16n16k16 tile."""
     np_dtype = _numpy_dtype(dtype)
     func, M, N, K = _build_tiled_numeric(1, 1, 1, 0.0, dtype)
@@ -798,7 +798,7 @@ _TILED_MODES = [
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize("Mt, Nt, Kt", _TILED_SHAPES)
 @pytest.mark.parametrize("dtype, beta", _TILED_MODES)
-def test_maca_gemm_mma_numerical_tiled(dtype, beta, Mt, Nt, Kt):
+def test_cuda_gemm_mma_numerical_tiled(dtype, beta, Mt, Nt, Kt):
     """End-to-end D = A @ B (+ C when beta is one) for tiled fragments."""
     np_dtype = _numpy_dtype(dtype)
     func, M, N, K = _build_tiled_numeric(Mt, Nt, Kt, beta, dtype)
@@ -829,7 +829,7 @@ def test_maca_gemm_mma_numerical_tiled(dtype, beta, Mt, Nt, Kt):
     "transpose_A, transpose_B",
     [(False, False), (True, False), (False, True), (True, True)],
 )
-def test_maca_gemm_mma_numerical_transpose(transpose_A, transpose_B, dtype):
+def test_cuda_gemm_mma_numerical_transpose(transpose_A, transpose_B, dtype):
     """End-to-end D = A @ B for every A/B logical orientation."""
     np_dtype = _numpy_dtype(dtype)
     func = _build_transpose_numeric(transpose_A, transpose_B, dtype)
@@ -856,7 +856,7 @@ def test_maca_gemm_mma_numerical_transpose(transpose_A, transpose_B, dtype):
 @pytest.mark.parametrize("Mt, Nt, Kt", _TILED_SHAPES[1:])
 @pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
 @pytest.mark.gpu
-def test_maca_gemm_mma_lowers_tiled(Mt, Nt, Kt, dtype):
+def test_cuda_gemm_mma_lowers_tiled(Mt, Nt, Kt, dtype):
     """Every supported m16n16k16 tiling lowers to its MACA intrinsic."""
     script = _lower(_build_tiled(Mt, Nt, Kt, dtype=dtype))["main"].script()
     assert _SCRIPT_INTRINSIC[dtype] in script
@@ -866,7 +866,7 @@ def test_maca_gemm_mma_lowers_tiled(Mt, Nt, Kt, dtype):
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize("Mt, Nt, Kt", [(1, 1, 1), (2, 2, 2), (4, 1, 1)])
 @pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
-def test_maca_gemm_mma_codegen_uses_direct_builtin(Mt, Nt, Kt, dtype):
+def test_cuda_gemm_mma_codegen_issue_count(Mt, Nt, Kt, dtype):
     """Codegen emits the matching C500 builtin, without a WMMA wrapper."""
     func, _, _, _ = _build_tiled_numeric(Mt, Nt, Kt, 0.0, dtype)
     src = _compile(func).mod.imports[0].inspect_source()
@@ -879,7 +879,7 @@ def test_maca_gemm_mma_codegen_uses_direct_builtin(Mt, Nt, Kt, dtype):
     [(False, False), (True, False), (False, True), (True, True)],
 )
 @pytest.mark.gpu
-def test_maca_gemm_mma_lowers_transpose(transpose_A, transpose_B):
+def test_cuda_gemm_mma_lowers_transpose(transpose_A, transpose_B):
     """All input orientations use the same m16n16k16 MACA instruction."""
     script = _lower(_build_transpose(transpose_A, transpose_B))["main"].script()
     assert _SCRIPT_INTRINSIC["float16"] in script
@@ -890,7 +890,7 @@ def test_maca_gemm_mma_lowers_transpose(transpose_A, transpose_B):
     [(False, False), (True, False), (False, True), (True, True)],
 )
 @pytest.mark.gpu
-def test_maca_gemm_mma_lowers_aligned_nonzero_region(transpose_A, transpose_B):
+def test_cuda_gemm_mma_lowers_aligned_nonzero_region(transpose_A, transpose_B):
     """A nonzero 16-aligned region lowers for every input orientation."""
     script = _lower(_build_aligned_region_slice(transpose_A, transpose_B))["main"].script()
     assert _SCRIPT_INTRINSIC["float16"] in script
@@ -902,7 +902,7 @@ def test_maca_gemm_mma_lowers_aligned_nonzero_region(transpose_A, transpose_B):
     "transpose_A, transpose_B",
     [(False, False), (True, False), (False, True), (True, True)],
 )
-def test_maca_gemm_mma_codegen_transpose(transpose_A, transpose_B):
+def test_cuda_gemm_mma_codegen_transpose(transpose_A, transpose_B):
     """Every input orientation reaches the native f16 C500 builtin."""
     src = (
         _compile(_build_transpose_numeric(transpose_A, transpose_B)).mod.imports[0].inspect_source()
@@ -922,7 +922,7 @@ def test_maca_gemm_mma_codegen_transpose(transpose_A, transpose_B):
         ("float16", "float16", "float32", "float16"),
     ],
 )
-def test_maca_gemm_mma_rejects_unsupported_dtype(a, b, c, d):
+def test_cuda_gemm_mma_rejects_unsupported_dtype(a, b, c, d):
     """Mixed input signedness and incompatible accumulator signatures decline."""
     with pytest.raises(RuntimeError, match="does not support dtype signature"):
         _lower(_build_dtypes(a, b, c, d))
