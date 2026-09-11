@@ -14,12 +14,11 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Tests for the MACA Wave64 ``m16n16k16`` register GEMM dispatch.
+"""Tests for MACA Wave64 register GEMM datatype families.
 
-The dispatch lowers ``tirx.tile.gemm`` over pure-register fragments to the
-MACA C builtins for f16/bf16 inputs with f32 accumulation.  This follows the
-SDK WMMA m16n16k16 fragment mapping.  A Wave64 lane maps its four local
-operand and accumulator slots as follows:
+The original f16/bf16-to-f32 fixtures follow the SDK WMMA m16n16k16 fragment
+mapping. A Wave64 lane maps its four local operand and accumulator slots as
+follows:
 
     lane = 16 * group + row
     A[p] = A[row, 4 * group + p]
@@ -28,7 +27,9 @@ operand and accumulator slots as follows:
 
 The multi-tile layouts retain these atom coordinates as their innermost axes
 and use positive physical strides for the outer tile axes.  Numerical tests
-load and store through this mapping directly.
+load and store through this mapping directly. The family fixture additionally
+covers f16 output, full f32/f64, byte integers, packed four-bit integers, and
+binary AND/popcount using independently specified lane maps.
 """
 
 import numpy as np
@@ -47,9 +48,26 @@ MMA_N = 16
 MMA_K = 16
 WAVE_SIZE = 64
 
+# Explicit test-side signatures; these maps do not import dispatch internals.
+_NUMERIC_FAMILIES = {
+    "f16_f32": ("float16", "float32", 16, 16, 16),
+    "bf16_f32": ("bfloat16", "float32", 16, 16, 16),
+    "f16_f16": ("float16", "float16", 16, 16, 16),
+    "f32_f32": ("float32", "float32", 16, 16, 4),
+    "f64_f64": ("float64", "float64", 16, 16, 4),
+    "i8_i32": ("int8", "int32", 16, 16, 16),
+    "u8_i32": ("uint8", "int32", 16, 16, 16),
+    "i4_i32": ("int4", "int32", 8, 8, 32),
+    "u4_i32": ("uint4", "int32", 8, 8, 32),
+    "b1_i32": ("int1", "int32", 8, 8, 128),
+}
+
 _SCRIPT_INTRINSIC = {
     "float16": "T.maca.mma_m16n16k16_f16_f32(",
     "bfloat16": "T.maca.mma_m16n16k16_bf16_f32(",
+    "float16_acc": "T.maca.mma_m16n16k16_f16_f16(",
+    "int8": "T.maca.mma_m16n16k16_i8_i32(",
+    "uint8": "T.maca.mma_m16n16k16_u8_i32(",
 }
 _SOURCE_BUILTIN = {
     "float16": "__builtin_mxc_mma_16x16x16f16",
@@ -124,6 +142,54 @@ def _build_dtypes(a_dtype, b_dtype, c_dtype, d_dtype):
         B = T.alloc_buffer((MMA_K, MMA_N), b_dtype, scope="local", layout=B_ATOM)
         C = T.alloc_buffer((MMA_M, MMA_N), c_dtype, scope="local", layout=D_ATOM)
         D = T.alloc_buffer((MMA_M, MMA_N), d_dtype, scope="local", layout=D_ATOM)
+        Tx.warp.gemm(D, A, B, C, transpose_A=False, transpose_B=False, alpha=1.0, beta=0.0)
+
+    return gemm
+
+
+def _build_f32_gemm():
+    """Build the SDK's full-F32 m16n16k4 atom."""
+    a_layout = TileLayout(S[(16, 4) : (1 @ laneid, 16 @ laneid)])
+    b_layout = TileLayout(S[(4, 16) : (16 @ laneid, 1 @ laneid)])
+    d_layout = D_ATOM
+
+    @T.prim_func
+    def gemm():
+        T.device_entry()
+        _cta = T.cta_id([1])
+        _wave = T.warp_id([1])
+        _lane = T.lane_id([WAVE_SIZE])
+        A = T.alloc_buffer((16, 4), "float32", scope="local", layout=a_layout)
+        B = T.alloc_buffer((4, 16), "float32", scope="local", layout=b_layout)
+        C = T.alloc_buffer((16, 16), "float32", scope="local", layout=d_layout)
+        D = T.alloc_buffer((16, 16), "float32", scope="local", layout=d_layout)
+        Tx.warp.gemm(D, A, B, C, transpose_A=False, transpose_B=False, alpha=1.0, beta=0.0)
+
+    return gemm
+
+
+def _build_packed_gemm(dtype, atom):
+    """Build a minimal packed C500 atom for lowering coverage."""
+    m, n, k = atom
+    if dtype in ("int4", "uint4"):
+        a_layout = TileLayout(S[(8, 8, 4) : (1 @ laneid, 8 @ laneid, 1)])
+        b_layout = TileLayout(S[(8, 4, 8) : (8 @ laneid, 1, 1 @ laneid)])
+        d_layout = TileLayout(S[(8, 8) : (8 @ laneid, 1 @ laneid)])
+    else:
+        a_layout = TileLayout(S[(8, 8, 16) : (1 @ laneid, 8 @ laneid, 1)])
+        b_layout = TileLayout(S[(8, 16, 8) : (8 @ laneid, 1, 1 @ laneid)])
+        d_layout = TileLayout(S[(8, 8) : (8 @ laneid, 1 @ laneid)])
+
+    @T.prim_func
+    def gemm():
+        T.device_entry()
+        _cta = T.cta_id([1])
+        _wave = T.warp_id([1])
+        _lane = T.lane_id([WAVE_SIZE])
+        A = T.alloc_buffer((m, k), dtype, scope="local", layout=a_layout)
+        B = T.alloc_buffer((k, n), dtype, scope="local", layout=b_layout)
+        C = T.alloc_buffer((m, n), "int32", scope="local", layout=d_layout)
+        D = T.alloc_buffer((m, n), "int32", scope="local", layout=d_layout)
         Tx.warp.gemm(D, A, B, C, transpose_A=False, transpose_B=False, alpha=1.0, beta=0.0)
 
     return gemm
@@ -326,6 +392,278 @@ def _lower(func):
         return tvm.tirx.transform.LowerTIRx()(tvm.IRModule({"main": func}))
 
 
+def _build_family_numeric(family, tiles, beta, transpose, region=False, repeat=False):
+    """Load SDK lane payloads independently of the production layout builders."""
+    dtype, acc, am, an, ak = _NUMERIC_FAMILIES[family]
+    mt, nt, kt = tiles
+    pad = int(region)
+    pm, pn, pk = mt + pad, nt + pad, kt + pad
+    M, N, K = pm * am, pn * an, pk * ak
+    if am == 8:
+        slots = ak // 8
+        Al = TileLayout(S[(pm, 8, pk, 8, slots) : (pk * slots, 1 @ laneid, slots, 8 @ laneid, 1)])
+        Bl = TileLayout(S[(pk, 8, slots, pn, 8) : (pn * slots, 8 @ laneid, 1, slots, 1 @ laneid)])
+        Dl = TileLayout(S[(pm, 8, pn, 8) : (pn, 8 @ laneid, 1, 1 @ laneid)])
+    elif ak == 4:
+        Al = TileLayout(S[(pm, 16, pk, 4) : (pk, 1 @ laneid, 1, 16 @ laneid)])
+        Bl = TileLayout(S[(pk, 4, pn, 16) : (pn, 16 @ laneid, 1, 1 @ laneid)])
+        Dl, _, _ = _frag(pm, pn, pk)
+        if acc == "float64":
+            Dl = TileLayout(S[(pm, 4, 4, pn, 16) : (pn * 4, 1, 16 @ laneid, 4, 1 @ laneid)])
+        slots = 1
+    else:
+        Dl, Al, Bl = _frag(pm, pn, pk)
+        slots = 4
+    ta, tb = transpose
+    Al = _transpose_frag(Al, [M, K]) if ta else Al
+    Bl = _transpose_frag(Bl, [K, N]) if tb else Bl
+    ashape, bshape = ((K, M) if ta else (M, K)), ((N, K) if tb else (K, N))
+    m0, n0, k0 = pad * am, pad * an, pad * ak
+    dslots = am * an // WAVE_SIZE
+    # Sub-byte inputs arrive as ordinary bytes. Pack their two-byte lane
+    # payload explicitly, independently of the intrinsic's unpacking.
+    host_dtype = "int8" if dtype in ("int4", "int1") else "uint8" if dtype == "uint4" else dtype
+
+    @T.prim_func
+    def gemm(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle, D_ptr: T.handle):
+        A_g = T.match_buffer(A_ptr, ashape, host_dtype)
+        B_g = T.match_buffer(B_ptr, bshape, host_dtype)
+        C_g = T.match_buffer(C_ptr, (M, N), acc)
+        D_g = T.match_buffer(D_ptr, (M, N), acc)
+        T.device_entry()
+        _cta = T.cta_id([1])
+        _wave = T.warp_id([1])
+        lane = T.lane_id([64])
+        A_f = T.alloc_buffer(ashape, dtype, scope="local", layout=Al)
+        B_f = T.alloc_buffer(bshape, dtype, scope="local", layout=Bl)
+        D_f = T.alloc_buffer((M, N), acc, scope="local", layout=Dl)
+        A_l = A_f.local(pm, pk, slots)
+        B_l = B_f.local(pk, pn, slots)
+        D_l = D_f.local(pm, pn, dslots)
+        if am == 8:
+            A_bits = T.decl_buffer((pm, pk), "uint16", data=A_l.data, scope="local")
+            B_bits = T.decl_buffer((pk, pn), "uint16", data=B_l.data, scope="local")
+            for mi, ki in T.grid(pm, pk):
+                A_bits[mi, ki] = T.uint16(0)
+                for p in T.serial(slots):
+                    if ta:
+                        A_bits[mi, ki] = A_bits[mi, ki] | (
+                            (
+                                T.Cast(
+                                    "uint16",
+                                    A_g[ki * ak + slots * (lane // am) + p, mi * am + lane % am],
+                                )
+                                & T.uint16((1 << (16 // slots)) - 1)
+                            )
+                            << T.Cast("uint16", p * (16 // slots))
+                        )
+                    else:
+                        A_bits[mi, ki] = A_bits[mi, ki] | (
+                            (
+                                T.Cast(
+                                    "uint16",
+                                    A_g[mi * am + lane % am, ki * ak + slots * (lane // am) + p],
+                                )
+                                & T.uint16((1 << (16 // slots)) - 1)
+                            )
+                            << T.Cast("uint16", p * (16 // slots))
+                        )
+            for ki, ni in T.grid(pk, pn):
+                B_bits[ki, ni] = T.uint16(0)
+                for p in T.serial(slots):
+                    if tb:
+                        B_bits[ki, ni] = B_bits[ki, ni] | (
+                            (
+                                T.Cast(
+                                    "uint16",
+                                    B_g[ni * an + lane % an, ki * ak + slots * (lane // an) + p],
+                                )
+                                & T.uint16((1 << (16 // slots)) - 1)
+                            )
+                            << T.Cast("uint16", p * (16 // slots))
+                        )
+                    else:
+                        B_bits[ki, ni] = B_bits[ki, ni] | (
+                            (
+                                T.Cast(
+                                    "uint16",
+                                    B_g[ki * ak + slots * (lane // an) + p, ni * an + lane % an],
+                                )
+                                & T.uint16((1 << (16 // slots)) - 1)
+                            )
+                            << T.Cast("uint16", p * (16 // slots))
+                        )
+        else:
+            for mi, ki, p in T.grid(pm, pk, slots):
+                if ta:
+                    A_l[mi, ki, p] = A_g[ki * ak + slots * (lane // am) + p, mi * am + lane % am]
+                else:
+                    A_l[mi, ki, p] = A_g[mi * am + lane % am, ki * ak + slots * (lane // am) + p]
+            for ki, ni, p in T.grid(pk, pn, slots):
+                if tb:
+                    B_l[ki, ni, p] = B_g[ni * an + lane % an, ki * ak + slots * (lane // an) + p]
+                else:
+                    B_l[ki, ni, p] = B_g[ki * ak + slots * (lane // an) + p, ni * an + lane % an]
+        for mi, ni, p in T.grid(pm, pn, dslots):
+            if acc == "float64":
+                D_l[mi, ni, p] = C_g[mi * am + (lane // an) + 4 * p, ni * an + lane % an]
+            else:
+                D_l[mi, ni, p] = C_g[mi * am + dslots * (lane // an) + p, ni * an + lane % an]
+        for iteration in T.unroll(2 if repeat else 1):
+            if ta:
+                if tb:
+                    Tx.warp.gemm(
+                        D_f[m0:M, n0:N],
+                        A_f[k0:K, m0:M],
+                        B_f[n0:N, k0:K],
+                        D_f[m0:M, n0:N],
+                        transpose_A=True,
+                        transpose_B=True,
+                        beta=beta,
+                    )
+                else:
+                    Tx.warp.gemm(
+                        D_f[m0:M, n0:N],
+                        A_f[k0:K, m0:M],
+                        B_f[k0:K, n0:N],
+                        D_f[m0:M, n0:N],
+                        transpose_A=True,
+                        transpose_B=False,
+                        beta=beta,
+                    )
+            else:
+                if tb:
+                    Tx.warp.gemm(
+                        D_f[m0:M, n0:N],
+                        A_f[m0:M, k0:K],
+                        B_f[n0:N, k0:K],
+                        D_f[m0:M, n0:N],
+                        transpose_A=False,
+                        transpose_B=True,
+                        beta=beta,
+                    )
+                else:
+                    Tx.warp.gemm(
+                        D_f[m0:M, n0:N],
+                        A_f[m0:M, k0:K],
+                        B_f[k0:K, n0:N],
+                        D_f[m0:M, n0:N],
+                        transpose_A=False,
+                        transpose_B=False,
+                        beta=beta,
+                    )
+        for mi, ni, p in T.grid(pm, pn, dslots):
+            if acc == "float64":
+                D_g[mi * am + (lane // an) + 4 * p, ni * an + lane % an] = D_l[mi, ni, p]
+            else:
+                D_g[mi * am + dslots * (lane // an) + p, ni * an + lane % an] = D_l[mi, ni, p]
+
+    return gemm, (M, N, K), (m0, n0, k0)
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.parametrize("family", _NUMERIC_FAMILIES)
+@pytest.mark.parametrize("beta", [0.0, 1.0])
+@pytest.mark.parametrize(
+    "tiles,transpose,region,repeat",
+    [
+        ((1, 1, 1), (False, False), False, False),
+        ((2, 2, 3), (False, False), False, False),
+        ((2, 1, 2), (True, False), False, False),
+        ((1, 2, 2), (False, True), False, False),
+        ((2, 2, 3), (True, True), True, True),
+    ],
+)
+def test_maca_gemm_mma_family_numerical(family, beta, tiles, transpose, region, repeat):
+    """Check new signatures, tile offsets, in-place C=D, and repeated calls."""
+    func, (M, N, K), (m0, n0, k0) = _build_family_numeric(
+        family, tiles, beta, transpose, region, repeat
+    )
+    dtype, acc, _, _, ak = _NUMERIC_FAMILIES[family]
+    rng = np.random.default_rng(20260910)
+    if acc == "int32":
+        lo, hi = {
+            "int8": (-128, 128),
+            "uint8": (0, 256),
+            "int4": (-8, 8),
+            "uint4": (0, 16),
+            "int1": (0, 2),
+        }[dtype]
+        host_dtype = "int8" if dtype in ("int4", "int1") else "uint8" if dtype == "uint4" else dtype
+        a = rng.integers(lo, hi, (M, K), dtype=host_dtype)
+        b = rng.integers(lo, hi, (K, N), dtype=host_dtype)
+        a.flat[:4] = [lo, hi - 1, 0, 1]
+        b.flat[:4] = [hi - 1, lo, 1, 0]
+        c = rng.integers(-1000, 1000, (M, N), dtype="int32")
+        c[m0, n0 : n0 + 4] = [2**31 - 1, 2**31 - 2, -(2**31), -(2**31) + 1]
+        if dtype == "int1":
+            # The [m0,n0] dot is K-k0 for AND, but zero for XOR.
+            a[m0, k0:] = 1
+            b[k0:, n0] = 1
+    else:
+        np_dtype = _numpy_dtype(dtype) if dtype == "bfloat16" else dtype
+        a = rng.uniform(-0.5, 0.5, (M, K)).astype(np_dtype)
+        b = rng.uniform(-0.5, 0.5, (K, N)).astype(np_dtype)
+        c = rng.uniform(-0.5, 0.5, (M, N)).astype(acc)
+        if acc == "float16":
+            # Dyadic values make each atom's f32 dot exact; differences then
+            # measure f16 conversion between atoms, not f32 reduction order.
+            a = (rng.integers(-32, 33, (M, K)) / 32).astype(dtype)
+            b = (rng.integers(-32, 33, (K, N)) / 32).astype(dtype)
+            c = (rng.integers(-32, 33, (M, N)) / 32).astype(acc)
+        if beta == 0:
+            c.fill(np.nan)
+    reference = c.copy()
+    result = c[m0:, n0:].copy()
+    for _ in range(2 if repeat else 1):
+        if beta == 0:
+            result = np.zeros_like(result)
+        for k in range(k0, K, ak):
+            ref_dtype = "int64" if acc == "int32" else acc if acc == "float64" else "float32"
+            product = a[m0:, k : k + ak].astype(ref_dtype) @ b[k : k + ak, n0:].astype(ref_dtype)
+            result = (result.astype(ref_dtype) + product).astype(acc)
+    reference[m0:, n0:] = result
+    if acc == "float16" and tiles[2] > 1 and not repeat:
+        final_only = a[m0:, k0:].astype("float32") @ b[k0:, n0:].astype("float32")
+        if beta == 1:
+            final_only += c[m0:, n0:].astype("float32")
+        assert np.any(result != final_only.astype("float16")), (
+            "fixture must expose per-atom rounding"
+        )
+    dev = tvm.device("maca", 0)
+    a_dev = tvm.runtime.tensor(np.ascontiguousarray(a.T if transpose[0] else a), dev)
+    b_dev = tvm.runtime.tensor(np.ascontiguousarray(b.T if transpose[1] else b), dev)
+    c_dev = tvm.runtime.tensor(c, dev)
+    d_dev = tvm.runtime.tensor(np.zeros((M, N), dtype=acc), dev)
+    module = _compile(func)
+    source = module.mod.imports[0].inspect_source()
+    helper = {
+        "f16_f32": "mma_m16n16k16_f16_f32",
+        "bf16_f32": "mma_m16n16k16_bf16_f32",
+        "f16_f16": "mma_m16n16k16_f16_f16",
+        "f32_f32": "mma_m16n16k4_f32_f32",
+        "f64_f64": "mma_m16n16k4_f64_f64",
+        "i8_i32": "mma_m16n16k16_i8_i32",
+        "u8_i32": "mma_m16n16k16_u8_i32",
+        "i4_i32": "mma_m8n8k32_i4_i32",
+        "u4_i32": "mma_m8n8k32_u4_i32",
+        "b1_i32": "bmma_m8n8k128_b1_i32",
+    }[family]
+    assert source.count("tvm_builtin_maca_" + helper + "(") >= 2
+    assert "tcgen05" not in source and "asm volatile" not in source
+    module(a_dev, b_dev, c_dev, d_dev)
+    if acc == "int32":
+        np.testing.assert_array_equal(d_dev.numpy(), reference)
+    elif acc == "float16":
+        # Native MMA cancellation can leave one minimum half subnormal.
+        np.testing.assert_allclose(d_dev.numpy(), reference, rtol=0, atol=2**-24, equal_nan=True)
+    elif acc == "float64":
+        np.testing.assert_allclose(d_dev.numpy(), reference, rtol=1e-12, atol=1e-14, equal_nan=True)
+    else:
+        np.testing.assert_allclose(d_dev.numpy(), reference, rtol=1e-5, atol=1e-6, equal_nan=True)
+
+
 def _numpy_dtype(dtype):
     if dtype == "bfloat16":
         return pytest.importorskip("ml_dtypes").bfloat16
@@ -366,6 +704,42 @@ def test_maca_gemm_mma_accumulates_c_when_beta_one():
     assert _SCRIPT_INTRINSIC["bfloat16"] in script
     assert "c_local[" in script
     assert "T.float32(0" not in script
+
+
+@pytest.mark.parametrize(
+    "dtypes, intrinsic",
+    [
+        (("float16", "float16", "float16", "float16"), _SCRIPT_INTRINSIC["float16_acc"]),
+        (("int8", "int8", "int32", "int32"), _SCRIPT_INTRINSIC["int8"]),
+        (("uint8", "uint8", "int32", "int32"), _SCRIPT_INTRINSIC["uint8"]),
+    ],
+)
+@pytest.mark.gpu
+def test_maca_gemm_mma_lowers_additional_m16n16k16_families(dtypes, intrinsic):
+    """Additional C500 signatures select their typed direct intrinsic."""
+    script = _lower(_build_dtypes(*dtypes))["main"].script()
+    assert intrinsic in script
+    assert "wmma" not in script.lower()
+
+
+@pytest.mark.gpu
+def test_maca_gemm_mma_lowers_full_f32_atom():
+    script = _lower(_build_f32_gemm())["main"].script()
+    assert "T.maca.mma_m16n16k4_f32_f32(" in script
+
+
+@pytest.mark.parametrize(
+    "dtype, atom, intrinsic",
+    [
+        ("int4", (8, 8, 32), "T.maca.mma_m8n8k32_i4_i32("),
+        ("uint4", (8, 8, 32), "T.maca.mma_m8n8k32_u4_i32("),
+        ("int1", (8, 8, 128), "T.maca.bmma_m8n8k128_b1_i32("),
+    ],
+)
+@pytest.mark.gpu
+def test_maca_gemm_mma_lowers_packed_atoms(dtype, atom, intrinsic):
+    script = _lower(_build_packed_gemm(dtype, atom))["main"].script()
+    assert intrinsic in script
 
 
 def test_maca_gemm_mma_rejects_nonunit_alpha():
@@ -540,16 +914,87 @@ def test_maca_gemm_mma_codegen_transpose(transpose_A, transpose_B):
 @pytest.mark.parametrize(
     "a, b, c, d",
     [
-        ("float16", "float16", "float16", "float16"),
         ("bfloat16", "float16", "float32", "float32"),
-        ("float32", "float32", "float32", "float32"),
-        ("int8", "int8", "int32", "int32"),
+        ("float32", "float16", "float32", "float32"),
+        ("int8", "uint8", "int32", "int32"),
+        ("uint8", "int8", "int32", "int32"),
+        ("float16", "float16", "int32", "int32"),
+        ("float16", "float16", "float32", "float16"),
     ],
 )
 def test_maca_gemm_mma_rejects_unsupported_dtype(a, b, c, d):
-    """Only matching f16/bf16 inputs with f32 accumulation are supported."""
-    with pytest.raises(RuntimeError, match="dispatch failed"):
+    """Mixed input signedness and incompatible accumulator signatures decline."""
+    with pytest.raises(RuntimeError, match="does not support dtype signature"):
         _lower(_build_dtypes(a, b, c, d))
+
+
+def _build_contract_case(case):
+    """Vary one register-fragment contract while keeping the signature valid."""
+    dl, al, _ = _frag(3, 1, 1)
+    a_layout = dl if case == "layout" else al
+    a_scope = "shared" if case == "scope" else "local"
+    start = -16 if case == "negative" else 1 if case == "alignment" else 0
+    extent = {"empty": 0, "bounds": 64, "overlap": 32}.get(case, 16)
+    c_start = 16 if case in ("overlap", "disjoint") else 0
+
+    @T.prim_func
+    def gemm():
+        T.device_entry()
+        _cta = T.cta_id([1])
+        _wave = T.warp_id([1])
+        _lane = T.lane_id([WAVE_SIZE])
+        D = T.alloc_buffer((48, 16), "float16", scope="local", layout=dl)
+        A_storage = T.alloc_buffer((48, 16), "float16", scope=a_scope, layout=a_layout)
+        B_storage = T.alloc_buffer((16, 16), "float16", scope="local", layout=B_ATOM)
+        if case == "alias_a":
+            A = T.decl_buffer((48, 16), "float16", data=D.data, scope="local", layout=al)
+        else:
+            A = A_storage
+        if case == "alias_b":
+            B = T.decl_buffer((16, 16), "float16", data=D.data, scope="local", layout=B_ATOM)
+        else:
+            B = B_storage
+        Tx.warp.gemm(
+            D[start : start + extent, 0:16],
+            A[0:extent, 0:16],
+            B,
+            D[c_start : c_start + extent, 0:16],
+            transpose_A=False,
+            transpose_B=False,
+            beta=1.0,
+        )
+
+    return gemm
+
+
+@pytest.mark.parametrize(
+    "case, diagnostic",
+    [
+        ("alignment", "requires buffer and region alignment"),
+        ("bounds", "in-bounds nonempty regions"),
+        ("empty", "in-bounds nonempty regions"),
+        ("negative", "in-bounds nonempty regions"),
+        ("layout", "unsupported A fragment layout"),
+        ("scope", "requires local A fragments"),
+        ("alias_a", "D must not alias A"),
+        ("alias_b", "D must not alias B"),
+        ("overlap", "rejects shifted overlapping C/D regions"),
+    ],
+)
+def test_maca_gemm_mma_rejects_invalid_contract(case, diagnostic):
+    with pytest.raises(RuntimeError, match=diagnostic):
+        _lower(_build_contract_case(case))
+
+
+def test_maca_gemm_mma_accepts_disjoint_c_d_regions():
+    script = _lower(_build_contract_case("disjoint"))["main"].script()
+    assert "T.maca.mma_m16n16k16_f16_f16(" in script
+
+
+def test_maca_gemm_mma_rejects_other_architecture():
+    with tvm.target.Target({"kind": "maca", "mcpu": "xcore1100"}):
+        with pytest.raises(RuntimeError, match="requires the C500/xcore1000 target"):
+            tvm.tirx.transform.LowerTIRx()(tvm.IRModule({"main": _build_gemm()}))
 
 
 if __name__ == "__main__":

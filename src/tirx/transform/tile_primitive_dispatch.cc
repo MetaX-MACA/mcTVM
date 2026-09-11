@@ -632,6 +632,13 @@ class TilePrimitiveDispatcher : public StmtExprMutator {
         LOG(WARNING) << "ExecContext scope_switch failed: " << err;
       }
     }
+    // Make declaration aliases visible before view lowering.  Comparing
+    // buffer_data(view) expressions alone does not identify shared storage.
+    ffi::Map<Var, Var> storage_roots;
+    for (const auto& [buffer, root] : buffer_root_) {
+      storage_roots.Set(buffer, root);
+    }
+    shared_state_.Set("buffer_storage_roots", storage_roots);
     tirx::DispatchContext sctx(target_, op->scope, launch_params_, var_range_map_,
                                /*alloc_only=*/false, /*callbacks=*/{}, shared_state_, inter_map,
                                intra_map, scope_kind);

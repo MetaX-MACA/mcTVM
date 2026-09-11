@@ -114,6 +114,14 @@ const DeviceIntrinsicRegistration kDeviceIntrinsics[] = {
     TIRX_DEVICE_INTRIN_ALIAS(maca_barrier_inst, maca, kOpaque),
     TIRX_DEVICE_INTRIN_ALIAS(maca_mma_m16n16k16_f16_f32, maca, kOpaque),
     TIRX_DEVICE_INTRIN_ALIAS(maca_mma_m16n16k16_bf16_f32, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_mma_m16n16k16_f16_f16, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_mma_m16n16k16_i8_i32, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_mma_m16n16k16_u8_i32, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_mma_m16n16k4_f32_f32, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_mma_m16n16k4_f64_f64, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_mma_m8n8k32_i4_i32, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_mma_m8n8k32_u4_i32, maca, kOpaque),
+    TIRX_DEVICE_INTRIN_ALIAS(maca_bmma_m8n8k128_b1_i32, maca, kOpaque),
 };
 
 void RegisterDeviceIntrinsicAliases() {

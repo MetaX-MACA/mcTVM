@@ -211,6 +211,46 @@ def maca_mma_m16n16k16_bf16_f32(d, a, b, c):
     return call_intrin("void", "tirx.maca.mma_m16n16k16_bf16_f32", d, a, b, c)
 
 
+def maca_mma_m16n16k16_f16_f16(d, a, b, c):
+    """Issue a Wave64 m16n16k16 F16 MMA with F16 accumulation."""
+    return call_intrin("void", "tirx.maca.mma_m16n16k16_f16_f16", d, a, b, c)
+
+
+def maca_mma_m16n16k16_i8_i32(d, a, b, c):
+    """Issue a Wave64 signed int8 m16n16k16 MMA."""
+    return call_intrin("void", "tirx.maca.mma_m16n16k16_i8_i32", d, a, b, c)
+
+
+def maca_mma_m16n16k16_u8_i32(d, a, b, c):
+    """Issue a Wave64 unsigned int8 m16n16k16 MMA."""
+    return call_intrin("void", "tirx.maca.mma_m16n16k16_u8_i32", d, a, b, c)
+
+
+def maca_mma_m16n16k4_f32_f32(d, a, b, c):
+    """Issue a Wave64 m16n16k4 full-F32 MMA."""
+    return call_intrin("void", "tirx.maca.mma_m16n16k4_f32_f32", d, a, b, c)
+
+
+def maca_mma_m16n16k4_f64_f64(d, a, b, c):
+    """Issue a Wave64 m16n16k4 double-precision MMA."""
+    return call_intrin("void", "tirx.maca.mma_m16n16k4_f64_f64", d, a, b, c)
+
+
+def maca_mma_m8n8k32_i4_i32(d, a, b, c):
+    """Issue a packed 4-bit m8n8k32 MMA."""
+    return call_intrin("void", "tirx.maca.mma_m8n8k32_i4_i32", d, a, b, c)
+
+
+def maca_mma_m8n8k32_u4_i32(d, a, b, c):
+    """Issue a packed unsigned 4-bit m8n8k32 MMA."""
+    return call_intrin("void", "tirx.maca.mma_m8n8k32_u4_i32", d, a, b, c)
+
+
+def maca_bmma_m8n8k128_b1_i32(d, a, b, c):
+    """Issue an AND/popcount m8n8k128 one-bit MMA."""
+    return call_intrin("void", "tirx.maca.bmma_m8n8k128_b1_i32", d, a, b, c)
+
+
 def maca_wmma_load(fragment, buffer_ptr, stride, layout, index=0):
     """Load one 16x16x16 MACA WMMA fragment from shared memory."""
     return tir.tvm_load_matrix_sync(fragment, 16, 16, 16, index, buffer_ptr, stride, layout)
