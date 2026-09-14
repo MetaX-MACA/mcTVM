@@ -77,19 +77,39 @@ _SOURCE_BUILTIN = {
 # C500 Wave64 m16n16k16 atoms.  For lane = 16 * group + row, the source
 # register index p is represented by the final extent-4 axis and maps to the
 # SDK WMMA payload coordinate 4 * group + p.
-A_ATOM = TileLayout(S[(16, 4, 4) : (1 @ laneid, 16 @ laneid, 1)])
-B_ATOM = TileLayout(S[(4, 4, 16) : (16 @ laneid, 1, 1 @ laneid)])
-D_ATOM = TileLayout(S[(4, 4, 16) : (16 @ laneid, 1, 1 @ laneid)])
+A_FRAG = TileLayout(S[(16, 4, 4) : (1 @ laneid, 16 @ laneid, 1)])
+B_FRAG = TileLayout(S[(4, 4, 16) : (16 @ laneid, 1, 1 @ laneid)])
+D_FRAG = TileLayout(S[(4, 4, 16) : (16 @ laneid, 1, 1 @ laneid)])
 
 
 def _transpose_frag(layout, shape):
-    """Swap the two logical axes while preserving physical register order."""
-    grouped, separators = layout.group(shape)
-    return grouped.permute_by_groups(separators, [1, 0])
+    """Swap the two logical axes of a 2D fragment layout.
+
+    The transposed input orientations (A as [K, M], B as [N, K]) hold the exact
+    same per-lane/per-register element distribution as the K-major fragments --
+    only the buffer's logical axes are swapped. So instead of writing them out
+    by hand, derive them: ``group`` the shard into the logical dims, then
+    ``permute_by_groups`` to exchange the two groups.
+    """
+    grouped, seps = layout.group(shape)
+    return grouped.permute_by_groups(seps, [1, 0])
 
 
-def _frag(Mt, Nt, Kt):
+# Transposed input orientations of the same single tile: A as [K, M], B as
+# [N, K]. The dispatch swaps axes per the transpose flags; the .row.col mma is
+# unchanged.
+A_KM_FRAG = _transpose_frag(A_FRAG, [MMA_M, MMA_K])
+B_NK_FRAG = _transpose_frag(B_FRAG, [MMA_K, MMA_N])
+
+
+def _frag(Mt, Nt, Kt, kinst):
     """Return Wave64 fragments for an ``Mt x Nt x Kt`` m16n16k16 tiling.
+
+    Logical shapes: A = (16*Mt, kinst*Kt), B = (kinst*Kt, 8*Nt), D/C = (16*Mt, 8*Nt).
+    Each operand's tiled layout is the single-tile base ``tile_to`` the full
+    logical shape -- ``tile_to`` repeats the base's per-lane/per-register element
+    map over the tile grid, so a tiling is just a grid of the single-tile
+    fragments (the base is the single source of truth, k8 and k16 alike).
 
     The innermost axes are exactly the C500 atoms.  The positive outer strides
     make a per-thread local view have physical shape ``[Mt, Kt, 4]`` for A,
@@ -97,6 +117,8 @@ def _frag(Mt, Nt, Kt):
     """
     if min(Mt, Nt, Kt) < 1:
         raise ValueError("tile counts must be positive")
+    if kinst != MMA_K:
+        raise ValueError(f"MACA only supports kinst={MMA_K}, but got {kinst}")
 
     A = TileLayout(S[(Mt, MMA_M, Kt, 4, 4) : (Kt * 4, 1 @ laneid, 4, MMA_K @ laneid, 1)])
     B = TileLayout(S[(Kt, 4, 4, Nt, MMA_N) : (Nt * 4, MMA_K @ laneid, 1, 4, 1 @ laneid)])
@@ -104,9 +126,14 @@ def _frag(Mt, Nt, Kt):
     return D, A, B
 
 
-def _build_tiled(Mt, Nt, Kt, *, alpha=1.0, beta=0.0, dtype="float16"):
-    """Build one Wave64 GEMM call over an ``Mt x Nt x Kt`` register tiling."""
-    Dl, Al, Bl = _frag(Mt, Nt, Kt)
+def _build_tiled(Mt, Nt, Kt, kinst, *, alpha=1.0, beta=0.0, dtype="float16", store=False):
+    """A single-warp kernel issuing one ``T.gemm`` over an Mt x Nt x Kt tiling.
+
+    With ``store=True`` the result is written back to a global buffer (a full
+    kernel for codegen); otherwise only the ``T.gemm`` is emitted (for
+    ``LowerTIRx`` dispatch checks).
+    """
+    Dl, Al, Bl = _frag(Mt, Nt, Kt, kinst)
     M, N, K = MMA_M * Mt, MMA_N * Nt, MMA_K * Kt
 
     @T.prim_func
@@ -126,7 +153,38 @@ def _build_tiled(Mt, Nt, Kt, *, alpha=1.0, beta=0.0, dtype="float16"):
 
 def _build_gemm(alpha=1.0, beta=0.0, dtype="bfloat16"):
     """Build one m16n16k16 register GEMM call."""
-    return _build_tiled(1, 1, 1, alpha=alpha, beta=beta, dtype=dtype)
+    return _build_tiled(1, 1, 1, MMA_K, alpha=alpha, beta=beta, dtype=dtype)
+
+
+def _build_transpose(transpose_A, transpose_B, *, dtype="float16"):
+    """Build a single tile for one A/B logical input orientation."""
+    Al = A_KM_FRAG if transpose_A else A_FRAG
+    Bl = B_NK_FRAG if transpose_B else B_FRAG
+    A_shape = (MMA_K, MMA_M) if transpose_A else (MMA_M, MMA_K)
+    B_shape = (MMA_N, MMA_K) if transpose_B else (MMA_K, MMA_N)
+
+    @T.prim_func
+    def gemm():
+        T.device_entry()
+        _cta = T.cta_id([1])
+        _wave = T.warp_id([1])
+        _lane = T.lane_id([WAVE_SIZE])
+        A = T.alloc_buffer(A_shape, dtype, scope="local", layout=Al)
+        B = T.alloc_buffer(B_shape, dtype, scope="local", layout=Bl)
+        C = T.alloc_buffer((MMA_M, MMA_N), "float32", scope="local", layout=D_FRAG)
+        D = T.alloc_buffer((MMA_M, MMA_N), "float32", scope="local", layout=D_FRAG)
+        Tx.warp.gemm(
+            D,
+            A,
+            B,
+            C,
+            transpose_A=transpose_A,
+            transpose_B=transpose_B,
+            alpha=1.0,
+            beta=0.0,
+        )
+
+    return gemm
 
 
 def _build_dtypes(a_dtype, b_dtype, c_dtype, d_dtype):
@@ -138,66 +196,27 @@ def _build_dtypes(a_dtype, b_dtype, c_dtype, d_dtype):
         _cta = T.cta_id([1])
         _wave = T.warp_id([1])
         _lane = T.lane_id([WAVE_SIZE])
-        A = T.alloc_buffer((MMA_M, MMA_K), a_dtype, scope="local", layout=A_ATOM)
-        B = T.alloc_buffer((MMA_K, MMA_N), b_dtype, scope="local", layout=B_ATOM)
-        C = T.alloc_buffer((MMA_M, MMA_N), c_dtype, scope="local", layout=D_ATOM)
-        D = T.alloc_buffer((MMA_M, MMA_N), d_dtype, scope="local", layout=D_ATOM)
+        A = T.alloc_buffer((MMA_M, MMA_K), a_dtype, scope="local", layout=A_FRAG)
+        B = T.alloc_buffer((MMA_K, MMA_N), b_dtype, scope="local", layout=B_FRAG)
+        C = T.alloc_buffer((MMA_M, MMA_N), c_dtype, scope="local", layout=D_FRAG)
+        D = T.alloc_buffer((MMA_M, MMA_N), d_dtype, scope="local", layout=D_FRAG)
         Tx.warp.gemm(D, A, B, C, transpose_A=False, transpose_B=False, alpha=1.0, beta=0.0)
 
     return gemm
 
 
-def _build_f32_gemm():
-    """Build the SDK's full-F32 m16n16k4 atom."""
-    a_layout = TileLayout(S[(16, 4) : (1 @ laneid, 16 @ laneid)])
-    b_layout = TileLayout(S[(4, 16) : (16 @ laneid, 1 @ laneid)])
-    d_layout = D_ATOM
+def _build_tiled_numeric(Mt, Nt, Kt, kinst, beta, dtype):
+    """End-to-end ``T.gemm`` over an Mt x Nt x Kt tiling, with the A/B inputs
+    loaded and the D output stored register-by-register.
 
-    @T.prim_func
-    def gemm():
-        T.device_entry()
-        _cta = T.cta_id([1])
-        _wave = T.warp_id([1])
-        _lane = T.lane_id([WAVE_SIZE])
-        A = T.alloc_buffer((16, 4), "float32", scope="local", layout=a_layout)
-        B = T.alloc_buffer((4, 16), "float32", scope="local", layout=b_layout)
-        C = T.alloc_buffer((16, 16), "float32", scope="local", layout=d_layout)
-        D = T.alloc_buffer((16, 16), "float32", scope="local", layout=d_layout)
-        Tx.warp.gemm(D, A, B, C, transpose_A=False, transpose_B=False, alpha=1.0, beta=0.0)
-
-    return gemm
-
-
-def _build_packed_gemm(dtype, atom):
-    """Build a minimal packed C500 atom for lowering coverage."""
-    m, n, k = atom
-    if dtype in ("int4", "uint4"):
-        a_layout = TileLayout(S[(8, 8, 4) : (1 @ laneid, 8 @ laneid, 1)])
-        b_layout = TileLayout(S[(8, 4, 8) : (8 @ laneid, 1, 1 @ laneid)])
-        d_layout = TileLayout(S[(8, 8) : (8 @ laneid, 1 @ laneid)])
-    else:
-        a_layout = TileLayout(S[(8, 8, 16) : (1 @ laneid, 8 @ laneid, 1)])
-        b_layout = TileLayout(S[(8, 16, 8) : (8 @ laneid, 1, 1 @ laneid)])
-        d_layout = TileLayout(S[(8, 8) : (8 @ laneid, 1 @ laneid)])
-
-    @T.prim_func
-    def gemm():
-        T.device_entry()
-        _cta = T.cta_id([1])
-        _wave = T.warp_id([1])
-        _lane = T.lane_id([WAVE_SIZE])
-        A = T.alloc_buffer((m, k), dtype, scope="local", layout=a_layout)
-        B = T.alloc_buffer((k, n), dtype, scope="local", layout=b_layout)
-        C = T.alloc_buffer((m, n), "int32", scope="local", layout=d_layout)
-        D = T.alloc_buffer((m, n), "int32", scope="local", layout=d_layout)
-        Tx.warp.gemm(D, A, B, C, transpose_A=False, transpose_B=False, alpha=1.0, beta=0.0)
-
-    return gemm
-
-
-def _build_tiled_numeric(Mt, Nt, Kt, beta, dtype):
-    """Build a source/load/store fixture using the C500 direct lane mapping."""
-    Dl, Al, Bl = _frag(Mt, Nt, Kt)
+    Fragments are indexed through per-register multi-dim ``.local()`` views.
+    Their axes follow physical register order (stride-descending):
+    A = [Mt, Kt, kHi, rM(2), kp], B = [Kt, Nt, kHi, kp], and
+    D/C = [Mt, Nt, rM(2), rN(2)]. The lane owns g = lane>>2 and
+    t = lane&3; within a tile M = mt*16 + rM*8 + g,
+    N = nt*8 + t*2 + rN, K = kt*kinst + kHi*8 + t*2 + kp.
+    """
+    Dl, Al, Bl = _frag(Mt, Nt, Kt, kinst)
     M, N, K = MMA_M * Mt, MMA_N * Nt, MMA_K * Kt
 
     @T.prim_func
@@ -234,35 +253,310 @@ def _build_tiled_numeric(Mt, Nt, Kt, beta, dtype):
     return gemm, M, N, K
 
 
-def _build_transpose(transpose_A, transpose_B, *, dtype="float16"):
-    """Build a single tile for one A/B logical input orientation."""
-    Al = _transpose_frag(A_ATOM, [MMA_M, MMA_K]) if transpose_A else A_ATOM
-    Bl = _transpose_frag(B_ATOM, [MMA_K, MMA_N]) if transpose_B else B_ATOM
+def _build_transpose_numeric(transpose_A, transpose_B, dtype="float16"):
+    """End-to-end single-tile ``T.gemm`` for one A/B input orientation.
+
+    The transposed and K-major A fragments share the physical register order
+    [kHi, rM, kp]; only their logical buffer axes differ.  B's physical order
+    [kHi, kp] is likewise unchanged by orientation.
+    """
+    Al = A_KM_FRAG if transpose_A else A_FRAG
+    Bl = B_NK_FRAG if transpose_B else B_FRAG
     A_shape = (MMA_K, MMA_M) if transpose_A else (MMA_M, MMA_K)
     B_shape = (MMA_N, MMA_K) if transpose_B else (MMA_K, MMA_N)
 
     @T.prim_func
-    def gemm():
+    def gemm(A_ptr: T.handle, B_ptr: T.handle, D_ptr: T.handle):
+        A_g = T.match_buffer(A_ptr, A_shape, dtype)
+        B_g = T.match_buffer(B_ptr, B_shape, dtype)
+        D_g = T.match_buffer(D_ptr, (MMA_M, MMA_N), "float32")
         T.device_entry()
         _cta = T.cta_id([1])
         _wave = T.warp_id([1])
-        _lane = T.lane_id([WAVE_SIZE])
-        A = T.alloc_buffer(A_shape, dtype, scope="local", layout=Al)
-        B = T.alloc_buffer(B_shape, dtype, scope="local", layout=Bl)
-        C = T.alloc_buffer((MMA_M, MMA_N), "float32", scope="local", layout=D_ATOM)
-        D = T.alloc_buffer((MMA_M, MMA_N), "float32", scope="local", layout=D_ATOM)
+        lane = T.lane_id([WAVE_SIZE])
+        group = lane // MMA_M
+        row = lane % MMA_M
+        A_f = T.alloc_buffer(A_shape, dtype, scope="local", layout=Al)
+        B_f = T.alloc_buffer(B_shape, dtype, scope="local", layout=Bl)
+        C_f = T.alloc_buffer((MMA_M, MMA_N), "float32", scope="local", layout=D_FRAG)
+        D_f = T.alloc_buffer((MMA_M, MMA_N), "float32", scope="local", layout=D_FRAG)
+        A_local = A_f.local(4)
+        B_local = B_f.local(4)
+        D_local = D_f.local(4)
+        for p in T.unroll(4):
+            if transpose_A:
+                A_local[p] = A_g[4 * group + p, row]
+            else:
+                A_local[p] = A_g[row, 4 * group + p]
+            if transpose_B:
+                B_local[p] = B_g[row, 4 * group + p]
+            else:
+                B_local[p] = B_g[4 * group + p, row]
         Tx.warp.gemm(
-            D,
-            A,
-            B,
-            C,
+            D_f,
+            A_f,
+            B_f,
+            C_f,
             transpose_A=transpose_A,
             transpose_B=transpose_B,
             alpha=1.0,
             beta=0.0,
         )
+        for p in T.unroll(4):
+            D_g[4 * group + p, row] = D_local[p]
 
     return gemm
+
+
+def _lower(func):
+    with tvm.target.Target("maca"):
+        return tvm.tirx.transform.LowerTIRx()(tvm.IRModule({"main": func}))
+
+
+def test_cuda_gemm_mma_variant_is_registered():
+    # Importing tvm.tirx registers all per-target schedule variants. The new
+    # synchronous CUDA mma path must show up for ("gemm", "cuda"). The registry
+    # keys ops by their full name (``op.name`` == "tirx.tile.gemm").
+    schedules = list_registered_schedules()
+    maca_gemm = schedules.get("tirx.tile.gemm", {}).get("maca", [])
+    assert any(variant.startswith("mma.m16n16k16") for variant in maca_gemm), (
+        "m16n16k16 MACA GEMM variant is not registered; "
+        f"tirx.tile.gemm schedules = {schedules.get('tirx.tile.gemm')}"
+    )
+
+
+@pytest.mark.parametrize("dtype", ["bfloat16", "float16"])
+@pytest.mark.gpu
+def test_cuda_gemm_mma_lowers_to_mma_sync(dtype):
+    """beta=0 clears D then invokes the matching MACA MMA intrinsic."""
+    script = _lower(_build_gemm(alpha=1.0, beta=0.0, dtype=dtype))["main"].script()
+
+    assert _SCRIPT_INTRINSIC[dtype] in script
+    assert "T.float32(0" in script
+    assert "wmma" not in script.lower()
+
+
+@pytest.mark.gpu
+def test_cuda_gemm_mma_accumulates_c_when_beta_one():
+    """beta=1 initializes D from C before invoking the MACA intrinsic."""
+    script = _lower(_build_gemm(alpha=1.0, beta=1.0))["main"].script()
+
+    assert _SCRIPT_INTRINSIC["bfloat16"] in script
+    assert "c_local[" in script
+    assert "T.float32(0" not in script
+
+
+def test_cuda_gemm_mma_rejects_nonunit_alpha():
+    """alpha != 1 is unsupported (ptx mma has no scale); dispatch must fail."""
+    with pytest.raises(RuntimeError, match="dispatch failed"):
+        _lower(_build_gemm(alpha=2.0, beta=0.0))
+
+
+def test_cuda_gemm_mma_rejects_fractional_beta():
+    """beta must be 0 or 1 (mma only accumulates 1*C); other values must fail."""
+    with pytest.raises(RuntimeError, match="dispatch failed"):
+        _lower(_build_gemm(alpha=1.0, beta=0.5))
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
+def test_cuda_gemm_mma_numerical(dtype):
+    """End-to-end D = A @ B on one Wave64 m16n16k16 tile."""
+    np_dtype = pytest.importorskip("ml_dtypes").bfloat16 if dtype == "bfloat16" else np.float16
+    func, M, N, K = _build_tiled_numeric(1, 1, 1, MMA_K, 0.0, dtype)
+    with tvm.target.Target("maca"):
+        mod = tvm.compile(tvm.IRModule({"main": func}), target="maca", tir_pipeline="tirx")
+
+    np.random.seed(0)
+    A_np = np.random.uniform(-1, 1, (M, K)).astype(np.float32)
+    B_np = np.random.uniform(-1, 1, (K, N)).astype(np.float32)
+    golden = A_np @ B_np
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        A_dev = tvm.runtime.tensor(A_np.astype(np_dtype), dev)
+        B_dev = tvm.runtime.tensor(B_np.astype(np_dtype), dev)
+        C_dev = tvm.runtime.tensor(np.zeros((M, N), np.float32), dev)
+        D_dev = tvm.runtime.tensor(np.zeros((M, N), np.float32), dev)
+        mod(A_dev, B_dev, C_dev, D_dev)
+        tvm.testing.assert_allclose(golden, D_dev.numpy(), atol=2e-2, rtol=2e-2)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
+
+
+# (Mt, Nt, Kt, kinst) tilings: single tile, each dim multi-tiled, fully tiled,
+# M = 64, and the m16n8k8 (kHi == 1) variants including a non-16-divisible K.
+_TILED_SHAPES = [
+    (1, 1, 1, 16),
+    (2, 1, 1, 16),
+    (1, 2, 1, 16),
+    (1, 1, 2, 16),
+    (2, 2, 2, 16),
+    (4, 1, 1, 16),
+]
+# (dtype, beta) input modes crossed against every shape: f16/bf16 inputs, with
+# beta = 0 (D = A @ B) and beta = 1 (D = A @ B + C, accumulating C in place).
+_TILED_MODES = [
+    ("float16", 0.0),
+    ("bfloat16", 0.0),
+    ("float16", 1.0),
+    ("bfloat16", 1.0),
+]
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.parametrize("Mt, Nt, Kt, kinst", _TILED_SHAPES)
+@pytest.mark.parametrize("dtype, beta", _TILED_MODES)
+def test_cuda_gemm_mma_numerical_tiled(dtype, beta, Mt, Nt, Kt, kinst):
+    """End-to-end D = A @ B (+ C when beta==1) over an Mt x Nt x Kt tiling.
+
+    The two stacked ``parametrize`` decorators form the cartesian product of
+    every tiling shape with every (dtype, beta) input mode, so each combination
+    is an independent pytest item (pytest-xdist runs them in parallel)."""
+    if dtype == "bfloat16":
+        ml_dtypes = pytest.importorskip("ml_dtypes")
+        np_dtype = ml_dtypes.bfloat16
+    else:
+        np_dtype = np.float16
+
+    func, M, N, K = _build_tiled_numeric(Mt, Nt, Kt, kinst, beta, dtype)
+    with tvm.target.Target("maca"):
+        mod = tvm.compile(tvm.IRModule({"main": func}), target="maca", tir_pipeline="tirx")
+
+    np.random.seed(0)
+    A_np = np.random.uniform(-1, 1, (M, K)).astype(np.float32)
+    B_np = np.random.uniform(-1, 1, (K, N)).astype(np.float32)
+    C_np = np.random.uniform(-1, 1, (M, N)).astype(np.float32)
+    golden = A_np @ B_np + (C_np if beta == 1.0 else 0.0)
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        A_dev = tvm.runtime.tensor(A_np.astype(np_dtype), dev)
+        B_dev = tvm.runtime.tensor(B_np.astype(np_dtype), dev)
+        C_dev = tvm.runtime.tensor(C_np, dev)
+        D_dev = tvm.runtime.tensor(np.zeros((M, N), np.float32), dev)
+        mod(A_dev, B_dev, C_dev, D_dev)
+        tvm.testing.assert_allclose(golden, D_dev.numpy(), atol=2e-2, rtol=2e-2)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
+@pytest.mark.parametrize(
+    "transpose_A, transpose_B",
+    [(False, False), (True, False), (False, True), (True, True)],
+)
+def test_cuda_gemm_mma_numerical_transpose(transpose_A, transpose_B, dtype):
+    """End-to-end D = A @ B for every A/B input orientation, crossed with dtype.
+
+    The orientation and dtype decorators form a cartesian product, so each
+    (transpose_A, transpose_B, dtype) is an independent pytest item."""
+    if dtype == "bfloat16":
+        ml_dtypes = pytest.importorskip("ml_dtypes")
+        np_dtype = ml_dtypes.bfloat16
+    else:
+        np_dtype = np.float16
+
+    func = _build_transpose_numeric(transpose_A, transpose_B, dtype)
+    with tvm.target.Target("maca"):
+        mod = tvm.compile(tvm.IRModule({"main": func}), target="maca", tir_pipeline="tirx")
+
+    np.random.seed(0)
+    A_log = np.random.uniform(-1, 1, (MMA_M, MMA_K)).astype(np.float32)
+    B_log = np.random.uniform(-1, 1, (MMA_K, MMA_N)).astype(np.float32)
+    A_buf = (A_log.T if transpose_A else A_log).astype(np_dtype)
+    B_buf = (B_log.T if transpose_B else B_log).astype(np_dtype)
+    golden = A_log @ B_log
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        A_dev = tvm.runtime.tensor(A_buf, dev)
+        B_dev = tvm.runtime.tensor(B_buf, dev)
+        D_dev = tvm.runtime.tensor(np.zeros((MMA_M, MMA_N), np.float32), dev)
+        mod(A_dev, B_dev, D_dev)
+        tvm.testing.assert_allclose(golden, D_dev.numpy(), atol=2e-2, rtol=2e-2)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
+
+
+@pytest.mark.parametrize("Mt, Nt, Kt, kinst", _TILED_SHAPES[1:])
+@pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
+@pytest.mark.gpu
+def test_cuda_gemm_mma_lowers_tiled(Mt, Nt, Kt, kinst, dtype):
+    """Every supported m16n16k16 tiling lowers to its MACA intrinsic."""
+    script = _lower(_build_tiled(Mt, Nt, Kt, kinst, dtype=dtype))["main"].script()
+    assert _SCRIPT_INTRINSIC[dtype] in script
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.parametrize("Mt, Nt, Kt, kinst", [(1, 1, 1, 16), (2, 2, 2, 16), (4, 1, 1, 16)])
+@pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
+def test_cuda_gemm_mma_codegen_issue_count(Mt, Nt, Kt, kinst, dtype):
+    """Codegen emits the matching C500 builtin, without a WMMA wrapper."""
+    func, _, _, _ = _build_tiled_numeric(Mt, Nt, Kt, kinst, 0.0, dtype)
+    with tvm.target.Target("maca"):
+        src = (
+            tvm.compile(tvm.IRModule({"main": func}), target="maca", tir_pipeline="tirx")
+            .mod.imports[0]
+            .inspect_source()
+        )
+    assert _SOURCE_BUILTIN[dtype] in src
+    assert "wmma" not in src.lower()
+
+
+@pytest.mark.parametrize(
+    "transpose_A, transpose_B",
+    [(False, False), (True, False), (False, True), (True, True)],
+)
+@pytest.mark.gpu
+def test_cuda_gemm_mma_lowers_transpose(transpose_A, transpose_B):
+    """All input orientations use the same m16n16k16 MACA instruction."""
+    script = _lower(_build_transpose(transpose_A, transpose_B))["main"].script()
+    assert _SCRIPT_INTRINSIC["float16"] in script
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.parametrize(
+    "transpose_A, transpose_B",
+    [(False, False), (True, False), (False, True), (True, True)],
+)
+def test_cuda_gemm_mma_codegen_transpose(transpose_A, transpose_B):
+    """Every input orientation reaches the native f16 C500 builtin."""
+    with tvm.target.Target("maca"):
+        src = (
+            tvm.compile(
+                tvm.IRModule({"main": _build_transpose_numeric(transpose_A, transpose_B)}),
+                target="maca",
+                tir_pipeline="tirx",
+            )
+            .mod.imports[0]
+            .inspect_source()
+        )
+    assert _SOURCE_BUILTIN["float16"] in src
+    assert "wmma" not in src.lower()
+
+
+@pytest.mark.parametrize(
+    "a, b, c, d",
+    [
+        ("bfloat16", "float16", "float32", "float32"),
+        ("float32", "float16", "float32", "float32"),
+        ("int8", "uint8", "int32", "int32"),
+        ("uint8", "int8", "int32", "int32"),
+        ("float16", "float16", "int32", "int32"),
+        ("float16", "float16", "float32", "float16"),
+    ],
+)
+def test_cuda_gemm_mma_rejects_unsupported_dtype(a, b, c, d):
+    """Mixed input signedness and incompatible accumulator signatures decline."""
+    with pytest.raises(RuntimeError, match="does not support dtype signature"):
+        _lower(_build_dtypes(a, b, c, d))
 
 
 def _build_aligned_region_slice(transpose_A, transpose_B, *, dtype="float16"):
@@ -273,7 +567,7 @@ def _build_aligned_region_slice(transpose_A, transpose_B, *, dtype="float16"):
     per-operand tile offsets while normalizing either input orientation.
     """
     M, N, K = 32, 48, 48
-    Dl, Al, Bl = _frag(M // MMA_M, N // MMA_N, K // MMA_K)
+    Dl, Al, Bl = _frag(M // MMA_M, N // MMA_N, K // MMA_K, MMA_K)
     Al = _transpose_frag(Al, [M, K]) if transpose_A else Al
     Bl = _transpose_frag(Bl, [K, N]) if transpose_B else Bl
     A_shape = (K, M) if transpose_A else (M, K)
@@ -337,59 +631,52 @@ def _build_aligned_region_slice(transpose_A, transpose_B, *, dtype="float16"):
     return gemm
 
 
-def _build_transpose_numeric(transpose_A, transpose_B, dtype="float16"):
-    """Build a source/load/store single tile for one input orientation."""
-    Al = _transpose_frag(A_ATOM, [MMA_M, MMA_K]) if transpose_A else A_ATOM
-    Bl = _transpose_frag(B_ATOM, [MMA_K, MMA_N]) if transpose_B else B_ATOM
-    A_shape = (MMA_K, MMA_M) if transpose_A else (MMA_M, MMA_K)
-    B_shape = (MMA_N, MMA_K) if transpose_B else (MMA_K, MMA_N)
+def _build_f32_gemm():
+    """Build the SDK's full-F32 m16n16k4 atom."""
+    a_layout = TileLayout(S[(16, 4) : (1 @ laneid, 16 @ laneid)])
+    b_layout = TileLayout(S[(4, 16) : (16 @ laneid, 1 @ laneid)])
+    d_layout = D_FRAG
 
     @T.prim_func
-    def gemm(A_ptr: T.handle, B_ptr: T.handle, D_ptr: T.handle):
-        A_g = T.match_buffer(A_ptr, A_shape, dtype)
-        B_g = T.match_buffer(B_ptr, B_shape, dtype)
-        D_g = T.match_buffer(D_ptr, (MMA_M, MMA_N), "float32")
+    def gemm():
         T.device_entry()
         _cta = T.cta_id([1])
         _wave = T.warp_id([1])
-        lane = T.lane_id([WAVE_SIZE])
-        group = lane // MMA_M
-        row = lane % MMA_M
-        A_f = T.alloc_buffer(A_shape, dtype, scope="local", layout=Al)
-        B_f = T.alloc_buffer(B_shape, dtype, scope="local", layout=Bl)
-        C_f = T.alloc_buffer((MMA_M, MMA_N), "float32", scope="local", layout=D_ATOM)
-        D_f = T.alloc_buffer((MMA_M, MMA_N), "float32", scope="local", layout=D_ATOM)
-        A_local = A_f.local(4)
-        B_local = B_f.local(4)
-        D_local = D_f.local(4)
-        for p in T.unroll(4):
-            if transpose_A:
-                A_local[p] = A_g[4 * group + p, row]
-            else:
-                A_local[p] = A_g[row, 4 * group + p]
-            if transpose_B:
-                B_local[p] = B_g[row, 4 * group + p]
-            else:
-                B_local[p] = B_g[4 * group + p, row]
-        Tx.warp.gemm(
-            D_f,
-            A_f,
-            B_f,
-            C_f,
-            transpose_A=transpose_A,
-            transpose_B=transpose_B,
-            alpha=1.0,
-            beta=0.0,
-        )
-        for p in T.unroll(4):
-            D_g[4 * group + p, row] = D_local[p]
+        _lane = T.lane_id([WAVE_SIZE])
+        A = T.alloc_buffer((16, 4), "float32", scope="local", layout=a_layout)
+        B = T.alloc_buffer((4, 16), "float32", scope="local", layout=b_layout)
+        C = T.alloc_buffer((16, 16), "float32", scope="local", layout=d_layout)
+        D = T.alloc_buffer((16, 16), "float32", scope="local", layout=d_layout)
+        Tx.warp.gemm(D, A, B, C, transpose_A=False, transpose_B=False, alpha=1.0, beta=0.0)
 
     return gemm
 
 
-def _lower(func):
-    with tvm.target.Target("maca"):
-        return tvm.tirx.transform.LowerTIRx()(tvm.IRModule({"main": func}))
+def _build_packed_gemm(dtype, atom):
+    """Build a minimal packed C500 atom for lowering coverage."""
+    m, n, k = atom
+    if dtype in ("int4", "uint4"):
+        a_layout = TileLayout(S[(8, 8, 4) : (1 @ laneid, 8 @ laneid, 1)])
+        b_layout = TileLayout(S[(8, 4, 8) : (8 @ laneid, 1, 1 @ laneid)])
+        d_layout = TileLayout(S[(8, 8) : (8 @ laneid, 1 @ laneid)])
+    else:
+        a_layout = TileLayout(S[(8, 8, 16) : (1 @ laneid, 8 @ laneid, 1)])
+        b_layout = TileLayout(S[(8, 16, 8) : (8 @ laneid, 1, 1 @ laneid)])
+        d_layout = TileLayout(S[(8, 8) : (8 @ laneid, 1 @ laneid)])
+
+    @T.prim_func
+    def gemm():
+        T.device_entry()
+        _cta = T.cta_id([1])
+        _wave = T.warp_id([1])
+        _lane = T.lane_id([WAVE_SIZE])
+        A = T.alloc_buffer((m, k), dtype, scope="local", layout=a_layout)
+        B = T.alloc_buffer((k, n), dtype, scope="local", layout=b_layout)
+        C = T.alloc_buffer((m, n), "int32", scope="local", layout=d_layout)
+        D = T.alloc_buffer((m, n), "int32", scope="local", layout=d_layout)
+        Tx.warp.gemm(D, A, B, C, transpose_A=False, transpose_B=False, alpha=1.0, beta=0.0)
+
+    return gemm
 
 
 def _build_family_numeric(family, tiles, beta, transpose, region=False, repeat=False):
@@ -407,12 +694,12 @@ def _build_family_numeric(family, tiles, beta, transpose, region=False, repeat=F
     elif ak == 4:
         Al = TileLayout(S[(pm, 16, pk, 4) : (pk, 1 @ laneid, 1, 16 @ laneid)])
         Bl = TileLayout(S[(pk, 4, pn, 16) : (pn, 16 @ laneid, 1, 1 @ laneid)])
-        Dl, _, _ = _frag(pm, pn, pk)
+        Dl, _, _ = _frag(pm, pn, pk, MMA_K)
         if acc == "float64":
             Dl = TileLayout(S[(pm, 4, 4, pn, 16) : (pn * 4, 1, 16 @ laneid, 4, 1 @ laneid)])
         slots = 1
     else:
-        Dl, Al, Bl = _frag(pm, pn, pk)
+        Dl, Al, Bl = _frag(pm, pn, pk, MMA_K)
         slots = 4
     ta, tb = transpose
     Al = _transpose_frag(Al, [M, K]) if ta else Al
@@ -602,7 +889,7 @@ def test_maca_gemm_mma_family_numerical(family, beta, tiles, transpose, region, 
             a[m0, k0:] = 1
             b[k0:, n0] = 1
     else:
-        np_dtype = _numpy_dtype(dtype) if dtype == "bfloat16" else dtype
+        np_dtype = pytest.importorskip("ml_dtypes").bfloat16 if dtype == "bfloat16" else dtype
         a = rng.uniform(-0.5, 0.5, (M, K)).astype(np_dtype)
         b = rng.uniform(-0.5, 0.5, (K, N)).astype(np_dtype)
         c = rng.uniform(-0.5, 0.5, (M, N)).astype(acc)
@@ -636,7 +923,8 @@ def test_maca_gemm_mma_family_numerical(family, beta, tiles, transpose, region, 
     b_dev = tvm.runtime.tensor(np.ascontiguousarray(b.T if transpose[1] else b), dev)
     c_dev = tvm.runtime.tensor(c, dev)
     d_dev = tvm.runtime.tensor(np.zeros((M, N), dtype=acc), dev)
-    module = _compile(func)
+    with tvm.target.Target("maca"):
+        module = tvm.compile(tvm.IRModule({"main": func}), target="maca", tir_pipeline="tirx")
     source = module.mod.imports[0].inspect_source()
     helper = {
         "f16_f32": "mma_m16n16k16_f16_f32",
@@ -662,48 +950,6 @@ def test_maca_gemm_mma_family_numerical(family, beta, tiles, transpose, region, 
         np.testing.assert_allclose(d_dev.numpy(), reference, rtol=1e-12, atol=1e-14, equal_nan=True)
     else:
         np.testing.assert_allclose(d_dev.numpy(), reference, rtol=1e-5, atol=1e-6, equal_nan=True)
-
-
-def _numpy_dtype(dtype):
-    if dtype == "bfloat16":
-        return pytest.importorskip("ml_dtypes").bfloat16
-    return np.float16
-
-
-def _compile(func):
-    target = tvm.target.Target("maca")
-    with target:
-        return tvm.compile(tvm.IRModule({"main": func}), target=target, tir_pipeline="tirx")
-
-
-def test_cuda_gemm_mma_variant_is_registered():
-    schedules = list_registered_schedules()
-    maca_gemm = schedules.get("tirx.tile.gemm", {}).get("maca", [])
-    assert any(variant.startswith("mma.m16n16k16") for variant in maca_gemm), (
-        "m16n16k16 MACA GEMM variant is not registered; "
-        f"tirx.tile.gemm schedules = {schedules.get('tirx.tile.gemm')}"
-    )
-
-
-@pytest.mark.parametrize("dtype", ["bfloat16", "float16"])
-@pytest.mark.gpu
-def test_cuda_gemm_mma_lowers_to_mma_sync(dtype):
-    """beta=0 clears D then invokes the matching MACA MMA intrinsic."""
-    script = _lower(_build_gemm(alpha=1.0, beta=0.0, dtype=dtype))["main"].script()
-
-    assert _SCRIPT_INTRINSIC[dtype] in script
-    assert "T.float32(0" in script
-    assert "wmma" not in script.lower()
-
-
-@pytest.mark.gpu
-def test_cuda_gemm_mma_accumulates_c_when_beta_one():
-    """beta=1 initializes D from C before invoking the MACA intrinsic."""
-    script = _lower(_build_gemm(alpha=1.0, beta=1.0))["main"].script()
-
-    assert _SCRIPT_INTRINSIC["bfloat16"] in script
-    assert "c_local[" in script
-    assert "T.float32(0" not in script
 
 
 @pytest.mark.parametrize(
@@ -742,149 +988,6 @@ def test_maca_gemm_mma_lowers_packed_atoms(dtype, atom, intrinsic):
     assert intrinsic in script
 
 
-def test_cuda_gemm_mma_rejects_nonunit_alpha():
-    with pytest.raises(RuntimeError, match="dispatch failed"):
-        _lower(_build_gemm(alpha=2.0, beta=0.0))
-
-
-def test_cuda_gemm_mma_rejects_fractional_beta():
-    with pytest.raises(RuntimeError, match="dispatch failed"):
-        _lower(_build_gemm(alpha=1.0, beta=0.5))
-
-
-@pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
-def test_cuda_gemm_mma_numerical(dtype):
-    """End-to-end D = A @ B on one Wave64 m16n16k16 tile."""
-    np_dtype = _numpy_dtype(dtype)
-    func, M, N, K = _build_tiled_numeric(1, 1, 1, 0.0, dtype)
-    mod = _compile(func)
-
-    np.random.seed(0)
-    A_np = np.random.uniform(-1, 1, (M, K)).astype(np.float32)
-    B_np = np.random.uniform(-1, 1, (K, N)).astype(np.float32)
-    golden = A_np @ B_np
-
-    def run_and_check():
-        dev = tvm.maca(0)
-        A_dev = tvm.runtime.tensor(A_np.astype(np_dtype), dev)
-        B_dev = tvm.runtime.tensor(B_np.astype(np_dtype), dev)
-        C_dev = tvm.runtime.tensor(np.zeros((M, N), np.float32), dev)
-        D_dev = tvm.runtime.tensor(np.zeros((M, N), np.float32), dev)
-        mod(A_dev, B_dev, C_dev, D_dev)
-        tvm.testing.assert_allclose(golden, D_dev.numpy(), atol=2e-2, rtol=2e-2)
-
-    tvm.testing.run_with_gpu_lock(run_and_check)
-
-
-_TILED_SHAPES = [
-    (1, 1, 1),
-    (2, 1, 1),
-    (1, 2, 1),
-    (1, 1, 2),
-    (2, 2, 2),
-    (4, 1, 1),
-]
-_TILED_MODES = [
-    ("float16", 0.0),
-    ("bfloat16", 0.0),
-    ("float16", 1.0),
-    ("bfloat16", 1.0),
-]
-
-
-@pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.parametrize("Mt, Nt, Kt", _TILED_SHAPES)
-@pytest.mark.parametrize("dtype, beta", _TILED_MODES)
-def test_cuda_gemm_mma_numerical_tiled(dtype, beta, Mt, Nt, Kt):
-    """End-to-end D = A @ B (+ C when beta is one) for tiled fragments."""
-    np_dtype = _numpy_dtype(dtype)
-    func, M, N, K = _build_tiled_numeric(Mt, Nt, Kt, beta, dtype)
-    mod = _compile(func)
-
-    np.random.seed(0)
-    A_np = np.random.uniform(-1, 1, (M, K)).astype(np.float32)
-    B_np = np.random.uniform(-1, 1, (K, N)).astype(np.float32)
-    C_np = np.random.uniform(-1, 1, (M, N)).astype(np.float32)
-    golden = A_np @ B_np + (C_np if beta == 1.0 else 0.0)
-
-    def run_and_check():
-        dev = tvm.maca(0)
-        A_dev = tvm.runtime.tensor(A_np.astype(np_dtype), dev)
-        B_dev = tvm.runtime.tensor(B_np.astype(np_dtype), dev)
-        C_dev = tvm.runtime.tensor(C_np, dev)
-        D_dev = tvm.runtime.tensor(np.zeros((M, N), np.float32), dev)
-        mod(A_dev, B_dev, C_dev, D_dev)
-        tvm.testing.assert_allclose(golden, D_dev.numpy(), atol=2e-2, rtol=2e-2)
-
-    tvm.testing.run_with_gpu_lock(run_and_check)
-
-
-@pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
-@pytest.mark.parametrize(
-    "transpose_A, transpose_B",
-    [(False, False), (True, False), (False, True), (True, True)],
-)
-def test_cuda_gemm_mma_numerical_transpose(transpose_A, transpose_B, dtype):
-    """End-to-end D = A @ B for every A/B logical orientation."""
-    np_dtype = _numpy_dtype(dtype)
-    func = _build_transpose_numeric(transpose_A, transpose_B, dtype)
-    mod = _compile(func)
-
-    np.random.seed(0)
-    A_log = np.random.uniform(-1, 1, (MMA_M, MMA_K)).astype(np.float32)
-    B_log = np.random.uniform(-1, 1, (MMA_K, MMA_N)).astype(np.float32)
-    A_buf = (A_log.T if transpose_A else A_log).astype(np_dtype)
-    B_buf = (B_log.T if transpose_B else B_log).astype(np_dtype)
-    golden = A_log @ B_log
-
-    def run_and_check():
-        dev = tvm.maca(0)
-        A_dev = tvm.runtime.tensor(A_buf, dev)
-        B_dev = tvm.runtime.tensor(B_buf, dev)
-        D_dev = tvm.runtime.tensor(np.zeros((MMA_M, MMA_N), np.float32), dev)
-        mod(A_dev, B_dev, D_dev)
-        tvm.testing.assert_allclose(golden, D_dev.numpy(), atol=2e-2, rtol=2e-2)
-
-    tvm.testing.run_with_gpu_lock(run_and_check)
-
-
-@pytest.mark.parametrize("Mt, Nt, Kt", _TILED_SHAPES[1:])
-@pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
-@pytest.mark.gpu
-def test_cuda_gemm_mma_lowers_tiled(Mt, Nt, Kt, dtype):
-    """Every supported m16n16k16 tiling lowers to its MACA intrinsic."""
-    script = _lower(_build_tiled(Mt, Nt, Kt, dtype=dtype))["main"].script()
-    assert _SCRIPT_INTRINSIC[dtype] in script
-
-
-@pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.parametrize("Mt, Nt, Kt", [(1, 1, 1), (2, 2, 2), (4, 1, 1)])
-@pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
-def test_cuda_gemm_mma_codegen_issue_count(Mt, Nt, Kt, dtype):
-    """Codegen emits the matching C500 builtin, without a WMMA wrapper."""
-    func, _, _, _ = _build_tiled_numeric(Mt, Nt, Kt, 0.0, dtype)
-    src = _compile(func).mod.imports[0].inspect_source()
-    assert _SOURCE_BUILTIN[dtype] in src
-    assert "wmma" not in src.lower()
-
-
-@pytest.mark.parametrize(
-    "transpose_A, transpose_B",
-    [(False, False), (True, False), (False, True), (True, True)],
-)
-@pytest.mark.gpu
-def test_cuda_gemm_mma_lowers_transpose(transpose_A, transpose_B):
-    """All input orientations use the same m16n16k16 MACA instruction."""
-    script = _lower(_build_transpose(transpose_A, transpose_B))["main"].script()
-    assert _SCRIPT_INTRINSIC["float16"] in script
-
-
 @pytest.mark.parametrize(
     "transpose_A, transpose_B",
     [(False, False), (True, False), (False, True), (True, True)],
@@ -896,41 +999,9 @@ def test_cuda_gemm_mma_lowers_aligned_nonzero_region(transpose_A, transpose_B):
     assert _SCRIPT_INTRINSIC["float16"] in script
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.parametrize(
-    "transpose_A, transpose_B",
-    [(False, False), (True, False), (False, True), (True, True)],
-)
-def test_cuda_gemm_mma_codegen_transpose(transpose_A, transpose_B):
-    """Every input orientation reaches the native f16 C500 builtin."""
-    src = (
-        _compile(_build_transpose_numeric(transpose_A, transpose_B)).mod.imports[0].inspect_source()
-    )
-    assert _SOURCE_BUILTIN["float16"] in src
-    assert "wmma" not in src.lower()
-
-
-@pytest.mark.parametrize(
-    "a, b, c, d",
-    [
-        ("bfloat16", "float16", "float32", "float32"),
-        ("float32", "float16", "float32", "float32"),
-        ("int8", "uint8", "int32", "int32"),
-        ("uint8", "int8", "int32", "int32"),
-        ("float16", "float16", "int32", "int32"),
-        ("float16", "float16", "float32", "float16"),
-    ],
-)
-def test_cuda_gemm_mma_rejects_unsupported_dtype(a, b, c, d):
-    """Mixed input signedness and incompatible accumulator signatures decline."""
-    with pytest.raises(RuntimeError, match="does not support dtype signature"):
-        _lower(_build_dtypes(a, b, c, d))
-
-
 def _build_contract_case(case):
     """Vary one register-fragment contract while keeping the signature valid."""
-    dl, al, _ = _frag(3, 1, 1)
+    dl, al, _ = _frag(3, 1, 1, MMA_K)
     a_layout = dl if case == "layout" else al
     a_scope = "shared" if case == "scope" else "local"
     start = -16 if case == "negative" else 1 if case == "alignment" else 0
@@ -945,13 +1016,13 @@ def _build_contract_case(case):
         _lane = T.lane_id([WAVE_SIZE])
         D = T.alloc_buffer((48, 16), "float16", scope="local", layout=dl)
         A_storage = T.alloc_buffer((48, 16), "float16", scope=a_scope, layout=a_layout)
-        B_storage = T.alloc_buffer((16, 16), "float16", scope="local", layout=B_ATOM)
+        B_storage = T.alloc_buffer((16, 16), "float16", scope="local", layout=B_FRAG)
         if case == "alias_a":
             A = T.decl_buffer((48, 16), "float16", data=D.data, scope="local", layout=al)
         else:
             A = A_storage
         if case == "alias_b":
-            B = T.decl_buffer((16, 16), "float16", data=D.data, scope="local", layout=B_ATOM)
+            B = T.decl_buffer((16, 16), "float16", data=D.data, scope="local", layout=B_FRAG)
         else:
             B = B_storage
         Tx.warp.gemm(
