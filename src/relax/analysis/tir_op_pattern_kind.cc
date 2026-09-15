@@ -23,6 +23,7 @@
 #include <tvm/relax/analysis.h>
 #include <tvm/relax/op_attr_types.h>
 #include <tvm/tirx/analysis.h>
+#include <tvm/tirx/expr.h>
 #include <tvm/tirx/expr_functor.h>
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/op.h>
@@ -341,7 +342,7 @@ class PatternKindAnalyzer : public StmtExprVisitor {
     if (store == nullptr) {
       return false;
     }
-    return RemoveCast(store->value).as<BufferLoadNode>() != nullptr;
+    return RemoveCast(store->value).as<tirx::BufferLoadNode>() != nullptr;
   }
 
  private:
@@ -430,7 +431,7 @@ bool HasReshapePattern(const PrimFunc& func) {
       if (buffer_store == nullptr) {
         return;
       }
-      const auto* buffer_load = buffer_store->value.as<BufferLoadNode>();
+      const auto* buffer_load = buffer_store->value.as<tirx::BufferLoadNode>();
       if (buffer_load == nullptr) {
         return;
       }
