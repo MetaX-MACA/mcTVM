@@ -61,6 +61,8 @@ class mcDNNJSONSerializer : public JSONSerializer {
       return HandleConv2D(call_node, fn, composite_name);
     } else if (composite_name.find("mcdnn.attention") != std::string::npos) {
       return HandleAttention(call_node, fn, composite_name);
+    } else if (composite_name.find("mcdnn.softmax") != std::string::npos) {
+      return HandleSoftmax(call_node, fn, composite_name);
     } else {
       TVM_FFI_THROW(InternalError) << "Unsupported composite function: " << composite_name;
     }
@@ -123,6 +125,21 @@ class mcDNNJSONSerializer : public JSONSerializer {
     node->SetAttr("head_size", static_cast<int64_t>(head_size));
     node->SetAttr("head_size_v", static_cast<int64_t>(head_size_v));
     node->SetAttr("layout", ffi::String(layout));
+    return AddNode(node, ffi::GetRef<Expr>(call_node));
+  }
+
+  NodeEntries HandleSoftmax(const CallNode* call_node, const Function& fn,
+                            const std::string& composite_name) {
+    NodeEntries inputs;
+    for (const auto& arg : call_node->args) {
+      auto res = VisitExpr(arg);
+      inputs.insert(inputs.end(), res.begin(), res.end());
+    }
+    TVM_FFI_ICHECK_EQ(inputs.size(), 1);
+    auto node = std::make_shared<JSONGraphNode>(composite_name, "kernel", inputs, 1);
+    const CallNode* root_call = backend::GetOpInFunction(fn, "relax.nn.softmax");
+    node->SetAttr("axis", static_cast<int64_t>(root_call->attrs.as<SoftmaxAttrs>()->axis));
+    SetCallNodeAttribute(node, root_call);
     return AddNode(node, ffi::GetRef<Expr>(call_node));
   }
 

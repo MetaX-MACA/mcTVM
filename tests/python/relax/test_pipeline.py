@@ -167,6 +167,30 @@ class PowerModule:
         return y
 
 
+@tvm.script.ir_module
+class MatmulModule:
+    @R.function
+    def main(
+        x: R.Tensor((2, 4), dtype="float32"), w: R.Tensor((4, 3), dtype="float32")
+    ) -> R.Tensor((2, 3), dtype="float32"):
+        with R.dataflow():
+            y: R.Tensor((2, 3), dtype="float32") = R.matmul(x, w)
+            R.output(y)
+        return y
+
+
+def test_maca_pipeline_partitions_mcblas_only_when_requested():
+    with_mcblas = tvm.target.Target({"kind": "maca", "libs": ["mcblas"]})
+    with_mcblas_mod = relax.pipeline.get_default_pipeline(with_mcblas)(MatmulModule)
+    with_mcblas_text = with_mcblas_mod.script()
+    assert "mcblas" in with_mcblas_text
+    assert "call_packed" in with_mcblas_text
+
+    without_mcblas = tvm.target.Target("maca")
+    without_mcblas_mod = relax.pipeline.get_default_pipeline(without_mcblas)(MatmulModule)
+    assert '"Codegen": "mcblas"' not in without_mcblas_mod.script()
+
+
 def _has_thread_binding(func: tvm.tirx.PrimFunc) -> bool:
     """Whether the PrimFunc body contains a GPU thread-binding loop."""
     found = False

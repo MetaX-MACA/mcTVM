@@ -261,6 +261,8 @@ def register_pipeline(name: str):
 
 def library_dispatch_passes(target: tvm.target.Target):
     """Get the default library dispatch passes for the given target."""
+    if target.kind.name == "maca":
+        return backend.maca.library_dispatch_passes(target)
     if target.kind.name == "cuda":
         return backend.cuda.library_dispatch_passes(target)
     if target.kind.name == "rocm":
@@ -278,6 +280,8 @@ def library_dispatch_passes(target: tvm.target.Target):
 
 def legalize_passes(target: tvm.target.Target):
     """Get the default legalization passes for the given target."""
+    if target.kind.name == "maca":
+        return backend.maca.legalize_passes(target)
     if target.kind.name == "cuda":
         return backend.cuda.legalize_passes(target)
     if target.kind.name == "rocm":
@@ -295,6 +299,8 @@ def legalize_passes(target: tvm.target.Target):
 
 def dataflow_lower_passes(target: tvm.target.Target):
     """Get the default legalization passes for the given target."""
+    if target.kind.name == "maca":
+        return backend.maca.dataflow_lower_passes(target)
     if target.kind.name == "cuda":
         return backend.cuda.dataflow_lower_passes(target)
     if target.kind.name == "rocm":
@@ -312,6 +318,8 @@ def dataflow_lower_passes(target: tvm.target.Target):
 
 def finalize_passes(target: tvm.target.Target):
     """Get the default legalization passes for the given target."""
+    if target.kind.name == "maca":
+        return backend.maca.finalize_passes(target)
     if target.kind.name == "cuda":
         return backend.cuda.finalize_passes(target)
     if target.kind.name == "rocm":
@@ -329,6 +337,8 @@ def finalize_passes(target: tvm.target.Target):
 
 def get_default_pipeline(target: tvm.target.Target):
     """Get the default Relax compilation pipeline for the given target."""
+    if target.kind.name == "maca":
+        return backend.maca.get_default_pipeline(target)
     if target.kind.name == "cuda":
         return backend.cuda.get_default_pipeline(target)
     if target.kind.name == "rocm":
