@@ -31,106 +31,220 @@ from tvm.tirx.operator.tile_primitive.dispatcher import fail, predicate, registe
 
 WAVE_SIZE = 64
 
+# In every ``S[shape : mapping]`` below, entries at the same position describe
+# one decomposed logical matrix axis.  ``x @ laneid`` shards that axis across
+# Wave64 lanes with lane stride ``x``; a plain integer is the stride in the
+# flattened lane-local fragment.  The decomposed axes are listed outermost to
+# innermost, so their products reconstruct the original two matrix dimensions.
 
+
+# Native C500 ``mma_16x16x16*`` fragments use all 64 Wave lanes as a
+# 16-way row split and a 4-way K split.  The two trailing extent-4 axes are
+# the four values passed in each lane's v4 operand; ``1 @ laneid`` and
+# ``16 @ laneid`` encode the row and K-group lane contributions respectively.
+# Thus lane ``l`` owns A[(l % 16, 4 * (l // 16) + p)], p in [0, 4).
 def _a_layout(rows: int, reduction: int) -> TileLayout:
     return TileLayout(
         S[
-            (rows // 16, 16, reduction // 16, 4, 4) : (
-                reduction // 16 * 4,
-                1 @ laneid,
-                4,
-                16 @ laneid,
-                1,
+            (
+                rows // 16,  # Number of M=16 instruction atoms.
+                16,  # Row within an M=16 atom; selected by lane % 16.
+                reduction // 16,  # Number of K=16 instruction atoms.
+                4,  # Four K groups; selected by lane // 16.
+                4,  # Four consecutive K values held locally by each lane.
+            ) : (
+                reduction // 16 * 4,  # Local stride between adjacent M atoms.
+                1 @ laneid,  # Map lane % 16 to the row-within-atom axis.
+                4,  # Four local values per K atom.
+                16 @ laneid,  # Map lane // 16 to the K-group axis.
+                1,  # Store the lane's four K values consecutively.
             )
         ]
     )
 
 
+# B uses the transposed view of the same native fragment: lane ``l`` owns
+# B[(4 * (l // 16) + p, l % 16)].  Keeping this order in registers is what
+# lets the ``maca_mma_m16n16k16_*`` wrappers pass a v4 B fragment directly to
+# ``__builtin_mxc_mma_16x16x16f16/bf16/i8``.
 def _b_layout(reduction: int, columns: int) -> TileLayout:
     return TileLayout(
         S[
-            (reduction // 16, 4, 4, columns // 16, 16) : (
-                columns // 16 * 4,
-                16 @ laneid,
-                1,
-                4,
-                1 @ laneid,
+            (
+                reduction // 16,  # Number of K=16 instruction atoms.
+                4,  # Four K groups; selected by lane // 16.
+                4,  # Four consecutive K values held locally by each lane.
+                columns // 16,  # Number of N=16 instruction atoms.
+                16,  # Column within an N=16 atom; selected by lane % 16.
+            ) : (
+                columns // 16 * 4,  # Local stride between adjacent K atoms.
+                16 @ laneid,  # Map lane // 16 to the K-group axis.
+                1,  # Store the lane's four K values consecutively.
+                4,  # Four local values per N atom.
+                1 @ laneid,  # Map lane % 16 to the column-within-atom axis.
             )
         ]
     )
 
 
+# C and D have the same per-lane coordinates as B, because the C500 builtin
+# returns four output values per lane at the column positions selected by the
+# lane.  This is the accumulator layout consumed by the native f16/bf16/i8
+# wrappers and by ``__builtin_mxc_mma_16x16x4f32`` (the f16-to-f16 wrapper
+# converts that same f32 result back to f16).
 def _d_layout(rows: int, columns: int) -> TileLayout:
     return TileLayout(
         S[
-            (rows // 16, 4, 4, columns // 16, 16) : (
-                columns // 16 * 4,
-                16 @ laneid,
-                1,
-                4,
-                1 @ laneid,
+            (
+                rows // 16,  # Number of M=16 output atoms.
+                4,  # Four row groups; selected by lane // 16.
+                4,  # Four result rows held locally by each lane.
+                columns // 16,  # Number of N=16 output atoms.
+                16,  # Column within an N=16 atom; selected by lane % 16.
+            ) : (
+                columns // 16 * 4,  # Local stride between adjacent M atoms.
+                16 @ laneid,  # Map lane // 16 to the output row-group axis.
+                1,  # Store the lane's four accumulator values consecutively.
+                4,  # Four local accumulator values per N atom.
+                1 @ laneid,  # Map lane % 16 to the output-column axis.
             )
         ]
     )
 
 
+# The f32 ``mma_16x16x4f32``/``__builtin_mxc_mma_16x16x4f32`` API has one A
+# value and one B value per lane, rather than four.  Lanes still cover a 16x16
+# tile (row/column are lane % 16), while the extent-4 K axis is selected by
+# lane // 16.  The leading ``reduction // 4`` axis then groups those K=4 atoms
+# for a larger tile.
 def _f32_a_layout(rows: int, reduction: int) -> TileLayout:
     return TileLayout(
-        S[(rows // 16, 16, reduction // 4, 4) : (reduction // 4, 1 @ laneid, 1, 16 @ laneid)]
+        S[
+            (
+                rows // 16,  # Number of M=16 instruction atoms.
+                16,  # Row within an M=16 atom; selected by lane % 16.
+                reduction // 4,  # Number of K=4 instruction atoms.
+                4,  # K coordinate within the atom; selected by lane // 16.
+            ) : (
+                reduction // 4,  # Local stride between adjacent M atoms.
+                1 @ laneid,  # Map lane % 16 to the row-within-atom axis.
+                1,  # One lane-local A value per K atom.
+                16 @ laneid,  # Map lane // 16 to the K-within-atom axis.
+            )
+        ]
     )
 
 
+# This is the matching K-by-N register view for ``mma_16x16x4f32`` and
+# ``mma_16x16x4f64``: lane ``l`` supplies B[(l // 16, l % 16)].
 def _f32_b_layout(reduction: int, columns: int) -> TileLayout:
     return TileLayout(
-        S[(reduction // 4, 4, columns // 16, 16) : (columns // 16, 16 @ laneid, 1, 1 @ laneid)]
+        S[
+            (
+                reduction // 4,  # Number of K=4 instruction atoms.
+                4,  # K coordinate within the atom; selected by lane // 16.
+                columns // 16,  # Number of N=16 instruction atoms.
+                16,  # Column within an N=16 atom; selected by lane % 16.
+            ) : (
+                columns // 16,  # Local stride between adjacent K atoms.
+                16 @ laneid,  # Map lane // 16 to the K-within-atom axis.
+                1,  # One lane-local B value per N atom.
+                1 @ laneid,  # Map lane % 16 to the column-within-atom axis.
+            )
+        ]
     )
 
 
+# FP64 uses the same 16x16x4 input contract, but the MACA f64 builtin returns
+# four doubles at rows l // 16 + 4*p.  The distinct D layout preserves those
+# row-spaced results instead of reusing the f32 accumulator mapping.
 def _f64_d_layout(rows: int, columns: int) -> TileLayout:
     return TileLayout(
         S[
-            (rows // 16, 4, 4, columns // 16, 16) : (
-                columns // 16 * 4,
-                1,
-                16 @ laneid,
-                4,
-                1 @ laneid,
+            (
+                rows // 16,  # Number of M=16 output atoms.
+                4,  # Four lane-local row groups, indexed by result slot p.
+                4,  # Base row within each group; selected by lane // 16.
+                columns // 16,  # Number of N=16 output atoms.
+                16,  # Column within an N=16 atom; selected by lane % 16.
+            ) : (
+                columns // 16 * 4,  # Local stride between adjacent M atoms.
+                1,  # Store result slots p consecutively for rows group + 4*p.
+                16 @ laneid,  # Map lane // 16 to the base-row axis.
+                4,  # Four local accumulator values per N atom.
+                1 @ laneid,  # Map lane % 16 to the output-column axis.
             )
         ]
     )
 
 
+# Packed int4 and int1 inputs are staged as uint16 backing words.  ``slots``
+# is 4 for nibble MMA (m8n8k32) and 16 for one-bit BMMA (m8n8k128); each lane
+# owns one 8-row fragment and ``slots`` consecutive packed K values.  The
+# software MACA helpers gather these lane chunks with bpermute before doing
+# nibble products (int4/u4) or the AND/popcount sequence (int1).
 def _packed_a_layout(rows: int, reduction: int, slots: int) -> TileLayout:
     return TileLayout(
         S[
-            (rows // 8, 8, reduction // (8 * slots), 8, slots) : (
-                reduction // (8 * slots) * slots,
-                1 @ laneid,
-                slots,
-                8 @ laneid,
-                1,
+            (
+                rows // 8,  # Number of M=8 software MMA atoms.
+                8,  # Row within an M=8 atom; selected by lane % 8.
+                reduction // (8 * slots),  # Number of complete packed K atoms.
+                8,  # Eight packed K groups; selected by lane // 8.
+                slots,  # Logical values packed into this lane's uint16 chunk.
+            ) : (
+                reduction // (8 * slots) * slots,  # Local stride between M atoms.
+                1 @ laneid,  # Map lane % 8 to the row-within-atom axis.
+                slots,  # Number of logical values held per packed K atom.
+                8 @ laneid,  # Map lane // 8 to the packed K-group axis.
+                1,  # Consecutive bit/nibble positions inside the uint16 chunk.
             )
         ]
     )
 
 
+# B is the packed counterpart of A for the m8n8 kernels: lane ``l`` owns the
+# K chunk for column l % 8, with ``slots`` packed values per local fragment.
+# There is no separate native packed-fragment API in this implementation; the
+# layout matches the software bpermute/popcount helpers in intrinsics/mma.py.
 def _packed_b_layout(reduction: int, columns: int, slots: int) -> TileLayout:
     return TileLayout(
         S[
-            (reduction // (8 * slots), 8, slots, columns // 8, 8) : (
-                columns // 8 * slots,
-                8 @ laneid,
-                1,
-                slots,
-                1 @ laneid,
+            (
+                reduction // (8 * slots),  # Number of complete packed K atoms.
+                8,  # Eight packed K groups; selected by lane // 8.
+                slots,  # Logical values packed into this lane's uint16 chunk.
+                columns // 8,  # Number of N=8 software MMA atoms.
+                8,  # Column within an N=8 atom; selected by lane % 8.
+            ) : (
+                columns // 8 * slots,  # Local stride between packed K atoms.
+                8 @ laneid,  # Map lane // 8 to the packed K-group axis.
+                1,  # Consecutive bit/nibble positions inside the uint16 chunk.
+                slots,  # Number of logical values held per N atom.
+                1 @ laneid,  # Map lane % 8 to the column-within-atom axis.
             )
         ]
     )
 
 
+# Packed m8n8 accumulators have one scalar result per lane.  The two extent-8
+# axes split rows and columns, and the lane terms select (l // 8, l % 8), as
+# required by the software int4 and ``bmma_m8n8k128_b1_i32`` implementations.
 def _packed_d_layout(rows: int, columns: int) -> TileLayout:
     return TileLayout(
-        S[(rows // 8, 8, columns // 8, 8) : (columns // 8, 8 @ laneid, 1, 1 @ laneid)]
+        S[
+            (
+                rows // 8,  # Number of M=8 output atoms.
+                8,  # Row within an M=8 atom; selected by lane // 8.
+                columns // 8,  # Number of N=8 output atoms.
+                8,  # Column within an N=8 atom; selected by lane % 8.
+            ) : (
+                columns // 8,  # Local stride between adjacent M atoms.
+                8 @ laneid,  # Map lane // 8 to the output-row axis.
+                1,  # One lane-local accumulator per N atom.
+                1 @ laneid,  # Map lane % 8 to the output-column axis.
+            )
+        ]
     )
 
 
@@ -138,11 +252,25 @@ def _packed_d_layout(rows: int, columns: int) -> TileLayout:
 class MmaSignature:
     """A native or software atom and its logical per-lane storage contract."""
 
+    # Logical operand/accumulator dtypes in the order A, B, C, D.  This is the
+    # TIR-side contract used to select the matching MACA intrinsic overload.
     dtypes: tuple[str, str, str, str]
+    # ISA atom dimensions (M, N, K), e.g. 16x16x16 or the packed 8x8x32
+    # software-compatible path.  The dispatcher rejects a signature whose
+    # dimensions do not match the registered tile-primitive variant.
     atom: tuple[int, int, int]
+    # Number of scalar values each lane contributes for A, B, and D/C.  Native
+    # 16x16 MMA returns four accumulator values per lane; packed m8n8 paths
+    # carry packed input slots but only one output value.
     slots: tuple[int, int, int]
+    # Layout constructors for A, B, and D/C.  They encode the register
+    # fragment contract expected by the corresponding MACA builtin/helper.
     layouts: tuple[Callable, Callable, Callable]
+    # TIR script wrapper for the MACA operation emitted once per K atom; this
+    # resolves to a native ISA builtin or the software compatibility helper.
     intrinsic: Callable
+    # Scalar constructor used to initialize D when beta == 0, matching the
+    # accumulator dtype expected by the selected intrinsic.
     zero: Callable
 
 
@@ -342,6 +470,17 @@ def _check_aliases(d_region, a_region, b_region, c_region, analyzer, sctx):
 
 
 def _lower_mma(op_call: TilePrimitiveCall, sctx: DispatchContext, atom) -> PrimFunc:
+    """Validate a register GEMM and lower it to unrolled Wave64 MMA calls.
+
+    ``atom`` is the (M, N, K) shape selected by the public dispatch variant.
+    The function normalizes transposed operands to logical A[M, K] and B[K, N]
+    coordinates, verifies their per-lane layouts against ``MmaSignature``, and
+    flattens each logical atom to the register slots consumed by the matching
+    MACA intrinsic.  The returned PrimFunc initializes each D atom from C (or
+    zero) and accumulates one intrinsic call for every K atom.
+    """
+
+    # The tile call stores arguments as D, A, B, C followed by GEMM controls.
     op_call = TilePrimitiveCall.downcast(op_call)
     valid, reason = _full_wave64(op_call, sctx)
     if not valid:
@@ -353,10 +492,16 @@ def _lower_mma(op_call: TilePrimitiveCall, sctx: DispatchContext, atom) -> PrimF
         b_region.buffer,
         c_region.buffer,
     )
+
+    # Select the descriptor by the complete A/B/C/D dtype contract, then make
+    # sure it belongs to this dispatch variant's ISA atom.
     dtype = tuple(str(buffer.dtype) for buffer in (a_buffer, b_buffer, c_buffer, d_buffer))
     signature = _SIGNATURE_BY_DTYPE.get(dtype)
     if signature is None or signature.atom != atom:
         fail(f"MMA atom {atom} does not support dtype signature {dtype}")
+
+    # MACA MMA implements D=A@B+C directly.  Only alpha=1 and beta={0,1} can
+    # therefore be represented without extra arithmetic around the intrinsic.
     analyzer = Analyzer()
     if _const_scalar(alpha, analyzer) != 1.0:
         fail("MMA requires alpha=1")
@@ -366,15 +511,27 @@ def _lower_mma(op_call: TilePrimitiveCall, sctx: DispatchContext, atom) -> PrimF
     transpose_a, transpose_b = _const_scalar(trans_a, analyzer), _const_scalar(trans_b, analyzer)
     if transpose_a not in (0.0, 1.0) or transpose_b not in (0.0, 1.0):
         fail("MMA requires constant transpose flags")
+
+    # m/n/k are the dimensions of one instruction (or software-compatible)
+    # atom.  _matrix_region checks the caller-visible orientation and returns
+    # the full buffer shape plus (start, extent) for both region axes.
     m, n, k = signature.atom
     a_shape, a_axes = _matrix_region(a_region, analyzer, "A", (k, m) if transpose_a else (m, k))
     b_shape, b_axes = _matrix_region(b_region, analyzer, "B", (n, k) if transpose_b else (k, n))
     c_shape, c_axes = _matrix_region(c_region, analyzer, "C", (m, n))
     d_shape, d_axes = _matrix_region(d_region, analyzer, "D", (m, n))
+
+    # From here onward, shapes and region axes always use canonical GEMM order:
+    # A[M, K], B[K, N], and C/D[M, N].  The expected layouts below are created
+    # in that order and transposed back only when compared with an input buffer.
     if transpose_a:
         a_shape, a_axes = a_shape[::-1], a_axes[::-1]
     if transpose_b:
         b_shape, b_axes = b_shape[::-1], b_axes[::-1]
+
+    # Each descriptor layout maps logical matrix coordinates to a Wave64 lane
+    # and a lane-local register offset.  Canonicalization makes structurally
+    # equivalent layout expressions compare equal.
     expected_a, expected_b = signature.layouts[0](*a_shape), signature.layouts[1](*b_shape)
     if transpose_a:
         expected_a = _transpose_layout(expected_a, a_shape)
@@ -387,6 +544,8 @@ def _lower_mma(op_call: TilePrimitiveCall, sctx: DispatchContext, atom) -> PrimF
         ("D", d_buffer, signature.layouts[2](*d_shape)),
     ):
         _match_layout(name, buffer.layout, expected)
+
+    # Region extents must satisfy A[M,K] @ B[K,N] + C[M,N] -> D[M,N].
     if (
         a_axes[0][1] != d_axes[0][1]
         or b_axes[1][1] != d_axes[1][1]
@@ -395,25 +554,44 @@ def _lower_mma(op_call: TilePrimitiveCall, sctx: DispatchContext, atom) -> PrimF
     ):
         fail("MMA GEMM regions have incompatible dimensions")
     _check_aliases(d_region, a_region, b_region, c_region, analyzer, sctx)
+
+    # A layout's storage span is the number of lane-local scalar slots needed
+    # for the whole buffer.  These spans become the lengths of the flattened
+    # local views used by the emitted PrimFunc.
     a_span, b_span, c_span, d_span = (
         _static_int(buffer.layout.storage().span(), analyzer, "storage span")
         for buffer in (a_buffer, b_buffer, c_buffer, d_buffer)
     )
+
+    # Number of instruction atoms covered by the requested region along M, N,
+    # and K.  Every loop is unrolled so codegen sees explicit intrinsic calls.
     row_tiles, column_tiles, reduction_tiles = (
         d_axes[0][1] // m,
         d_axes[1][1] // n,
         a_axes[1][1] // k,
     )
+
+    # Atoms are lane-locally flattened in matrix order: A[M-tile,K-tile],
+    # B[K-tile,N-tile], and C/D[M-tile,N-tile].  These values are the number
+    # of atoms in the inner dimension of each complete buffer.
     a_stride, b_stride, c_stride, d_stride = (
         a_shape[1] // k,
         b_shape[1] // n,
         c_shape[1] // n,
         d_shape[1] // n,
     )
+
+    # am/ak, bk/bn, cm/cn, and dm/dn are the region origins measured in atoms,
+    # rather than logical matrix elements.  Alignment checks above guarantee
+    # that each division is exact.
     am, ak = a_axes[0][0] // m, a_axes[1][0] // k
     bk, bn = b_axes[0][0] // k, b_axes[1][0] // n
     cm, cn = c_axes[0][0] // m, c_axes[1][0] // n
     dm, dn = d_axes[0][0] // m, d_axes[1][0] // n
+
+    # Slot counts convert a flattened atom number to its first lane-local
+    # scalar.  beta=1 copies C into D; beta=0 constructs an accumulator zero.
+    # All registered m8 atoms are the packed int4/int1 software paths.
     a_slots, b_slots, d_slots = signature.slots
     use_c = beta_value == 1.0
     packed = m == 8
@@ -424,6 +602,8 @@ def _lower_mma(op_call: TilePrimitiveCall, sctx: DispatchContext, atom) -> PrimF
         c_local, d_local = c_buffer.local(c_span), d_buffer.local(d_span)
         for row_tile in T.unroll(row_tiles):
             for column_tile in T.unroll(column_tiles):
+                # Locate this output atom in the flattened D and C fragment
+                # grids, then initialize its per-lane accumulator slots once.
                 d_offset = ((dm + row_tile) * d_stride + dn + column_tile) * d_slots
                 c_offset = ((cm + row_tile) * c_stride + cn + column_tile) * d_slots
                 for element in T.unroll(d_slots):
@@ -432,6 +612,9 @@ def _lower_mma(op_call: TilePrimitiveCall, sctx: DispatchContext, atom) -> PrimF
                     else:
                         d_local[d_offset + element] = signature.zero(0)
                 for reduction_tile in T.unroll(reduction_tiles):
+                    # Locate A[row_tile,reduction_tile] and
+                    # B[reduction_tile,column_tile] in their flattened atom
+                    # grids.  Each call accumulates into the same D atom.
                     a_offset = ((am + row_tile) * a_stride + ak + reduction_tile) * a_slots
                     b_offset = ((bk + reduction_tile) * b_stride + bn + column_tile) * b_slots
                     if packed:
@@ -449,6 +632,8 @@ def _lower_mma(op_call: TilePrimitiveCall, sctx: DispatchContext, atom) -> PrimF
                             T.address_of(d_local[d_offset]),
                         )
                     else:
+                        # Native MACA wrappers take pointers to the first
+                        # lane-local A, B, C, and D register slot for the atom.
                         signature.intrinsic(
                             T.address_of(d_local[d_offset]),
                             T.address_of(a_local[a_offset]),
