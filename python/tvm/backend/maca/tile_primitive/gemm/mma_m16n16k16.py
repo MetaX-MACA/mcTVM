@@ -372,8 +372,6 @@ _SIGNATURE_BY_DTYPE = {signature.dtypes: signature for signature in _SIGNATURES}
 
 
 def _full_wave64(_op_call: TilePrimitiveCall, sctx: DispatchContext) -> tuple[bool, str | None]:
-    if sctx.target.kind.name != "maca" or str(sctx.target.attrs.get("mcpu", "")) != "xcore1000":
-        return False, "MMA requires the C500/xcore1000 target"
     if not sctx.is_warp:
         return False, "MMA requires warp execution scope"
     active_range = sctx.intra.get("laneid")

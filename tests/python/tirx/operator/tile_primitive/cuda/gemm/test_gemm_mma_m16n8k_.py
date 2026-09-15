@@ -1062,11 +1062,5 @@ def test_maca_gemm_mma_accepts_disjoint_c_d_regions():
     assert "T.maca.mma_m16n16k16_f16_f16(" in script
 
 
-def test_maca_gemm_mma_rejects_other_architecture():
-    with tvm.target.Target({"kind": "maca", "mcpu": "xcore1100"}):
-        with pytest.raises(RuntimeError, match="requires the C500/xcore1000 target"):
-            tvm.tirx.transform.LowerTIRx()(tvm.IRModule({"main": _build_gemm()}))
-
-
 if __name__ == "__main__":
     tvm.testing.main()
