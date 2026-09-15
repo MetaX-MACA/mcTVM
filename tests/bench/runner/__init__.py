@@ -1,4 +1,3 @@
-# isort: skip_file
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -15,12 +14,4 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""The Relax MACA backend compilation pipeline and other passes."""
-
-from .pipeline import (
-    dataflow_lower_passes,
-    finalize_passes,
-    get_default_pipeline,
-    legalize_passes,
-    library_dispatch_passes,
-)
+"""Relax benchmark runner."""

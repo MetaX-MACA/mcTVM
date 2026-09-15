@@ -23,6 +23,7 @@ from functools import partial, reduce
 import tvm
 from tvm import relax
 from tvm.relax import PyExprMutator, expr_functor, transform
+from tvm.relax.dpl import is_op, wildcard
 from tvm.relax.transform import PatternCheckContext
 
 from ..pattern_registry import get_patterns_with_prefix, register_patterns
@@ -89,6 +90,29 @@ def _check_stacked_attention(context: PatternCheckContext, layout: str) -> bool:
     return True
 
 
+def _check_softmax(context: PatternCheckContext) -> bool:
+    """Offload only layouts that do not require MCDNN format transforms."""
+    root = context.annotated_expr.get("root")
+    data = context.annotated_expr.get("input")
+    if root is None or data is None or not isinstance(root, relax.Call):
+        return False
+    if data.ty.dtype not in ("float16", "float32") or data.ty.ndim > 4:
+        return False
+    axis = int(root.attrs.axis)
+    if axis < 0:
+        axis += data.ty.ndim
+    if axis < 0 or axis >= data.ty.ndim:
+        return False
+    # MCDNN's channel-mode path inserts an expensive layout conversion when
+    # dimensions follow the reduction axis.
+    trailing = 1
+    for dim in data.ty.shape.values[axis + 1 :]:
+        if not isinstance(dim, int | tvm.tirx.expr.IntImm):
+            return False
+        trailing *= int(dim)
+    return trailing == 1
+
+
 register_patterns(
     [
         (
@@ -122,6 +146,12 @@ register_patterns(
             "mcdnn.attention.SBN3H",
             *make_stacked_attention_pattern(start_op="split", layout="SBN3H"),
             partial(_check_stacked_attention, layout="SBN3H"),
+        ),
+        (
+            "mcdnn.softmax",
+            softmax_pattern := is_op("relax.nn.softmax")(softmax_input := wildcard()),
+            {"input": softmax_input, "root": softmax_pattern},
+            _check_softmax,
         ),
     ]
 )
