@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 """Run an AFM batch-128 inference workload on a MACA device via ``torch.export``.
 
 The default input signature and computation follow the inspected Relay graph
@@ -24,9 +41,9 @@ import time
 
 import numpy as np
 import torch
+from torch.export import export
 
 import tvm
-from torch.export import export
 from tvm import relax
 from tvm.relax.frontend.torch import from_exported_program
 
@@ -97,6 +114,7 @@ class AttentionalFactorizationMachine(torch.nn.Module):
         weighted sequence softmax.  The same rules are expressed here before
         building the seven AFM fields.
         """
+
         def normalize_index(ids: torch.Tensor, table_size: int) -> torch.Tensor:
             # The benchmark inputs are generated in-range.  Keeping this as
             # an identity also matches the Relay graph, whose take indices
@@ -108,12 +126,13 @@ class AttentionalFactorizationMachine(torch.nn.Module):
         weighted_mask = self.weighted_positions < weighted_seq_seq_length.to(torch.float32)
         weighted_mask_float = weighted_mask.unsqueeze(-1).to(torch.float32)
         # Relay uses arithmetic masking, rather than a where/select operation.
-        masked_weight = torch.where(weighted_mask.unsqueeze(-1), weight, torch.full_like(weight, -1e9))
+        masked_weight = torch.where(
+            weighted_mask.unsqueeze(-1), weight, torch.full_like(weight, -1e9)
+        )
         normalized_weight = torch.softmax(masked_weight, dim=1) * weighted_mask_float
         weighted_denominator = weighted_seq_seq_length.to(torch.float32) + 1e-8
         weighted_embedding = torch.sum(
-            self.sequence_embeddings[0](weighted_ids) * normalized_weight,
-            dim=1, keepdim=True
+            self.sequence_embeddings[0](weighted_ids) * normalized_weight, dim=1, keepdim=True
         ) / weighted_denominator.unsqueeze(-1)
 
         sum_ids = normalize_index(sequence_sum, 5)
@@ -131,23 +150,33 @@ class AttentionalFactorizationMachine(torch.nn.Module):
 
         max_ids = normalize_index(sequence_max, 9)
         max_mask = sequence_max != 0
-        max_embedding = torch.max(torch.where(max_mask.unsqueeze(-1), self.sequence_embeddings[3](max_ids), torch.full_like(self.sequence_embeddings[3](max_ids), -1e9)), dim=1, keepdim=True).values
+        max_embedding = torch.max(
+            torch.where(
+                max_mask.unsqueeze(-1),
+                self.sequence_embeddings[3](max_ids),
+                torch.full_like(self.sequence_embeddings[3](max_ids), -1e9),
+            ),
+            dim=1,
+            keepdim=True,
+        ).values
         sparse_embeddings = [
             self.sparse_embeddings[0](normalize_index(sparse_feature_0, 6)),
             self.sparse_embeddings[1](normalize_index(sparse_feature_1, 1)),
             self.sparse_embeddings[2](normalize_index(sparse_feature_2, 2)),
         ]
         embeddings = torch.cat(
-            sparse_embeddings + [weighted_embedding, sum_embedding, mean_embedding, max_embedding],
+            [*sparse_embeddings, weighted_embedding, sum_embedding, mean_embedding, max_embedding],
             dim=1,
         )
         # Construct only the 21 upper-triangular field interactions directly.
         # This mirrors the old Relay graph and avoids materializing a 7x7
         # interaction tensor followed by 21 dynamic take operations.
         pairs = torch.cat(
-            [embeddings[:, left:left + 1, :] * embeddings[:, right:right + 1, :]
-             for left in range(self.num_fields)
-             for right in range(left + 1, self.num_fields)],
+            [
+                embeddings[:, left : left + 1, :] * embeddings[:, right : right + 1, :]
+                for left in range(self.num_fields)
+                for right in range(left + 1, self.num_fields)
+            ],
             dim=1,
         )
         attention = torch.softmax(self.attention(pairs), dim=1)
@@ -163,7 +192,8 @@ class AttentionalFactorizationMachine(torch.nn.Module):
                     self.linear_embeddings[3](weighted_ids) * normalized_weight,
                     dim=1,
                     keepdim=True,
-                ) / weighted_denominator.unsqueeze(-1),
+                )
+                / weighted_denominator.unsqueeze(-1),
                 torch.sum(
                     self.linear_embeddings[4](sum_ids) * sum_mask.unsqueeze(-1),
                     dim=1,
@@ -173,8 +203,17 @@ class AttentionalFactorizationMachine(torch.nn.Module):
                     self.linear_embeddings[5](mean_ids) * mean_mask.unsqueeze(-1),
                     dim=1,
                     keepdim=True,
-                ) / mean_denominator.unsqueeze(-1),
-                torch.max(torch.where(max_mask.unsqueeze(-1), self.linear_embeddings[6](max_ids), torch.full_like(self.linear_embeddings[6](max_ids), -1e9)), dim=1, keepdim=True).values,
+                )
+                / mean_denominator.unsqueeze(-1),
+                torch.max(
+                    torch.where(
+                        max_mask.unsqueeze(-1),
+                        self.linear_embeddings[6](max_ids),
+                        torch.full_like(self.linear_embeddings[6](max_ids), -1e9),
+                    ),
+                    dim=1,
+                    keepdim=True,
+                ).values,
             ],
             dim=1,
         )
@@ -198,9 +237,7 @@ def main(*, benchmark=None, target_config=None) -> None:
     torch.manual_seed(0)
     rng = np.random.default_rng(0)
     model = AttentionalFactorizationMachine().eval()
-    weighted_seq = rng.integers(
-        0, 2, size=(args.batch_size, 3), dtype=np.int32
-    )
+    weighted_seq = rng.integers(0, 2, size=(args.batch_size, 3), dtype=np.int32)
     weight = rng.random((args.batch_size, 3, 1), dtype=np.float32)
     weighted_seq_seq_length = rng.integers(1, 4, size=(args.batch_size, 1), dtype=np.int32)
     sparse_feature_0 = rng.integers(0, 6, size=(args.batch_size, 1), dtype=np.int32)
@@ -230,11 +267,13 @@ def main(*, benchmark=None, target_config=None) -> None:
     device = tvm.maca(0)
     if not device.exist:
         raise RuntimeError("No MACA device is available at maca:0")
-    target = tvm.target.Target({
-        "kind": "maca",
-        "libs": ["mcdnn", "mcblas", "mccub", "mxexpr"],
-        "max_num_threads": 512,
-    })
+    target = tvm.target.Target(
+        {
+            "kind": "maca",
+            "libs": ["mcdnn", "mcblas", "mccub", "mxexpr"],
+            "max_num_threads": 512,
+        }
+    )
     if target_config is not None:
         target = tvm.target.Target(target_config)
     # Apply target-specific library dispatch and generic GPU schedules.

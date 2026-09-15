@@ -19,18 +19,19 @@
 import argparse
 import ast
 import csv
-import importlib.util
 import hashlib
+import importlib.util
 import json
 import shlex
-from pathlib import Path
 import statistics
 import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 import torch
+
 import tvm
 
 
@@ -70,7 +71,11 @@ def parse_target(value):
             raise ValueError(f"Unknown target option: {key}")
         kind = str(options[key])
         if kind in ("IntImm", "int", "Integer", "Bool", "bool"):
-            value = int(value) if value.lower() not in ("true", "false") else int(value.lower() == "true")
+            value = (
+                int(value)
+                if value.lower() not in ("true", "false")
+                else int(value.lower() == "true")
+            )
         elif "Array" in kind:
             value = value.split(",") if value else []
         elif kind not in ("runtime.String", "String", "ffi.String", "str"):
@@ -87,10 +92,15 @@ def library_support(target):
         "mcdnn": "partition available; actual calls depend on matching supported operators",
         "mcblas": "partition available; actual calls depend on matching supported operators",
         "mccub": "not integrated: no MCCUB Relax dispatch/runtime adapter in this repository",
-        "mxexpr": "schedule hook exists in legacy MACA injective/broadcast TOPI; no Relax-specific dispatch",
+        "mxexpr": (
+            "schedule hook exists in legacy MACA injective/broadcast TOPI; "
+            "no Relax-specific dispatch"
+        ),
     }
-    return {str(lib): supported.get(str(lib), "unknown: no integration verified")
-            for lib in target.attrs.get("libs", [])}
+    return {
+        str(lib): supported.get(str(lib), "unknown: no integration verified")
+        for lib in target.attrs.get("libs", [])
+    }
 
 
 def main():
@@ -102,11 +112,18 @@ def main():
     bench.add_argument("--repeats", type=positive, default=10)
     bench.add_argument("--number", type=positive, default=50)
     bench.add_argument("--warmup", type=positive, default=1)
-    bench.add_argument("--target", default="maca --libs=mcdnn,mcblas,mccub,mxexpr -max_num_threads=512",
-                       help="TVM target string passed to Relax benchmark scripts")
+    bench.add_argument(
+        "--target",
+        default="maca --libs=mcdnn,mcblas,mccub,mxexpr -max_num_threads=512",
+        help="TVM target string passed to Relax benchmark scripts",
+    )
     bench.add_argument("--libs", default=None, help="Legacy library override (without --target)")
-    bench.add_argument("--max-num-threads", type=positive, default=None,
-                       help="Legacy thread limit override (without --target)")
+    bench.add_argument(
+        "--max-num-threads",
+        type=positive,
+        default=None,
+        help="Legacy thread limit override (without --target)",
+    )
     bench.add_argument("--workspace", type=Path, default=Path("tmp/relax_bench"))
     args = parser.parse_args()
     if args.profiler == "cupti" and (
@@ -120,11 +137,17 @@ def main():
         if args.libs is not None or args.max_num_threads is not None:
             if any(arg == "--target" or arg.startswith("--target=") for arg in sys.argv[1:]):
                 parser.error("Use either --target or --libs/--max-num-threads")
-            target = tvm.target.Target({
-                "kind": "maca",
-                "libs": (args.libs if args.libs is not None else "mcdnn,mcblas,mccub,mxexpr").split(",") if args.libs != "" else [],
-                "max_num_threads": args.max_num_threads or 512,
-            })
+            target = tvm.target.Target(
+                {
+                    "kind": "maca",
+                    "libs": (
+                        args.libs if args.libs is not None else "mcdnn,mcblas,mccub,mxexpr"
+                    ).split(",")
+                    if args.libs != ""
+                    else [],
+                    "max_num_threads": args.max_num_threads or 512,
+                }
+            )
         else:
             target = parse_target(args.target)
     except (ValueError, TypeError) as err:
@@ -152,10 +175,19 @@ def main():
                 raise ValueError(f"Unsupported model input (only Relax .py is supported): {entry}")
             for file in files:
                 tree = ast.parse(file.read_text(), filename=str(file))
-                main_fn = next((node for node in tree.body
-                                if isinstance(node, ast.FunctionDef) and node.name == "main"), None)
-                params = ({arg.arg for arg in main_fn.args.args + main_fn.args.kwonlyargs}
-                          if main_fn else set())
+                main_fn = next(
+                    (
+                        node
+                        for node in tree.body
+                        if isinstance(node, ast.FunctionDef) and node.name == "main"
+                    ),
+                    None,
+                )
+                params = (
+                    {arg.arg for arg in main_fn.args.args + main_fn.args.kwonlyargs}
+                    if main_fn
+                    else set()
+                )
                 if not {"benchmark", "target_config"} <= params:
                     reason = f"{file}: requires main(*, benchmark=None, target_config=None)"
                     if path.is_dir():
@@ -173,9 +205,15 @@ def main():
         if not unique:
             raise ValueError("No supported Relax benchmark scripts found")
         names = [name for name, _ in unique]
-        return [(name if names.count(name) == 1 else
-                 name + "-" + hashlib.sha256(str(path).encode()).hexdigest()[:12], path)
-                for name, path in unique]
+        return [
+            (
+                name
+                if names.count(name) == 1
+                else name + "-" + hashlib.sha256(str(path).encode()).hexdigest()[:12],
+                path,
+            )
+            for name, path in unique
+        ]
 
     try:
         models = discover_models(args.models)
@@ -193,8 +231,10 @@ def main():
                     vm["main"](*inputs)
                 if args.profiler == "cupti":
                     with torch.profiler.profile(
-                        activities=[torch.profiler.ProfilerActivity.CPU,
-                                    torch.profiler.ProfilerActivity.CUDA],
+                        activities=[
+                            torch.profiler.ProfilerActivity.CPU,
+                            torch.profiler.ProfilerActivity.CUDA,
+                        ],
                         record_shapes=True,
                     ) as prof:
                         for _ in range(args.number):
@@ -204,17 +244,25 @@ def main():
                     if elapsed <= 0:
                         raise RuntimeError("No device time captured; refusing zero result")
                     details = [
-                        dict(name=e.key, calls=e.count, calls_per_run=e.count / args.number,
-                             cpu_total_us=e.cpu_time_total, device_total_us=e.device_time_total,
-                             device_us_per_run=e.device_time_total / args.number)
+                        dict(
+                            name=e.key,
+                            calls=e.count,
+                            calls_per_run=e.count / args.number,
+                            cpu_total_us=e.cpu_time_total,
+                            device_total_us=e.device_time_total,
+                            device_us_per_run=e.device_time_total / args.number,
+                        )
                         for e in events
                     ]
                     write_csv(model_output / f"events-{round_id + 1:02}.csv", details)
                     if round_id == 0:
                         print(events.table(sort_by="device_time_total", row_limit=100))
-                    kernels = [e for e in prof.events()
-                               if e.device_type == torch.autograd.DeviceType.CUDA
-                               and not any(s in e.name.lower() for s in ("memcpy", "memset"))]
+                    kernels = [
+                        e
+                        for e in prof.events()
+                        if e.device_type == torch.autograd.DeviceType.CUDA
+                        and not any(s in e.name.lower() for s in ("memcpy", "memset"))
+                    ]
                     launches = len(kernels) / args.number
                     kernel_us = sum(e.time_range.elapsed_us() for e in kernels) / args.number
                     if not kernels:
@@ -227,25 +275,45 @@ def main():
                     device.sync()
                     elapsed = (time.perf_counter() - start) * 1e6 / args.number
                     launches = kernel_us = None
-                rows.append(dict(round=round_id + 1, us_per_run=elapsed,
-                                 kernel_launches_per_run=launches, kernel_us_per_run=kernel_us))
+                rows.append(
+                    dict(
+                        round=round_id + 1,
+                        us_per_run=elapsed,
+                        kernel_launches_per_run=launches,
+                        kernel_us_per_run=kernel_us,
+                    )
+                )
                 write_csv(model_output / "rounds.csv", rows)
-                print(f"{model} round {round_id + 1}/{args.repeats}: {elapsed:.3f} us/run",
-                      flush=True)
+                print(
+                    f"{model} round {round_id + 1}/{args.repeats}: {elapsed:.3f} us/run", flush=True
+                )
             samples = [r["us_per_run"] for r in rows]
             result = dict(
-                model=model, model_path=str(path), profiler=args.profiler,
-                metric="device_time_total/number" if args.profiler == "cupti"
+                model=model,
+                model_path=str(path),
+                profiler=args.profiler,
+                metric="device_time_total/number"
+                if args.profiler == "cupti"
                 else "synchronized_python_wall_us/number",
-                samples_us=samples, mean_us=statistics.mean(samples),
-                median_us=statistics.median(samples), std_us=statistics.pstdev(samples),
-                number=args.number, repeats=args.repeats, warmup=args.warmup,
-                clean_l2_cache=False, record_shapes=args.profiler == "cupti",
-                target=str(target), library_support=lib_support,
-                max_abs_error=error, torch_version=torch.__version__,
-                tvm_version=tvm.__version__, commit=git.stdout.strip(),
-                weights="synthetic, seed=0", compile_policy="once, correctness before timing",
-                opt_level=3, fuse_ops_max_depth=4096,
+                samples_us=samples,
+                mean_us=statistics.mean(samples),
+                median_us=statistics.median(samples),
+                std_us=statistics.pstdev(samples),
+                number=args.number,
+                repeats=args.repeats,
+                warmup=args.warmup,
+                clean_l2_cache=False,
+                record_shapes=args.profiler == "cupti",
+                target=str(target),
+                library_support=lib_support,
+                max_abs_error=error,
+                torch_version=torch.__version__,
+                tvm_version=tvm.__version__,
+                commit=git.stdout.strip(),
+                weights="synthetic, seed=0",
+                compile_policy="once, correctness before timing",
+                opt_level=3,
+                fuse_ops_max_depth=4096,
             )
             (model_output / "summary.json").write_text(json.dumps(result, indent=2) + "\n")
             print(f"{model}: mean={result['mean_us']:.3f}, median={result['median_us']:.3f} us/run")

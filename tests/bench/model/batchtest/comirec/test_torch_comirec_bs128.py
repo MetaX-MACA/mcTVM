@@ -1,3 +1,20 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 """Run a ComiRec batch-128 inference workload on a MACA device.
 
 The network mirrors ``comirec_bs128.mod``: six user feature embeddings and
@@ -17,12 +34,11 @@ import time
 
 import numpy as np
 import torch
+from torch.export import export
 
 import tvm
-from torch.export import export
 from tvm import relax
 from tvm.relax.frontend.torch import from_exported_program
-from tvm.target import target
 
 
 class ComiRec(torch.nn.Module):
@@ -33,7 +49,9 @@ class ComiRec(torch.nn.Module):
         self.history_size = 50
         self.embedding_dim = 16
         self.num_interests = 2
-        self.register_buffer("history_positions", torch.arange(self.history_size, dtype=torch.int32))
+        self.register_buffer(
+            "history_positions", torch.arange(self.history_size, dtype=torch.int32)
+        )
 
         self.user_id_embedding = torch.nn.Embedding(6041, self.embedding_dim)
         self.gender_embedding = torch.nn.Embedding(3, self.embedding_dim)
@@ -91,7 +109,9 @@ class ComiRec(torch.nn.Module):
 
         history_embedding = self.hist_movie_id_embedding(hist_movie_id)
         history_embedding = history_embedding + self.position_encoding.unsqueeze(0)
-        attention_logits = torch.tanh(self.attention_1(torch.tanh(self.attention_0(history_embedding))))
+        attention_logits = torch.tanh(
+            self.attention_1(torch.tanh(self.attention_0(history_embedding)))
+        )
         masked_logits = torch.where(
             history_mask.unsqueeze(-1), attention_logits, torch.full_like(attention_logits, -1e9)
         )
@@ -161,11 +181,13 @@ def main(*, benchmark=None, target_config=None) -> None:
     device = tvm.maca(0)
     if not device.exist:
         raise RuntimeError("No MACA device is available at maca:0")
-    target = tvm.target.Target({
-        "kind": "maca",
-        "libs": ["mcdnn", "mcblas", "mccub", "mxexpr"],
-        "max_num_threads": 512,
-    })
+    target = tvm.target.Target(
+        {
+            "kind": "maca",
+            "libs": ["mcdnn", "mcblas", "mccub", "mxexpr"],
+            "max_num_threads": 512,
+        }
+    )
 
     if target_config is not None:
         target = tvm.target.Target(target_config)
@@ -174,7 +196,9 @@ def main(*, benchmark=None, target_config=None) -> None:
         executable = tvm.compile(mod, target=target)
     vm = relax.VirtualMachine(executable, device)
 
-    maca_inputs = tuple(tvm.runtime.tensor(value, device) for value in (*torch_inputs, *params["main"]))
+    maca_inputs = tuple(
+        tvm.runtime.tensor(value, device) for value in (*torch_inputs, *params["main"])
+    )
     maca_output = vm["main"](*maca_inputs)[0].numpy()
     with torch.no_grad():
         torch_output = model(*torch_inputs).numpy()
