@@ -29,6 +29,8 @@ from tvm.tirx.layout import S, TileLayout, laneid
 from tvm.tirx.operator.tile_primitive import DispatchContext
 from tvm.tirx.operator.tile_primitive.dispatcher import fail, predicate, register_dispatch
 
+from ..common import maca_intrinsic_supported
+
 WAVE_SIZE = 64
 
 # In every ``S[shape : mapping]`` below, entries at the same position describe
@@ -642,28 +644,45 @@ def _lower_mma(op_call: TilePrimitiveCall, sctx: DispatchContext, atom) -> PrimF
     return impl
 
 
-_PREDICATES = [predicate("full_wave64", _full_wave64), predicate("no_replica", _no_replica)]
+def _predicates(intrinsic: str):
+    return [
+        predicate("maca_intrinsic", maca_intrinsic_supported, intrinsic=intrinsic),
+        predicate("full_wave64", _full_wave64),
+        predicate("no_replica", _no_replica),
+    ]
 
 
-@register_dispatch("gemm", "maca", variant="mma.m16n16k16", priority=10, when=_PREDICATES)
+@register_dispatch(
+    "gemm", "maca", variant="mma.m16n16k16", priority=10, when=_predicates("mma.m16n16k16")
+)
 def mma_m16n16k16(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc:
     """Lower a 16x16x16 native MMA signature."""
     return _lower_mma(op_call, sctx, (16, 16, 16))
 
 
-@register_dispatch("gemm", "maca", variant="mma.m16n16k4", priority=11, when=_PREDICATES)
+@register_dispatch(
+    "gemm", "maca", variant="mma.m16n16k4", priority=11, when=_predicates("mma.m16n16k4")
+)
 def mma_m16n16k4(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc:
     """Lower a 16x16x4 full-F32 MMA signature."""
     return _lower_mma(op_call, sctx, (16, 16, 4))
 
 
-@register_dispatch("gemm", "maca", variant="mma.m8n8k32", priority=12, when=_PREDICATES)
+@register_dispatch(
+    "gemm", "maca", variant="mma.m8n8k32", priority=12, when=_predicates("mma.m8n8k32")
+)
 def mma_m8n8k32(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc:
     """Lower an 8x8x32 signed or unsigned packed 4-bit signature."""
     return _lower_mma(op_call, sctx, (8, 8, 32))
 
 
-@register_dispatch("gemm", "maca", variant="mma.m8n8k128", priority=12, when=_PREDICATES)
+@register_dispatch(
+    "gemm",
+    "maca",
+    variant="mma.m8n8k128",
+    priority=12,
+    when=_predicates("bmma.m8n8k128"),
+)
 def mma_m8n8k128(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc:
     """Lower an 8x8x128 one-bit AND/popcount signature."""
     return _lower_mma(op_call, sctx, (8, 8, 128))

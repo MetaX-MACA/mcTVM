@@ -19,6 +19,7 @@
 
 import functools
 import operator
+from dataclasses import dataclass
 from enum import Enum
 
 from tvm.arith.analyzer import Analyzer
@@ -27,6 +28,63 @@ from tvm.script import tirx as T
 from tvm.tirx import Buffer, BufferRegion, PrimFunc
 from tvm.tirx.operator.tile_primitive import DispatchContext, fail
 from tvm.tirx.stmt import TilePrimitiveCall
+
+
+@dataclass(frozen=True)
+class IntrinsicCapability:
+    """A MACA intrinsic family supported by one exact compiler target."""
+
+    intrinsic: str
+    mcpu: str
+    mode: str
+    builtin: str
+
+
+_MACA_INTRINSIC_CAPABILITIES = (
+    IntrinsicCapability("mma.m16n16k16", "xcore1000", "native", "maca_mma_m16n16k16_*"),
+    IntrinsicCapability("mma.m16n16k4", "xcore1000", "native", "maca_mma_m16n16k4_*"),
+    IntrinsicCapability("mma.m8n8k32", "xcore1000", "native", "maca_mma_m8n8k32_*"),
+    IntrinsicCapability("bmma.m8n8k128", "xcore1000", "native", "maca_bmma_m8n8k128_*"),
+    IntrinsicCapability("copy_async.bsm", "xcore1000", "native", "maca.copy_async_*b"),
+)
+
+
+def _target_mcpu(sctx: DispatchContext) -> str:
+    """Return the compile target's canonical MACA ``mcpu`` name."""
+    return str(sctx.target.attrs.get("mcpu", ""))
+
+
+def maca_mcpu_is(
+    _op_call: TilePrimitiveCall,
+    sctx: DispatchContext,
+    supported: tuple[str, ...],
+) -> tuple[bool, str | None]:
+    """Check whether the MACA target has one of the exact ``mcpu`` names."""
+    mcpu = _target_mcpu(sctx)
+    ok = mcpu in supported
+    return ok, None if ok else f"MACA mcpu {mcpu!r} is not one of {supported!r}"
+
+
+def maca_intrinsic_supported(
+    _op_call: TilePrimitiveCall,
+    sctx: DispatchContext,
+    intrinsic: str,
+) -> tuple[bool, str | None]:
+    """Check whether an intrinsic family is supported by the compile target."""
+    capability = maca_intrinsic_capability(sctx, intrinsic)
+    if capability is not None:
+        return True, None
+    mcpu = _target_mcpu(sctx)
+    return False, f"MACA intrinsic {intrinsic!r} is unsupported on mcpu {mcpu!r}"
+
+
+def maca_intrinsic_capability(sctx: DispatchContext, intrinsic: str) -> IntrinsicCapability | None:
+    """Return the selected intrinsic capability record, if supported."""
+    mcpu = _target_mcpu(sctx)
+    for capability in _MACA_INTRINSIC_CAPABILITIES:
+        if capability.intrinsic == intrinsic and capability.mcpu == mcpu:
+            return capability
+    return None
 
 
 def next_power_of_2(x: int) -> int:
