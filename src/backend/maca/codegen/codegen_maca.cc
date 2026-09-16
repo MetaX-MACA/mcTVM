@@ -221,6 +221,7 @@ void CodeGenMACA::PrintFunctionSignature(const ffi::String& function_name, const
                                          std::ostream& os) {
   CallingConv calling_conv =
       func->GetAttr<CallingConv>(tvm::attr::kCallingConv, CallingConv::kDefault).value();
+  in_kernel_launch_ = (calling_conv == CallingConv::kDeviceKernelLaunch);
   if (calling_conv == CallingConv::kDeviceKernelLaunch) {
     os << "extern \"C\" __global__ ";
   } else if (calling_conv == CallingConv::kDefault) {
@@ -267,7 +268,14 @@ void CodeGenMACA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
       // unable to extract the number of threads per block, hence directly return
       return;
     }
-    os << " __launch_bounds__(" << threadIdx_ext_int->value << ")";
+    auto min_blocks_per_sm = f->GetAttr<int64_t>(tirx::attr::kLaunchBoundsMinBlocksPerSM);
+    if (min_blocks_per_sm.has_value()) {
+      TVM_FFI_ICHECK_GT(min_blocks_per_sm.value(), 0);
+      os << " __launch_bounds__(" << threadIdx_ext_int->value << ", " << min_blocks_per_sm.value()
+         << ")";
+    } else {
+      os << " __launch_bounds__(" << threadIdx_ext_int->value << ")";
+    }
   }
 }
 
@@ -557,14 +565,56 @@ struct __align__(16) fp8_e8x16_t {
 }
 
 void CodeGenMACA::VisitStmt_(const tirx::ForNode* op) {
+  // Materialize loop bounds before the pragma, because PrintExpr may emit
+  // temporaries and MACA requires the pragma to immediately precede its loop.
+  std::string begin_str = PrintExpr(op->min);
+  PrimExpr end = is_zero(op->min) ? op->extent : arith::Analyzer()->Simplify(op->min + op->extent);
+  std::string end_str = PrintExpr(end);
+  std::string step_str = op->step.has_value() ? PrintExpr(*op->step) : "";
   if (op->annotations.count("disable_unroll")) {
     PrintIndent();
     stream << "#pragma unroll 1\n";
-  } else if (op->kind == tirx::ForKind::kUnrolled || op->annotations.count("pragma_unroll")) {
+  } else if (op->kind == tirx::ForKind::kUnrolled) {
     PrintIndent();
     stream << "#pragma unroll\n";
+  } else if (auto it = op->annotations.find("pragma_unroll"); it != op->annotations.end()) {
+    PrintIndent();
+    stream << "#pragma unroll";
+    if (auto count = (*it).second.as<int64_t>()) {
+      stream << " " << count.value();
+    } else if (const auto* count = (*it).second.as<IntImmNode>()) {
+      stream << " " << count->value;
+    }
+    stream << "\n";
   }
-  CodeGenC::VisitStmt_(op);
+  PrintIndent();
+  std::string vid = AllocVarID(op->loop_var.get());
+  stream << "for (";
+  PrintType(op->loop_var.ty(), stream);
+  stream << ' ' << vid << " = " << begin_str << "; " << vid << " < " << end_str << "; ";
+  if (step_str.empty()) {
+    stream << "++" << vid;
+  } else {
+    stream << vid << " += " << step_str;
+  }
+  stream << ") {\n";
+  int for_scope = BeginScope();
+  PrintStmt(op->body);
+  this->EndScope(for_scope);
+  PrintIndent();
+  stream << "}\n";
+}
+
+void CodeGenMACA::VisitStmt_(const ReturnNode* op) {
+  if (!in_kernel_launch_) {
+    CodeGenC::VisitStmt_(op);
+    return;
+  }
+  const auto* value = op->value.as<IntImmNode>();
+  TVM_FFI_ICHECK(value && value->value == 0)
+      << "MACA device kernel may only contain a successful early return, return 0";
+  PrintIndent();
+  stream << "return;\n";
 }
 
 void CodeGenMACA::VisitStmt_(const DeclBufferNode* op) {
@@ -979,7 +1029,7 @@ void CodeGenMACA::PrintVecElemStore(const std::string& vec, const PrimType& t, i
 }
 
 void CodeGenMACA::PrintStorageSync(const CallNode* op) {
-  const std::string& sync = op->args[0].as<StringImmNode>()->value;
+  const std::string& sync = op->args[0].as<prim::StringImmNode>()->value;
   if (sync == "warp") {
     // DO nothing.
   } else if (sync == "shared" || sync == "shared.dyn") {
@@ -1057,7 +1107,7 @@ void CodeGenMACA::AddUtilFunction(const std::string& func_name, const std::strin
   this->util_funcs_.insert({func_name, code});
 }
 
-void CodeGenMACA::VisitExpr_(const CastNode* op, std::ostream& os) {
+void CodeGenMACA::VisitExpr_(const prim::CastNode* op, std::ostream& os) {
   PrimType from_ty = op->value.ty();
   PrimType target_ty = op->ty.as_or_throw<PrimType>();
   TVM_FFI_ICHECK_EQ(target_ty.lanes(), from_ty.lanes());
@@ -1191,8 +1241,8 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
     for (size_t i = 1; i < num_args + 1; i++) {
       args.push_back(this->PrintExpr(op->args[i]));
     }
-    std::string source_code = op->args[num_args + 1].as<StringImmNode>()->value;
-    std::string func_name = op->args[0].as<StringImmNode>()->value;
+    std::string source_code = op->args[num_args + 1].as<prim::StringImmNode>()->value;
+    std::string func_name = op->args[0].as<prim::StringImmNode>()->value;
     os << func_name << "(";
     for (size_t i = 0; i < num_args; i++) {
       const auto& arg = args[i];
@@ -1272,7 +1322,7 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->PrintExpr(op->args[4], os);
     os << "], ";
     this->PrintExpr(op->args[6], os);
-    if (const StringImmNode* str = op->args[7].as<StringImmNode>()) {
+    if (const prim::StringImmNode* str = op->args[7].as<prim::StringImmNode>()) {
       os << ", mxmaca::wmma::mem_" << str->value;
     } else {
       LOG(FATAL) << "Invalid parameters";
@@ -1298,6 +1348,153 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
       this->PrintExpr(op->args[i * 2 + 1], os);
       os << "]" << ((i < 3) ? ", " : ")");
     }
+  } else if (op->op.same_as(builtin::print_buffer())) {
+    TVM_FFI_ICHECK_GE(op->args.size(), 5U) << "Print operation expects at least 5 arguments";
+
+    Expr arg = op->args[0];
+    const auto* var_node = arg.as<VarNode>();
+    if (const auto* call = arg.as<CallNode>();
+        call && call->op.same_as(tirx::builtin::buffer_data()) && call->args.size() == 1) {
+      var_node = call->args[0].as<VarNode>();
+      TVM_FFI_ICHECK(var_node && var_node->ty.as<tirx::BufferTypeNode>())
+          << "print_buffer expects buffer_data to project a BufferVar";
+    }
+    PrimType dtype_ty = op->ty.as_or_throw<PrimType>();
+    bool is_string = op->args[2].as<IntImmNode>()->value;
+    bool is_scalar = op->args[3].as<IntImmNode>()->value;
+    int num_dims = op->args[4].as<IntImmNode>()->value;
+
+    TVM_FFI_ICHECK(!(is_string && is_scalar)) << "Cannot have both is_string and is_scalar true";
+    if (is_string) {
+      // String printing logic
+      std::string print_arg = var_node ? GetVarID(var_node) : PrintExpr(arg);
+      std::string buffer_name = var_node ? GetVarID(var_node) : "string_literal";
+      os << "// print_buffer starts (string)\n"
+         << "if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {\n"
+         << "  printf(\"" << buffer_name << ": %s\\n\\n\", (char*)" << print_arg << ");\n"
+         << "}\n"
+         << "// print_buffer ends\n";
+      return;
+    }
+
+    if (is_scalar) {
+      // Scalar printing logic
+      std::string format_specifier;
+      bool is_float16 = dtype_ty.MatchesElementType(DLDataTypeCode::kDLFloat, 16);
+      if (dtype_ty.MatchesCode(DLDataTypeCode::kDLFloat))
+        format_specifier = "%f";
+      else if (dtype_ty.MatchesCode(DLDataTypeCode::kDLInt))
+        format_specifier = "%d";
+      else if (dtype_ty.MatchesCode(DLDataTypeCode::kDLUInt))
+        format_specifier = "%u";
+      else
+        TVM_FFI_THROW(InternalError) << "Unsupported data type for scalar print: " << dtype_ty;
+
+      std::string print_arg = var_node ? ("*" + GetVarID(var_node)) : PrintExpr(arg);
+      os << "// print_buffer starts (scalar)\n"
+         << "if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {\n"
+         << "  printf(\"Scalar (dtype: " << dtype_ty << "): " << format_specifier << "\\n\\n\", "
+         << (is_float16 ? "static_cast<float>(" : "") << print_arg << (is_float16 ? ")" : "")
+         << ");\n"
+         << "}\n"
+         << "// print_buffer ends\n";
+      return;
+    }
+
+    Array<PrimExpr> shape;
+    for (size_t i = 5; i < op->args.size(); ++i) {
+      shape.push_back(op->args[i].as_or_throw<PrimExpr>());
+    }
+
+    std::string format_specifier;
+    bool is_float16 = false;
+    if (dtype_ty.MatchesCode(DLDataTypeCode::kDLFloat)) {
+      if (dtype_ty.bits() == 16) {
+        format_specifier = "%f";
+        is_float16 = true;
+      } else {
+        format_specifier = "%f";
+      }
+    } else if (dtype_ty.MatchesCode(DLDataTypeCode::kDLInt)) {
+      format_specifier = "%d";
+    } else if (dtype_ty.MatchesCode(DLDataTypeCode::kDLUInt)) {
+      format_specifier = "%u";
+    } else {
+      TVM_FFI_THROW(InternalError) << "Unsupported data type for print: " << dtype_ty;
+    }
+
+    TVM_FFI_ICHECK(var_node) << "Formatted print is only supported for buffer variables.";
+    std::string buffer_name = GetVarID(var_node);
+
+    os << "// print_buffer starts (buffer)\n"
+       << "if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {\n";
+
+    os << "  printf(\"(" << buffer_name << ", shape=(";
+    for (int i = 0; i < num_dims; ++i) {
+      os << PrintExpr(shape[i]) << (i < num_dims - 1 ? "," : "");
+    }
+    os << "), dtype=" << dtype_ty << "):\\n\");\n";
+
+    std::vector<std::string> loop_vars;
+    for (int i = 0; i < num_dims; ++i) {
+      loop_vars.push_back("i" + std::to_string(i));
+    }
+
+    std::function<void(int)> GenerateLoops;
+    GenerateLoops = [&](int dim) {
+      if (dim == num_dims) {
+        std::string idx_calculation;
+        if (num_dims > 0) {
+          idx_calculation = loop_vars[0];
+          for (int i = 1; i < num_dims; ++i) {
+            idx_calculation =
+                "(" + idx_calculation + " * " + PrintExpr(shape[i]) + " + " + loop_vars[i] + ")";
+          }
+        } else {
+          idx_calculation = "0";
+        }
+
+        os << std::string(num_dims * 2 + 4, ' ') << "printf(\"" << format_specifier << "\", ";
+        if (is_float16) {
+          os << "static_cast<float>(" << buffer_name << "[" << idx_calculation << "]));\n";
+        } else {
+          os << buffer_name << "[" << idx_calculation << "]);\n";
+        }
+        return;
+      }
+
+      std::string indent(dim * 2 + 2, ' ');
+      os << indent << "for (int " << loop_vars[dim] << " = 0; " << loop_vars[dim] << " < "
+         << PrintExpr(shape[dim]) << "; ++" << loop_vars[dim] << ") {\n";
+
+      if (dim < num_dims - 1) {
+        os << indent << "  printf(\"[\");\n";
+      }
+      GenerateLoops(dim + 1);
+
+      if (dim < num_dims - 1) {
+        os << indent << "  printf(\"]\");\n";
+      }
+
+      os << indent << "  if (" << loop_vars[dim] << " < " << PrintExpr(shape[dim]) << " - 1) {\n";
+      if (dim == num_dims - 1) {
+        os << indent << "    printf(\" \");\n";
+      } else {
+        os << indent << "    printf(\"\\n" << std::string(dim + 2, ' ') << "\");\n";
+      }
+      os << indent << "  }\n";
+
+      os << indent << "}\n";
+    };
+
+    os << "  printf(\"[\");\n";
+    if (num_dims > 0) {
+      GenerateLoops(0);
+    }
+    os << "  printf(\"]\\n\");\n";
+
+    os << "}\n"
+       << "// print_buffer ends\n";
   } else if (op->op.same_as(maca_func_call_op) ||
              (op->op.as<Op>() && op->op.as<Op>().value()->name == "tirx.maca.func_call")) {
     print_maca_func_call(op, os);
@@ -1311,11 +1508,11 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
 void CodeGenMACA::VisitStmt_(const AttrStmtNode* op) {
   if (op->attr_key == s_tir::attr::fragment_shape) {
     const VarNode* buffer = op->node.as<VarNode>();
-    const StringImmNode* shape_str = op->value.as<StringImmNode>();
+    const prim::StringImmNode* shape_str = op->value.as<prim::StringImmNode>();
     fragment_shapes[buffer] = shape_str->value;
   } else if (op->attr_key == s_tir::attr::fragment_layout) {
     const VarNode* buffer = op->node.as<VarNode>();
-    const StringImmNode* layout_str = op->value.as<StringImmNode>();
+    const prim::StringImmNode* layout_str = op->value.as<prim::StringImmNode>();
     fragment_layouts[buffer] = layout_str->value;
   } else if (op->attr_key == s_tir::attr::async_commit_queue_scope) {
     const IntImmNode* queue_id = op->value.as<IntImmNode>();
@@ -1359,7 +1556,11 @@ void CodeGenMACA::VisitStmt_(const AttrStmtNode* op) {
     return;
   } else if (op->attr_key == "pragma_unroll") {
     PrintIndent();
-    stream << "#pragma unroll\n";
+    stream << "#pragma unroll";
+    if (const auto* count = op->value.as<IntImmNode>(); count && count->value != 1) {
+      stream << " " << count->value;
+    }
+    stream << "\n";
     this->VisitStmt(op->body);
     return;
   }
@@ -1466,7 +1667,7 @@ void CodeGenMACA::VisitStmt_(const EvaluateNode* op) {
   }
 }
 
-void CodeGenMACA::VisitExpr_(const RampNode* op, std::ostream& os) {
+void CodeGenMACA::VisitExpr_(const prim::RampNode* op, std::ostream& os) {
   PrimType op_ty = op->ty.as_or_throw<PrimType>();
   int lanes = op_ty.lanes();
   TVM_FFI_ICHECK_LE(lanes, 4) << "ValueError: Ramp of more than 4 lanes is not allowed.";
@@ -1480,7 +1681,7 @@ void CodeGenMACA::VisitExpr_(const RampNode* op, std::ostream& os) {
   os << ")";
 }
 
-void CodeGenMACA::VisitExpr_(const BroadcastNode* op, std::ostream& os) {  // NOLINT(*)
+void CodeGenMACA::VisitExpr_(const prim::BroadcastNode* op, std::ostream& os) {  // NOLINT(*)
   PrimType op_ty = op->ty.as_or_throw<PrimType>();
   int lanes = op_ty.lanes();
   if (IsIntOrUInt(op_ty) && op_ty.bits() == 8) {
@@ -1657,7 +1858,7 @@ void CodeGenMACA::VisitExpr_(const BroadcastNode* op, std::ostream& os) {  // NO
   os << ')';
 }
 
-void CodeGenMACA::VisitExpr_(const SelectNode* op, std::ostream& os) {
+void CodeGenMACA::VisitExpr_(const prim::SelectNode* op, std::ostream& os) {
   PrimType op_ty = op->ty.as_or_throw<PrimType>();
   // Non-vector cases.
   if (!op_ty.IsFixedLengthVector()) {
@@ -1830,13 +2031,14 @@ int32_t CodeGenMACA::GetWmmaFragmentSize(const std::string& scope, const VarNode
     return 0;
 }
 
-void CodeGenMACA::HandleVolatileLoads(const std::string& value, const BufferLoadNode* op,
+void CodeGenMACA::HandleVolatileLoads(const std::string& value, const TensorLoadNode* op,
                                       std::ostream& os) {
   // Cast away volatile qualifier for fp16 types. That is, only loads and
   // stores are volatile. The loaded objects are not marked as volatile.
   //
   PrimType op_ty = op->ty.as_or_throw<PrimType>();
-  if ((IsFloat16(op_ty) || IsBFloat16(op_ty)) && IsVolatile(op->buffer.get())) {
+  if ((IsFloat16(op_ty) || IsBFloat16(op_ty)) &&
+      IsVolatile(op->source.as_or_throw<tvm::tirx::BufferVar>().get())) {
     os << "(";
     PrintType(op_ty, os);
     os << ")(" << value << ")";

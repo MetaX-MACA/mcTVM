@@ -880,12 +880,7 @@ spatial_size = 4096
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    ml_dtypes is None,
-    reason="TODO(maca): [fp8] install ml_dtypes for FP8 GEMV verification",
-    strict=False,
-    run=False,
-)
+@pytest.mark.skipif(ml_dtypes is None, reason="Requires ml_dtypes to be installed")
 def test_moe_gemv_shfl_down_illegal_instr():
     global num_experts
     global reduce_size

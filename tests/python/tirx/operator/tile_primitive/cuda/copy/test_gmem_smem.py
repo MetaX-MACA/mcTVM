@@ -93,11 +93,11 @@ def _build_kernel(scope, n_threads, shape, dtype):
 # (scope, n_threads, shape) — shape chosen so total / T / vec_len > 1 with at
 # least one outer round, and total is divisible by T*vec_len.
 TASKS = [
-    ("warp", 64, (32, 32)),  # 1024 total, T=64, vec 8 → outer 2
-    ("warp", 64, (32, 64)),  # 2048 total, outer 4
-    ("warpgroup", 256, (128, 32)),  # 4096, outer 2
-    ("warpgroup", 256, (128, 64)),  # 8192, outer 4
-    ("warpgroup", 256, (256, 16)),  # 4096, outer 2
+    ("warp", 64, (32, 32)),  # 1024 total, T=32, vec 8 → outer 4
+    ("warp", 64, (32, 64)),  # 2048 total, outer 8
+    ("warpgroup", 256, (128, 32)),  # 4096, outer 4
+    ("warpgroup", 256, (128, 64)),  # 8192, outer 8
+    ("warpgroup", 256, (256, 16)),  # 4096, outer 4
     ("cta", 256, (256, 32)),  # 8192, T=256, vec 8 → outer 4
     ("cta", 256, (512, 16)),  # 8192, outer 4
 ]
@@ -252,8 +252,9 @@ def test_copy_g2s_s2g(task, dtype, scope):
 # ----------------------------------------------------------------------------
 # Regression tests for known correctness gaps in ``align_layouts_gs``.
 #
-# These are intentionally algorithm-level (no GPU runtime) and validate the
-# MACA alignment implementation directly.
+# These are intentionally algorithm-level (no GPU runtime) and currently
+# XFAIL; flipping them to passing is the contract for the upcoming swizzle /
+# alignment fix.
 # ----------------------------------------------------------------------------
 
 
@@ -367,14 +368,17 @@ def test_swizzled_smem_emit_must_be_swizzle_aware():
         A_smem = T.alloc_buffer(shape, "float16", scope="shared", layout=s_layout)
         Tx.wg.copy(A_smem[0:128, 0:32], A[0:128, 0:32])
 
+    # NB: pin sm_90 explicitly — the default cuda target falls back to sm_50
+    # when no GPU is detected, which nvcc 13+ rejects. Codegen happens before
+    # nvcc; if the whole tvm.compile pipeline fails, we never see the source.
     target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
         compiled = tvm.compile(mod, target=target, tir_pipeline="tirx")
     src = "".join(im.inspect_source() for im in compiled.mod.imports)
 
-    # If emit is swizzle-aware, two ways it shows up in the generated MACA
-    # source:
+    # If emit is swizzle-aware, two ways it shows up in the generated
+    # CUDA:
     #   1. fallback path emits ``swizzle.apply(linear)``, which lowers
     #      to a ``^`` (XOR) somewhere in the S-offset computation
     #      (typically on a separate ``s_off_ptr[0] = ...`` line, not on

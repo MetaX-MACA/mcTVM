@@ -57,14 +57,6 @@ from tvm.tirx.layout import (
 )
 from tvm.tirx.layout import tid_in_wg as axis_tid_in_wg
 
-MACA_XFAIL = pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [tile-primitive-tcgen05-tmem-16xnb] support tcgen05 16xNb "
-        "tmem load/store layouts"
-    ),
-    strict=False,
-)
-
 # --------------------------------------------------------------------------
 # Shape metadata + host-side layout reconstruction
 # --------------------------------------------------------------------------
@@ -165,8 +157,7 @@ def _expected_reg_value_16b(
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.parametrize("shape", list(_SHAPE_REPS))
 @pytest.mark.parametrize("rep", [1, 2, 4, 8, 16, 32])  # subset; full reps below
 @pytest.mark.parametrize("dtype", ["float32"])
@@ -178,8 +169,7 @@ def test_tcgen05_ld_16xnb_load_fp32(shape, rep, dtype):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.parametrize(
     "shape, rep",
     [
@@ -194,8 +184,7 @@ def test_tcgen05_ld_16xnb_load_fp32_large_rep(shape, rep):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.parametrize("shape", list(_SHAPE_REPS))
 @pytest.mark.parametrize("rep", [1, 2, 4, 8, 16, 32])
 @pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
@@ -223,8 +212,7 @@ def test_tcgen05_16xnb_roundtrip_16b(shape, rep, dtype):
 # thread reg ↔ TMEM mapping round-trips bit-exactly — the M=64 sweep above
 # already covers the (lane, reg) decomposition, so a sparse rep set suffices.
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.parametrize("shape", ["16x64b", "16x128b", "16x256b"])
 @pytest.mark.parametrize("rep", [1, 2, 4])
 @pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
@@ -239,8 +227,7 @@ def test_tcgen05_16xnb_roundtrip_16b_M128(shape, rep, dtype):
 # produces. ``.16x*b`` M=64 PTX has the matching scatter built in, so the
 # round-trip is bit-exact in the same way as Layout D + M=64.
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.parametrize("shape", ["16x64b", "16x128b", "16x256b"])
 @pytest.mark.parametrize("rep", [1, 2, 4])
 @pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
@@ -345,7 +332,7 @@ def _run_roundtrip_16b(
                     tmem_addr[0], T.uint32(tmem_col_width_32b)
                 )
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": kernel})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -353,7 +340,7 @@ def _run_roundtrip_16b(
         B_np = np.zeros((128, per_thread_elems), dtype=dtype)
 
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A = tvm.runtime.tensor(A_np, dev)
             B = tvm.runtime.tensor(B_np, dev)
             mod(A, B)
@@ -626,7 +613,6 @@ def test_tcgen05_16xnb_sub_slab_view_read(shape, rep):
 # meaningful data — but Layout F leaves that slab undefined. Compilation
 # must raise a clear error, not silently emit a broken kernel.
 @pytest.mark.parametrize("atom_kind,frag_rows", [("16x*b", 128), ("32x32b", 128)])
-@MACA_XFAIL
 def test_layout_F_rejects_incompatible_atoms(atom_kind, frag_rows):
     """Layout F + (.16x*b M=128 or .32x32b) must raise at compile time."""
     if atom_kind == "16x*b":
@@ -668,7 +654,7 @@ def test_layout_F_rejects_incompatible_atoms(atom_kind, frag_rows):
             frag_view = frag.view(local_extent_rows, local_cols, layout=atom_view)
             Tx.wg.copy_async(frag_view[:, :], tmem[0:local_extent_rows, 0:local_cols])
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": kernel})
         with pytest.raises((ValueError, RuntimeError), match="datapath"):
@@ -960,7 +946,7 @@ def _run_load_test(shape: str, rep: int, dtype: str):
                     tmem_addr[0], T.uint32(tmem_col_width_32b)
                 )
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": kernel})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -992,7 +978,7 @@ def _run_load_test(shape: str, rep: int, dtype: str):
                 B_expected[t, r] = _expected_reg_value_16b(A_np, shape, rep, 0, t, r, dtype_np)
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A = tvm.runtime.tensor(A_np, dev)
         B = tvm.runtime.tensor(B_np, dev)
         mod(A, B)
@@ -1010,8 +996,7 @@ def _run_load_test(shape: str, rep: int, dtype: str):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.parametrize("shape", list(_SHAPE_REPS))
 @pytest.mark.parametrize("rep", [1, 4, 16])
 @pytest.mark.parametrize("dtype", ["float32"])
@@ -1116,7 +1101,7 @@ def test_tcgen05_st_16xnb_store(shape, rep, dtype):
                     tmem_addr[0], T.uint32(tmem_col_width_32b)
                 )
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": kernel})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1149,7 +1134,7 @@ def test_tcgen05_st_16xnb_store(shape, rep, dtype):
                 expected_values.append((tmem_lane, 2 * col_fp32 + 1, hi, t, r, row))
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A = tvm.runtime.tensor(A_np, dev)
         B = tvm.runtime.tensor(B_np, dev)
         mod(A, B)
@@ -1180,7 +1165,6 @@ def test_tcgen05_st_16xnb_store(shape, rep, dtype):
     ],
 )
 @pytest.mark.gpu
-@MACA_XFAIL
 def test_alloc_tcgen05_frag_wrapper_compiles(shape, frag_rows, K_cols):
     """Ensure T.alloc_tcgen05_ldst_frag yields a buffer that ``T.copy_async`` accepts
     and lowers to the correct tcgen05 atom for each supported instr_shape."""
@@ -1220,7 +1204,7 @@ def test_alloc_tcgen05_frag_wrapper_compiles(shape, frag_rows, K_cols):
                     tmem_addr[0], T.uint32(max(32, K_cols))
                 )
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": kernel})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1445,7 +1429,7 @@ def _run_sliced_vs_full_load(shape, full_rep, n_chunks):
                     tmem_addr[0], T.uint32(tmem_col_width_32b)
                 )
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": kernel})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1454,7 +1438,7 @@ def _run_sliced_vs_full_load(shape, full_rep, n_chunks):
         Bs_np = np.zeros((128, per_thread_elems), dtype=dtype)
 
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A = tvm.runtime.tensor(A_np, dev)
             Bf = tvm.runtime.tensor(Bf_np, dev)
             Bs = tvm.runtime.tensor(Bs_np, dev)
@@ -1466,8 +1450,7 @@ def _run_sliced_vs_full_load(shape, full_rep, n_chunks):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.parametrize(
     "full_rep, n_chunks",
     [

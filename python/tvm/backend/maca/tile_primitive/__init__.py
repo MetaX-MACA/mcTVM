@@ -16,4 +16,6 @@
 # under the License.
 
 from .copy import *
+from .copy_async import *
 from .elementwise import *
+from .reduction import *

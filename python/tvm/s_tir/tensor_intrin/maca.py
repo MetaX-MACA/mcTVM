@@ -419,6 +419,17 @@ TensorIntrin.register(
     *get_wmma_sync_intrin(16, 16, 16, "float16", "float32", True),
 )
 
+WMMA_SYNC_16x16x16_BF16BF16F32_INTRIN = "maca_wmma_sync_16x16x16_bf16bf16f32"
+TensorIntrin.register(
+    WMMA_SYNC_16x16x16_BF16BF16F32_INTRIN,
+    *get_wmma_sync_intrin(16, 16, 16, "bfloat16", "float32", False),
+)
+WMMA_SYNC_16x16x16_BF16BF16F32_TRANS_INTRIN = "maca_wmma_sync_16x16x16_bf16bf16f32_trans"
+TensorIntrin.register(
+    WMMA_SYNC_16x16x16_BF16BF16F32_TRANS_INTRIN,
+    *get_wmma_sync_intrin(16, 16, 16, "bfloat16", "float32", True),
+)
+
 WMMA_SYNC_16x16x16_f16f16f16_INTRIN = "maca_wmma_sync_16x16x16_f16f16f16"
 TensorIntrin.register(
     WMMA_SYNC_16x16x16_f16f16f16_INTRIN,
@@ -451,6 +462,21 @@ WMMA_LOAD_16x16x16_F16_A_INTRIN = "maca_wmma_load_16x16x16_f16_a_shared"
 TensorIntrin.register(
     WMMA_LOAD_16x16x16_F16_A_INTRIN,
     *get_wmma_load_intrin(16, 16, 16, "float16", "shared", False, False),
+)
+WMMA_LOAD_16x16x16_BF16_A_INTRIN = "maca_wmma_load_16x16x16_bf16_a_shared"
+TensorIntrin.register(
+    WMMA_LOAD_16x16x16_BF16_A_INTRIN,
+    *get_wmma_load_intrin(16, 16, 16, "bfloat16", "shared", False, False),
+)
+WMMA_LOAD_16x16x16_BF16_B_INTRIN = "maca_wmma_load_16x16x16_bf16_b_shared"
+TensorIntrin.register(
+    WMMA_LOAD_16x16x16_BF16_B_INTRIN,
+    *get_wmma_load_intrin(16, 16, 16, "bfloat16", "shared", True, False),
+)
+WMMA_LOAD_16x16x16_BF16_B_TRANS_INTRIN = "maca_wmma_load_16x16x16_bf16_b_trans_shared"
+TensorIntrin.register(
+    WMMA_LOAD_16x16x16_BF16_B_TRANS_INTRIN,
+    *get_wmma_load_intrin(16, 16, 16, "bfloat16", "shared", True, True),
 )
 
 WMMA_LOAD_16x16x4_F32_A_DYN_INTRIN = "maca_wmma_load_16x16x4_f32_a_shared_dyn"
@@ -725,11 +751,11 @@ def get_wmma_intrin_group(
     """
     assert load_scope in ["shared", "shared.dyn"]
     assert store_scope in ["global", "shared", "shared.dyn"]
-    assert in_dtype in ["float16", "int8"]
+    assert in_dtype in ["float16", "bfloat16", "int8"]
     assert out_dtype in ["float16", "float32", "int32"]
 
     shape = "16x16x16"
-    in_dtype = "f16" if in_dtype == "float16" else "s8"
+    in_dtype = {"float16": "f16", "bfloat16": "bf16", "int8": "s8"}[in_dtype]
     out_dtype = "f16" if out_dtype == "float16" else "f32" if out_dtype == "float32" else "s32"
     # convert "shared.dyn" to "shared_dyn"
     load_scope = load_scope.replace(".", "_")

@@ -27,13 +27,6 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import S, TileLayout
 
-MACA_XFAIL = pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [tile-primitive-copy-async-ldgsts] support LDGSTS async global-to-shared copy"
-    ),
-    strict=False,
-)
-
 
 @pytest.mark.parametrize(
     "task",
@@ -44,7 +37,7 @@ MACA_XFAIL = pytest.mark.xfail(
             (128, 32),  # s_shape
             (0, 0),  # g_st
             (128, 32),  # g_extent
-            32,  # thread_cnt
+            64,  # thread_cnt
             TileLayout(S[128, 32]),  # layoutA
             TileLayout(S[128, 32]),  # layoutB
             TileLayout(S[128, 32]),  # layoutS
@@ -55,7 +48,7 @@ MACA_XFAIL = pytest.mark.xfail(
             (32, 32),  # s_shape
             (32, 0),  # g_st
             (32, 32),  # g_extent
-            32,  # thread_cnt
+            64,  # thread_cnt
             TileLayout(S[64, 64]),  # layoutA
             TileLayout(S[64, 64]),  # layoutB
             TileLayout(S[32, 32]),  # layoutS
@@ -66,7 +59,7 @@ MACA_XFAIL = pytest.mark.xfail(
             (32, 32),  # s_shape
             (0, 0, 0),  # g_st
             (1, 32, 32),  # g_extent
-            32,  # thread_cnt
+            64,  # thread_cnt
             TileLayout(S[4, 32, 32]),  # layoutA
             TileLayout(S[4, 32, 32]),  # layoutB
             TileLayout(S[32, 32]),  # layoutS
@@ -75,7 +68,6 @@ MACA_XFAIL = pytest.mark.xfail(
 )
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
 @pytest.mark.parametrize(
     "dtype", ["int8", "float8_e4m3fn", "float8_e5m2", "float16", "bfloat16", "float32"]
 )
@@ -93,13 +85,15 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
 
         T.device_entry()
         cta_id = T.cta_id([1])
+        warp_id = T.warp_id([thread_cnt // 64])
+        lane_id = T.lane_id([64])
         tid = T.thread_id([thread_cnt])
         A_smem = T.alloc_buffer(s_shape, dtype, scope="shared", layout=layoutS)
 
         Tx.cta.copy_async(A_smem[tuple(r_smem)], A[tuple(r_gmem)], dispatch="ldgsts")
-        T.ptx.cp.async_.commit_group()
-        T.ptx.cp.async_.wait_group(0)
-        T.cuda.cta_sync()
+        T.maca.async_wait_gvmcnt(0)
+        T.maca.barrier_inst()
+        T.maca.cta_sync()
         Tx.cta.copy(B[tuple(r_gmem)], A_smem[tuple(r_smem)])
         # fmt: on
 
@@ -122,42 +116,63 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
             A = tvm.runtime.tensor(A_np, dev)
             B = tvm.runtime.tensor(B_np, dev)
             mod(A, B)
-            np.testing.assert_allclose(B_ref, B.numpy())
+            np.testing.assert_allclose(B_ref.astype("float32"), B.numpy().astype("float32"))
 
         tvm.testing.run_with_gpu_lock(run_and_check)
 
 
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_copy_ldgsts_predicate_zero_fill_codegen():
-    """ldgsts direct mode forwards predicate/zero-fill/prefetch without partition temps."""
+    """ldgsts forwards the predicate to MACA's zero-fill BSM intrinsic."""
 
     @T.prim_func
-    def copy_async(A_ptr: T.handle) -> None:
+    def copy_async(A_ptr: T.handle, B_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, (32, 16), "uint8", layout=TileLayout(S[32, 16]))
+        B = T.match_buffer(B_ptr, (32, 16), "uint8", layout=TileLayout(S[32, 16]))
 
         T.device_entry()
-        tid = T.thread_id([32])
+        cta_id = T.cta_id([1])
+        warp_id = T.warp_id([1])
+        lane_id = T.lane_id([64])
+        tid = T.thread_id([64])
         A_smem = T.alloc_buffer((32, 16), "uint8", scope="shared", layout=TileLayout(S[32, 16]))
 
-        Tx.copy_async(
-            A_smem[tid, :],
-            A[tid, :],
+        Tx.cta.copy_async(
+            A_smem[:, :],
+            A[:, :],
             dispatch="ldgsts",
-            direct=True,
-            prefetch_size=128,
-            predicate=tid < 16,
+            predicate=tid < 32,
             fill_mode="zero",
         )
+        T.maca.async_wait_gvmcnt(0)
+        T.maca.barrier_inst()
+        T.maca.cta_sync()
+        Tx.cta.copy(B[:, :], A_smem[:, :])
 
-    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
+    target = tvm.target.Target("maca")
     with target:
         mod = tvm.compile(tvm.IRModule({"main": copy_async}), target=target, tir_pipeline="tirx")
     src = mod.mod.imports[0].inspect_source()
-    assert "cp.async.cg.shared.global.L2::128B" in src
-    # the src-size arity: four operands, the last the zero-fill boundary
-    assert "cp.async.cg.shared.global.L2::128B [%0], [%1], 16, %2;" in src
-    assert "condval" in src
+    with open("copy_async.c", "w") as f:
+        f.write(src)
+    assert "__builtin_mxc_ldg_b64_bsm_predicator" in src
+    assert "predicate" in src
     assert "s_ptr_ptr" not in src
     assert "g_ptr_ptr" not in src
+
+    A_np = np.arange(32 * 16, dtype="uint8").reshape(32, 16)
+    B_np = np.full_like(A_np, 0xA5)
+
+    def run_and_check():
+        dev = tvm.maca(0)
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
+        mod(A, B)
+        expected = np.zeros_like(A_np)
+        expected[:16, :] = A_np[:16, :]
+        np.testing.assert_array_equal(B.numpy(), expected)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
 
 
 if __name__ == "__main__":

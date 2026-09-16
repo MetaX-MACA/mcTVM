@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Register scalar C500 elementwise schedules."""
+"""Register scalar elementwise schedules."""
 
 from tvm.tirx import PrimFunc, TilePrimitiveCall
 from tvm.tirx.operator.tile_primitive import DispatchContext, predicate, register_dispatch

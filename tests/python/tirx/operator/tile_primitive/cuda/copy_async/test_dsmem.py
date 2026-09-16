@@ -40,11 +40,6 @@ from tvm.tirx.operator.tile_primitive.ops import CopyAsync
 from tvm.tirx.stmt_functor import StmtExprVisitor
 from tvm.tirx.tile_primitive import DispatchContext
 
-MACA_XFAIL = pytest.mark.xfail(
-    reason="TODO(maca): [tile-primitive-copy-async-dsmem] support DSMEM async copy dispatch",
-    strict=False,
-)
-
 
 def _make_dsmem_dispatch_call(shape, dtype, src_layout, dst_layout):
     """Call copy_dsmem_impl directly. Returns impl or raises DispatchFail."""
@@ -56,7 +51,7 @@ def _make_dsmem_dispatch_call(shape, dtype, src_layout, dst_layout):
     ranges = [Range.from_min_extent(0, s) for s in shape]
     config = {"mbar": Var("mbar", "handle"), "remote_cta_id": IntImm("int32", 1)}
     op_call = CopyAsync(BufferRegion(dst_buf, ranges), BufferRegion(src_buf, ranges), config=config)
-    target = tvm.target.Target({"kind": "maca", "arch": "sm_90a"})
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_90a"})
     sctx = DispatchContext(target, ExecScope("thread"), {}, {})
     return copy_dsmem_impl(op_call, sctx)
 
@@ -129,8 +124,7 @@ def _layout_physical_elements(layout):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 @pytest.mark.parametrize("shape,dtype,src_spec,dst_spec,expected", DSMEM_CONFIGS)
 def test_dsmem(shape, dtype, src_spec, dst_spec, expected):
     """Dispatch assertion + GPU correctness for DSMEM copy.
@@ -214,7 +208,7 @@ def test_dsmem(shape, dtype, src_spec, dst_spec, expected):
         # fmt: on
 
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": dsmem_copy})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -227,7 +221,7 @@ def test_dsmem(shape, dtype, src_spec, dst_spec, expected):
         B_np = np.zeros(shape, dtype=np_dtype)
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A_tvm = tvm.runtime.tensor(A_np, dev)
         B_tvm = tvm.runtime.tensor(B_np, dev)
         mod(A_tvm, B_tvm)
@@ -236,7 +230,6 @@ def test_dsmem(shape, dtype, src_spec, dst_spec, expected):
     tvm.testing.run_with_gpu_lock(run_and_check)
 
 
-@MACA_XFAIL
 def test_dsmem_dispatch_missing_config():
     """Dispatch fails when required config keys are missing."""
     from tvm.ir import Range
@@ -245,7 +238,7 @@ def test_dsmem_dispatch_missing_config():
     layout = TileLayout(S[64])
     buf = tvm.tirx.decl_buffer((64,), "float16", "A", scope="shared.dyn", layout=layout)
     br = BufferRegion(buf, [Range.from_min_extent(0, 64)])
-    target = tvm.target.Target({"kind": "maca", "arch": "sm_90a"})
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_90a"})
     sctx = DispatchContext(target, ExecScope("thread"), {}, {})
 
     with pytest.raises(DispatchFail, match="remote_cta_id"):
