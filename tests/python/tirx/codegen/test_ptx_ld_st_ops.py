@@ -25,14 +25,7 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.cuda.tile_primitive.copy._common import copy_ptx_form
 
-MACA_TIRX_COPY_INTRIN_XFAIL_REASON = (
-    "TODO(maca): [tirx-copy] support TIRX shared-memory scope resolution and PTX ld/st "
-    "byte-copy intrinsics"
-)
-
-pytestmark = pytest.mark.xfail(reason=MACA_TIRX_COPY_INTRIN_XFAIL_REASON, strict=False)
-
-TARGET = tvm.target.Target("maca")
+TARGET = tvm.target.Target("cuda")
 
 # num_bytes → kernel layout. ``fill_offset`` fills lane i with ``i + fill_offset``.
 _SHARED_COPY_CASES = {
@@ -48,7 +41,7 @@ def _build_and_run(func, *np_args):
     mod = tvm.compile(tvm.IRModule({"main": func}), target=TARGET, tir_pipeline="tirx")
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         rt_args = [tvm.runtime.tensor(a, device=dev) for a in np_args]
         mod(*rt_args)
         return tuple(a.numpy() for a in rt_args)
@@ -135,7 +128,7 @@ def test_ptx_ld_st_codegen_emits_shared_asm():
         Tx.copy(D[0:4], reg[:])
     # fmt: on
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.compile(tvm.IRModule({"main": copy_kernel}), target=target, tir_pipeline="tirx")
     src = mod.mod.imports[0].inspect_source("cuda")
@@ -167,6 +160,25 @@ def test_ptx_ld_st_raw_shared_address_codegen():
     assert src.count("__cvta_generic_to_shared") == 1
     assert '"st.weak.shared::cta.b128 [%0], %1;"' in src
     assert '"q"(__value)' in src
+
+
+def test_ptx_ld_st_immediate_offset_codegen():
+    """An immediate displacement must stay inside the PTX memory operand."""
+
+    @T.prim_func
+    def main(src: T.Buffer((4,), "uint64"), out: T.Buffer((4,), "uint64")):
+        T.device_entry()
+        tx = T.thread_id([32])
+        values = T.alloc_local((2,), "uint64")
+        if tx == 0:
+            T.ptx.ld.global_.v2.b64(values[0], values[1], T.ptx.addr(src.data, 16))
+            T.ptx.st.global_.v2.b64(T.ptx.addr(out.data, 16), values[0], values[1])
+
+    with TARGET:
+        mod = tvm.compile(tvm.IRModule({"main": main}), target=TARGET, tir_pipeline="tirx")
+    src = mod.mod.imports[0].inspect_source("cuda")
+    assert "ld.global.v2.b64 {%0, %1}, [%2+16];" in src
+    assert "st.global.v2.b64 [%0+16], {%1, %2};" in src
 
 
 def test_ptx_ld_global_nc_v8_codegen():
@@ -249,7 +261,7 @@ def test_ptx_ld_vector_scatter_dst_codegen():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.parametrize(
     "num_bytes",
     [16, 8, 4, 2, 1],

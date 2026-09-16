@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""MACA shared-memory elementwise dispatch using scalar C500 arithmetic."""
+"""MACA shared-memory elementwise dispatch using scalar arithmetic."""
 
 from tvm.script import tirx as T
 from tvm.tirx import PrimFunc, TilePrimitiveCall
@@ -55,12 +55,12 @@ def is_smem_ewise(spec):
                 cta_threads = int(tx_iv.dom.extent)
             except (TypeError, ValueError):
                 return False, f"non-static threadIdx.x extent: {tx_iv.dom.extent}"
-            # C500 exposes Wave64 and CTA barriers, but no subgroup barrier
+            # MACA exposes Wave64 and CTA barriers, but no subgroup barrier
             # spanning four waves. Restrict this path to one warpgroup per CTA
             # so the CTA barrier emitted below is exactly the collective scope.
             if cta_threads != 256:
                 return False, (
-                    "warpgroup shared elementwise requires one 256-thread CTA on C500 "
+                    "warpgroup shared elementwise requires one 256-thread CTA on MACA "
                     f"(got {cta_threads})"
                 )
         plan, msg = spec.parse(op_call)
@@ -94,7 +94,7 @@ def _tid_expr(sctx: DispatchContext):
 
 
 def emit_smem(op_call: TilePrimitiveCall, spec, sctx: DispatchContext) -> PrimFunc:
-    """Partition a shared tile across active C500 threads and emit scalar ops."""
+    """Partition a shared tile across active threads and emit scalar ops."""
 
     plan, msg = spec.parse(op_call)
     if msg is not None or plan is None:

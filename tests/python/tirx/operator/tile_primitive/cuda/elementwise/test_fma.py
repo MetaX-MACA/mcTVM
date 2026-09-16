@@ -361,7 +361,7 @@ def test_fma_warpgroup_wg_local_layout():
 # -----------------------------------------------------------------------------
 # Dispatch codegen check (no GPU runtime — explicit target arch).
 # Complements ``test_fma_warpgroup_wg_local_emits_packed_f32x2`` (which uses
-# the host-detected ``Target("maca")`` and skips when arch < sm_100).
+# the host-detected ``Target("cuda")`` and skips when arch < sm_100).
 # -----------------------------------------------------------------------------
 @MACA_XFAIL
 def test_fma_f32_sm100_packed_f32x2_dispatch():

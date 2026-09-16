@@ -23,11 +23,6 @@ import tvm.testing
 from tvm.script import tirx as T
 from tvm.testing import env
 
-MACA_PTX_SCALAR_F32_XFAIL_REASON = (
-    "TODO(maca): [ptx-f32-math] support PTX scalar f32 math intrinsics such as add, "
-    "multiply, and maximum"
-)
-
 
 @T.prim_func(s_tir=True)
 def ptx_scalar_f32_math(
@@ -51,18 +46,17 @@ def ptx_scalar_f32_math(
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(reason=MACA_PTX_SCALAR_F32_XFAIL_REASON, strict=False)
+@pytest.mark.skipif(not env.has_cuda_compute(7), reason="need cuda compute >= 7.0")
 def test_ptx_scalar_f32_math():
     f = ptx_scalar_f32_math
-    mod = tvm.compile(f, target="maca")
+    mod = tvm.compile(f, target="cuda")
     rng = np.random.default_rng(0)
     A_np = rng.standard_normal(32).astype("float32")
     B_np = rng.standard_normal(32).astype("float32")
     Z = np.zeros((32,), dtype="float32")
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A_nd = tvm.runtime.tensor(A_np, device=dev)
         B_nd = tvm.runtime.tensor(B_np, device=dev)
         Cadd = tvm.runtime.tensor(Z.copy(), device=dev)

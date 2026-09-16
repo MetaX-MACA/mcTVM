@@ -23,16 +23,10 @@ import tvm
 from tvm.script import tirx as T
 from tvm.testing import env
 
-MACA_TIRX_WARP_REDUCE_XFAIL_REASON = (
-    "TODO(maca): [warp-reduce] support TIRX warp reduction helpers and lane-scope lowering"
-)
-
-pytestmark = pytest.mark.xfail(reason=MACA_TIRX_WARP_REDUCE_XFAIL_REASON, strict=False)
-
 TARGET = tvm.target.Target("maca")
 
 
-def _build_and_run(func, n=32):
+def _build_and_run(func, n=64):
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=TARGET, tir_pipeline="tirx")
     out_np = np.zeros(n, dtype="float32")
@@ -54,20 +48,20 @@ def test_warp_sum_full():
     # fmt: off
     @T.prim_func
     def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (32,), "float32")
+        out = T.match_buffer(out_ptr, (64,), "float32")
         T.device_entry()
         cta_id = T.cta_id([1])
         warp_id = T.warp_id([1])
-        lane = T.lane_id([32])
+        lane = T.lane_id([64])
         val: T.f32 = T.float32(lane + 1)
-        val = T.cuda.warp_sum(val)
+        val = T.maca.warp_sum(val)
         out[lane] = val
         # fmt: on
 
     result, mod = _build_and_run(func)
-    expected = np.float32(32 * 33 / 2)  # sum(1..32)
-    np.testing.assert_allclose(result, np.full(32, expected))
-    assert "warp_reduce_sum_32" in mod.mod.imports[0].inspect_source()
+    expected = np.float32(64 * 65 / 2)  # sum(1..32)
+    np.testing.assert_allclose(result, np.full(64, expected))
+    assert "maca_warp_reduce_sum_64" in mod.mod.imports[0].inspect_source()
 
 
 @pytest.mark.gpu
@@ -78,13 +72,13 @@ def test_warp_sum_partial_8():
     # fmt: off
     @T.prim_func
     def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (32,), "float32")
+        out = T.match_buffer(out_ptr, (64,), "float32")
         T.device_entry()
         cta_id = T.cta_id([1])
         warp_id = T.warp_id([1])
-        lane = T.lane_id([32])
+        lane = T.lane_id([64])
         val: T.f32 = T.float32(lane + 1)
-        val = T.cuda.warp_sum(val, width=8)
+        val = T.maca.warp_sum(val, width=8)
         out[lane] = val
         # fmt: on
 
@@ -93,8 +87,8 @@ def test_warp_sum_partial_8():
     # Group 1: lanes 8-15 → sum(9..16) = 100
     # Group 2: lanes 16-23 → sum(17..24) = 164
     # Group 3: lanes 24-31 → sum(25..32) = 228
-    expected = np.zeros(32, dtype="float32")
-    for g in range(4):
+    expected = np.zeros(64, dtype="float32")
+    for g in range(8):
         group_sum = sum(range(g * 8 + 1, g * 8 + 9))
         expected[g * 8 : (g + 1) * 8] = group_sum
     np.testing.assert_allclose(result, expected)
@@ -108,19 +102,19 @@ def test_warp_max_partial_4():
     # fmt: off
     @T.prim_func
     def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (32,), "float32")
+        out = T.match_buffer(out_ptr, (64,), "float32")
         T.device_entry()
         cta_id = T.cta_id([1])
         warp_id = T.warp_id([1])
-        lane = T.lane_id([32])
+        lane = T.lane_id([64])
         val: T.f32 = T.float32(lane + 1)
-        val = T.cuda.warp_max(val, width=4)
+        val = T.maca.warp_max(val, width=4)
         out[lane] = val
         # fmt: on
 
     result, _ = _build_and_run(func)
-    expected = np.zeros(32, dtype="float32")
-    for g in range(8):
+    expected = np.zeros(64, dtype="float32")
+    for g in range(16):
         group_max = float(g * 4 + 4)
         expected[g * 4 : (g + 1) * 4] = group_max
     np.testing.assert_allclose(result, expected)
@@ -134,18 +128,18 @@ def test_warp_min_full():
     # fmt: off
     @T.prim_func
     def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (32,), "float32")
+        out = T.match_buffer(out_ptr, (64,), "float32")
         T.device_entry()
         cta_id = T.cta_id([1])
         warp_id = T.warp_id([1])
-        lane = T.lane_id([32])
+        lane = T.lane_id([64])
         val: T.f32 = T.float32(lane + 1)
-        val = T.cuda.warp_min(val)
+        val = T.maca.warp_min(val)
         out[lane] = val
         # fmt: on
 
     result, _ = _build_and_run(func)
-    np.testing.assert_allclose(result, np.full(32, 1.0))
+    np.testing.assert_allclose(result, np.full(64, 1.0))
 
 
 @pytest.mark.gpu
@@ -156,20 +150,20 @@ def test_warp_sum_partial_2():
     # fmt: off
     @T.prim_func
     def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (32,), "float32")
+        out = T.match_buffer(out_ptr, (64,), "float32")
         T.device_entry()
         cta_id = T.cta_id([1])
         warp_id = T.warp_id([1])
-        lane = T.lane_id([32])
+        lane = T.lane_id([64])
         val: T.f32 = T.float32(lane)
-        val = T.cuda.warp_sum(val, width=2)
+        val = T.maca.warp_sum(val, width=2)
         out[lane] = val
         # fmt: on
 
     result, _ = _build_and_run(func)
     # Pairs: (0,1)→1, (2,3)→5, (4,5)→9, ...
-    expected = np.zeros(32, dtype="float32")
-    for i in range(16):
+    expected = np.zeros(64, dtype="float32")
+    for i in range(32):
         pair_sum = float(2 * i + 2 * i + 1)
         expected[2 * i] = pair_sum
         expected[2 * i + 1] = pair_sum
@@ -185,19 +179,19 @@ def test_warp_sum_all_widths(width):
     # fmt: off
     @T.prim_func
     def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (32,), "float32")
+        out = T.match_buffer(out_ptr, (64,), "float32")
         T.device_entry()
         cta_id = T.cta_id([1])
         warp_id = T.warp_id([1])
-        lane = T.lane_id([32])
+        lane = T.lane_id([64])
         val: T.f32 = T.float32(lane)
-        val = T.cuda.warp_sum(val, width=width)
+        val = T.maca.warp_sum(val, width=width)
         out[lane] = val
         # fmt: on
 
     result, _ = _build_and_run(func)
-    expected = np.zeros(32, dtype="float32")
-    num_groups = 32 // width
+    expected = np.zeros(64, dtype="float32")
+    num_groups = 64 // width
     for g in range(num_groups):
         group_sum = sum(range(g * width, (g + 1) * width))
         expected[g * width : (g + 1) * width] = float(group_sum)

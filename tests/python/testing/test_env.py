@@ -77,7 +77,7 @@ def test_has_gpu_is_raw_any_device():
         or env._device_exists("opencl")  # pylint: disable=protected-access
         or env._device_exists("metal")  # pylint: disable=protected-access
         or env._device_exists("vulkan")  # pylint: disable=protected-access
-        or env._device_exists("maca")  # pylint: disable=protected-access
+        or env._device_exists("maca")
     )
     assert env.has_gpu() == any_device
 
@@ -98,13 +98,55 @@ def test_target_enabled_respects_tvm_test_targets(monkeypatch):
 def test_maca_compute_is_monotonic():
     """has_maca_compute is monotone in the requested version."""
     if not env.has_maca():
-        # Without a MACA device every query is False, including the (0, 0) floor.
+        # Without a CUDA device every query is False, including the (0, 0) floor.
         assert not env.has_maca_compute(1, 0)
         assert not env.has_maca_compute(0, 0)
         return
     # A device that satisfies (major, minor) also satisfies anything lower.
     assert env.has_maca_compute(1, 0)
     assert env.has_maca_compute(0, 0)
+
+
+@pytest.mark.parametrize(
+    ("compute_version", "expected"),
+    [
+        ("8.0", "sm_80"),
+        ("9.0", "sm_90a"),
+        ("10.0", "sm_100a"),
+        ("10.3", "sm_103a"),
+        ("invalid", None),
+    ],
+)
+def test_cuda_arch_from_compute_version(compute_version, expected):
+    assert env._cuda_arch_from_compute_version(compute_version) == expected
+
+
+def test_has_cuda_arch_matches_detected_device():
+    actual = env.cuda_arch()
+    if actual is None:
+        assert not env.has_cuda_arch("sm_100a")
+    else:
+        assert env.has_cuda_arch(actual)
+
+
+def test_cuda_arch_uses_requested_device(monkeypatch):
+    class Device:
+        exist = True
+        compute_version = "10.3"
+
+    requested = []
+
+    def cuda(device_id):
+        requested.append(device_id)
+        return Device()
+
+    env.cuda_arch.cache_clear()
+    monkeypatch.setattr(tvm, "cuda", cuda)
+    try:
+        assert env.cuda_arch(7) == "sm_103a"
+        assert requested == [7]
+    finally:
+        env.cuda_arch.cache_clear()
 
 
 def test_has_multi_gpu_is_bool():

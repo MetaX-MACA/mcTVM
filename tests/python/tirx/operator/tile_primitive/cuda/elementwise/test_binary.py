@@ -313,7 +313,7 @@ def test_binary_op_local_subcta_trivial(exec_scope, rhs_kind, op_type):
     dtype = "float16"
     m, n = 4, 8
     n_threads = 256 if exec_scope == "cta" else (256 if exec_scope == "warpgroup" else 64)
-    # Select warp3 for warp scope and the sole C500 warpgroup otherwise.
+    # in this test, use warp3/warpgroup1 to test
     thr_str = 0 if exec_scope in ("cta", "warpgroup") else 64 * 3
     a_shape = (n_threads, m, n)
     b_shape = (n_threads, m, n if rhs_kind == "region" else 1)
@@ -367,7 +367,7 @@ def test_binary_op_local_subcta_trivial(exec_scope, rhs_kind, op_type):
                     tx_op(C_local, A_local, const)
                 else:
                     tx_op(C_local, A_local, B_local)
-                # T.maca.cta_sync()
+                # T.cuda.cta_sync()
 
         if thr_str <= _tid and _tid < thr_str + n_threads:
             for i in T.serial(m):
@@ -780,7 +780,7 @@ def test_fma_warpgroup_wg_local_emits_packed_f32x2():
 # Dispatch codegen checks (no GPU runtime — explicit target arch).
 # These complement the existing `*_warpgroup_wg_local_layout` / `*_auto_dispatch`
 # variants by forcing the arch in the Target dict, so the codegen path runs
-# even on hosts where ``Target("maca")`` cannot detect the GPU.
+# even on hosts where ``Target("cuda")`` cannot detect the GPU.
 # -----------------------------------------------------------------------------
 @MACA_XFAIL
 def test_binary_add_f32_sm100_packed_f32x2_dispatch():
