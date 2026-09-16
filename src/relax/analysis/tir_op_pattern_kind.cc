@@ -124,7 +124,7 @@ class PatternKindAnalyzer : public StmtExprVisitor {
     // If the block index pattern is not opaque, update kind.
     if (index_pair_pattern != kOpaque) {
       // This rule for softmax: reduce + injective.
-      if (IsOutputBlock(op) && kind_ == kCommReduce) {
+      if (IsOutputBlock(op) && kind_ == kCommReduce && !IsPureCopyBlock(op)) {
         kind_ = kOutEWiseFusable;
       } else {
         kind_ = std::max(kind_, index_pair_pattern);
@@ -335,6 +335,15 @@ class PatternKindAnalyzer : public StmtExprVisitor {
       }
     }
     return true;
+  }
+
+  /*! \brief Whether a block only copies one buffer load to its output. */
+  static bool IsPureCopyBlock(const SBlockNode* block) {
+    const auto* store = block->body.as<BufferStoreNode>();
+    if (store == nullptr) {
+      return false;
+    }
+    return RemoveCast(store->value).as<TensorLoadNode>() != nullptr;
   }
 
  private:
