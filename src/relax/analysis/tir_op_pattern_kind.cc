@@ -23,7 +23,6 @@
 #include <tvm/relax/analysis.h>
 #include <tvm/relax/op_attr_types.h>
 #include <tvm/tirx/analysis.h>
-#include <tvm/tirx/expr.h>
 #include <tvm/tirx/expr_functor.h>
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/op.h>
