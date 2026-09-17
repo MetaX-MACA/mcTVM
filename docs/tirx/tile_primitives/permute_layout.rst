@@ -19,14 +19,41 @@ permute_layout
 ==============
 
 ``permute_layout`` rearranges a warp's data from a source ``TileLayout`` to a
-destination one — typically an in-place transpose. The single CUDA variant
-(``warp_xor_swizzle``) stages each lane's elements through a ``local`` buffer and
-writes them back under the destination layout. It chooses a per-lane **XOR
-swizzle** using the shared-memory bank model; for shared operands, the selected
-iteration order makes both read and write phases bank-conflict-free. A
-``warp_sync`` separates the two phases so the op is safe even when source and
-destination alias. Source:
+destination one — typically an in-place transpose. CUDA and MACA register
+separate implementations because their warp widths and memory instructions
+differ. Both stage every lane's values in registers and use a barrier between
+the load and store phases, so source and destination may alias.
+
+The CUDA variant (``warp_xor_swizzle``) uses Warp32 and an optional PTX shared
+memory path. Source:
 ``python/tvm/backend/cuda/tile_primitive/permute_layout/warp_xor_swizzle.py``.
+
+MACA C500 variant
+-----------------
+
+``wave64_halfwarp_xor_swizzle`` targets exactly ``maca -mcpu=xcore1000``. It
+requires warp scope, a one-dimensional full Wave64 lane range ``[0, 64)``,
+matching plain ``TileLayout`` slices, and equal 32-bit source and destination
+dtypes (``uint32``, ``int32``, or ``float32``). The slice volume must be
+divisible by 32, with ``P = volume / 32`` a power of two no larger than 32;
+both regrouped layouts must be bijections and admit a conflict-free XOR
+schedule. Ordinary typed buffer loads and stores are used for global, shared,
+and local buffers; no CUDA PTX, inline assembly, TCGEN05, TMA, tensor-memory,
+or BSM-permute builtin is involved.
+
+All 64 lanes execute both ``T.maca.warp_sync()`` barriers unconditionally.
+Only lanes 0--31 issue memory operations because C500 shared memory has 32
+four-byte banks and the proven CUDA schedule models one consecutive 32-lane
+cohort. The first barrier follows the complete register-load phase, which is
+required for aliased views; the second completes the store phase before the
+caller reuses the tile.
+
+The MACA implementation intentionally rejects 8/16/64/128-bit elements,
+``ComposeLayout`` or swizzled wrappers, CTA scope, multi-dimensional
+``threadIdx``, partial or strided Wave64 ranges, unsupported ``mcpu`` names,
+and layouts for which the bank model cannot find a common XOR schedule. A
+full-Wave64 or native BSM permutation remains future work requiring separate
+layout, bank, and hardware certification.
 
 What it accepts
 ---------------
@@ -39,7 +66,7 @@ The implementation first runs its ``_why_reject`` validator:
     if "threadIdx.y" in launch or "threadIdx.z" in launch: return "multi-dim threadIdx"
     if src_buf.dtype != dst_buf.dtype:             return "dtype mismatch"
     if src_ext_i != dst_ext_i:                     return "extent mismatch"
-    if dtype_bytes not in (1, 2, 4, 8, 16):        return "unsupported dtype byte width"
+    if dtype_bytes != 4:                            return "requires 32-bit elements"
     if not isinstance(src_buf.layout, TileLayout): return "src not a plain TileLayout"
     if not isinstance(dst_buf.layout, TileLayout): return "dst not a plain TileLayout"
     # + layouts must slice, regroup, and define bijections on the slice
