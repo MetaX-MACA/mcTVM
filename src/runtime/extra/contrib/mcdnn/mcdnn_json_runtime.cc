@@ -58,6 +58,8 @@ class mcDNNJSONRuntime : public JSONRuntimeBase {
         std::string op_name = node.GetOpName();
         if (op_name.find("conv2d") != std::string::npos) {
           op_execs_[i] = GetConv2DExec(node);
+        } else if (op_name.find("softmax") != std::string::npos) {
+          op_execs_[i] = GetSoftmaxExec(node);
         } else {
           TVM_FFI_THROW(InternalError) << "Unsupported op: " << op_name;
         }
@@ -185,6 +187,17 @@ class mcDNNJSONRuntime : public JSONRuntimeBase {
       }
     };
     return op_exec;
+  }
+
+  std::function<void()> GetSoftmaxExec(const JSONGraphNode& node) {
+    int axis = static_cast<int>(node.GetAttr<int64_t>("axis"));
+    auto softmax = tvm::ffi::Function::GetGlobalRequired("tvm.contrib.mcdnn.softmax.forward");
+    return [=, this]() {
+      auto* x = GetInput(node, 0);
+      uint32_t output_eid = EntryID(outputs_[0]);
+      auto* y = data_entry_[output_eid];
+      softmax(const_cast<DLTensor*>(x), const_cast<DLTensor*>(y), axis);
+    };
   }
 
   std::vector<std::function<void()>> op_execs_;

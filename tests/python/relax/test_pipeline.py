@@ -152,6 +152,52 @@ def test_non_gpu_target_raises_error(target_name, pipeline_func):
         pipeline_func(target)
 
 
+@tvm.script.ir_module
+class MCDNNSoftmaxModule:
+    @R.function
+    def main(x: R.Tensor((2, 4), dtype="float32")) -> R.Tensor((2, 4), dtype="float32"):
+        with R.dataflow():
+            y = R.nn.softmax(x, axis=1)
+            R.output(y)
+        return y
+
+
+@tvm.script.ir_module
+class MCDNNSoftmaxTrailingDimensionModule:
+    @R.function
+    def main(x: R.Tensor((2, 4, 3), dtype="float32")) -> R.Tensor((2, 4, 3), dtype="float32"):
+        with R.dataflow():
+            y = R.nn.softmax(x, axis=1)
+            R.output(y)
+        return y
+
+
+def _mcdnn_composite_functions(mod):
+    return [
+        func
+        for _, func in mod.functions.items()
+        if isinstance(func, relax.Function)
+        and func.attrs is not None
+        and func.attrs.get("Codegen") == "mcdnn"
+    ]
+
+
+def test_mcdnn_softmax_partition():
+    from tvm.relax.backend.maca.mcdnn import partition_for_mcdnn
+
+    mod = partition_for_mcdnn(MCDNNSoftmaxModule)
+    composites = _mcdnn_composite_functions(mod)
+    assert len(composites) == 1
+    assert "Composite" in composites[0].script() and "mcdnn.softmax" in composites[0].script()
+
+
+def test_mcdnn_softmax_rejects_trailing_dimension():
+    from tvm.relax.backend.maca.mcdnn import partition_for_mcdnn
+
+    mod = partition_for_mcdnn(MCDNNSoftmaxTrailingDimensionModule)
+    assert not _mcdnn_composite_functions(mod)
+
+
 # An elementwise binary op with a scalar constant operand. `R.power(x, const)`
 # legalizes to a single elementwise TIR PrimFunc, which the default GPU pipeline
 # must schedule (bind to GPU threads). Without a thread binding the kernel

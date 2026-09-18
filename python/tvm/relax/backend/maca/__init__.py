@@ -16,3 +16,11 @@
 # specific language governing permissions and limitations
 # under the License.
 """The Relax MACA backend compilation pipeline and other passes."""
+
+from .pipeline import (
+    dataflow_lower_passes,
+    finalize_passes,
+    get_default_pipeline,
+    legalize_passes,
+    library_dispatch_passes,
+)
