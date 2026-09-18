@@ -15,8 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from .copy import *
-from .copy_async import *
-from .elementwise import *
-from .gemm import *
-from .reduction import *
+"""MACA tile-primitive GEMM implementations."""
+
+from .mma_m16n16k16 import *

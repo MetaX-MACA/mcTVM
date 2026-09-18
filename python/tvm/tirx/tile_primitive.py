@@ -82,6 +82,9 @@ class DispatchContext(Object, Scriptable):
 
     shared_state : Dict[str, Object]
         Shared state persisting across dispatch calls within a single lowering pass.
+        ``buffer_storage_roots`` maps buffer variables to their allocation roots
+        through direct ``DeclBuffer(data=source.data)`` aliases. Dispatchers can
+        use it to check storage identity before buffer views are lowered.
     """
 
     target: Target
