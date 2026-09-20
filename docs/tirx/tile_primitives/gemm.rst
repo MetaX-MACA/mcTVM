@@ -30,10 +30,10 @@ tile, accumulating over K in place. Source:
 ``python/tvm/backend/cuda/tile_primitive/gemm/mma_m16n8k_.py``. (For the
 Blackwell async tensor-core path see :doc:`gemm_async`.)
 
-MACA C500 / xcore1000
----------------------
+MACA
+--------------
 
-MACA registers synchronous Wave64 variants for C500/xcore1000. All variants
+MACA registers synchronous Wave64 variants. All variants
 require non-replicated ``local`` register fragments, full Wave64 participation,
 constant transpose flags, ``alpha == 1.0``, and ``beta`` equal to 0 or 1. The
 verified signature matrix is:
@@ -54,14 +54,14 @@ verified signature matrix is:
      - ``m16n16k16``
      - ``mma_16x16x16bf16``
      - BF16 payload bits are preserved; f32 accumulation
-   * - ``float16 / float16 / float16 / float16``
-     - ``m16n16k16``
-     - ``mma_16x16x16f16``
-     - C is promoted to f32; native result is rounded to f16 after every K atom
    * - ``float32 / float32 / float32 / float32``
      - ``m16n16k4``
      - ``mma_16x16x4f32``
      - full-f32 arithmetic; A/B have one element per lane
+   * - ``float32 / float32 / float32 / float32`` (``precision="tf32"``)
+     - ``m16n16k8``
+     - ``mma_16x16x8tf32``
+     - FP32 storage; native TF32-truncated multipliers and FP32 accumulation/output
    * - ``float64 / float64 / float64 / float64``
      - ``m16n16k4``
      - ``mma_16x16x4f64``
@@ -70,31 +70,13 @@ verified signature matrix is:
      - ``m16n16k16``
      - ``mma_16x16x16i8``
      - packed byte payloads and int32 accumulation
-   * - ``uint8 / uint8 / int32 / int32``
-     - ``m16n16k16``
-     - ``mma_16x16x16i8``
-     - four signed MMA calls combine low-seven-bit and high-bit products
-   * - ``int4 / int4 / int32 / int32``
-     - ``m8n8k32``
-     - software dot product
-     - cross-lane gathering, low-nibble-first unpacking and sign extension
-   * - ``uint4 / uint4 / int32 / int32``
-     - ``m8n8k32``
-     - software dot product
-     - cross-lane gathering and unsigned nibble expansion
-   * - ``int1 / int1 / int32 / int32``
-     - ``m8n8k128``
-     - ``bmma`` equivalent
-     - AND/popcount products; XOR is a different operation and is not selected
 
 Every row supports all four transpose orientations, multiple M/N/K atoms,
 aligned nonzero regions, and exact in-place C=D. Regions must be positive,
 in bounds, and aligned to the atom dimensions in their logical orientation.
 Beta=0 never reads C; beta=1 initializes each output from C once before the
-K loop. Integer accumulation wraps modulo 2**32, including the software
-corrections, which use unsigned C++ arithmetic to avoid signed-overflow UB.
-The unsigned SDK overload calls the signed i8 builtin without correction;
-the tile helper explicitly corrects this for values above 127.
+K loop. Ordinary FP32 always selects full-FP32 ``m16n16k4``; it is never
+silently reduced. TF32 requires explicit ``precision="tf32"``.
 
 For one atom, lane ``l`` and local element ``p`` own these logical coordinates:
 
@@ -113,52 +95,26 @@ For one atom, lane ``l`` and local element ``p`` own these logical coordinates:
      - ``(l % 16, l // 16)``
      - ``(l // 16, l % 16)``
      - ``(4*(l // 16) + p, l % 16)``, p=0..3
+   * - 16x16x8, TF32
+     - ``(l % 16, ((l // 16) << 1) ^ 7)`` then its preceding K coordinate
+     - ``(((l // 16) << 1) ^ 7, l % 16)`` then its preceding K coordinate
+     - ``(4*(l // 16) + p, l % 16)``, p=0..3
    * - 16x16x4, f64
      - ``(l % 16, l // 16)``
      - ``(l // 16, l % 16)``
      - ``(l // 16 + 4*p, l % 16)``, p=0..3
-   * - 8x8x32, i4/u4
-     - ``(l % 8, 4*(l // 8) + p)``, p=0..3
-     - ``(4*(l // 8) + p, l % 8)``, p=0..3
-     - ``(l // 8, l % 8)``
-   * - 8x8x128, int1
-     - ``(l % 8, 16*(l // 8) + p)``, p=0..15
-     - ``(16*(l // 8) + p, l % 8)``, p=0..15
-     - ``(l // 8, l % 8)``
 
 Per-lane storage orders atoms as A[M-tile, K-tile, p],
 B[K-tile, N-tile, p], and C/D[M-tile, N-tile, p]. Transposition permutes
 the logical axes while preserving that physical order. These mappings use
-all 64 lanes without replication. The paired A/B K ordering differs from
-the SDK's reversed K groups but preserves the same dot products.
-
-Packed inputs require explicit packed storage: each lane's four nibbles or
-sixteen bits occupy one uint16, with increasing K in increasing bit position.
-Stage through a uint16 buffer view, as in the numerical tests; scalar int4
-and int1 stores do not pack individual logical elements. GEMM uses byte offsets
-so adjacent two-byte atoms remain distinct. Signed nibbles encode -8..7 in
-two's complement. ``int1`` is interpreted as the SDK's bit payload: set bits
-contribute 1 to an AND/popcount dot product (also the product of two signed
-one-bit values -1). It does not implement XOR/popcount or bipolar -1/+1 GEMM.
-The software helpers gather the distributed row/column chunks before computing
-each output; they do not assume each lane already owns a complete SDK fragment.
+all 64 lanes without replication. The paired A/B K ordering models the
+native reversed group order exactly.
 
 The implementation rejects mixed signedness, incompatible accumulator types,
 non-matching layouts, narrowed execution scopes, unsupported target architectures,
 and shifted overlapping C/D views before code generation. D may not alias A/B.
-TF32 has a compiling, executable xcore1000 builtin, but the current MACA WMMA
-codegen has no mapping from a TIR dtype to ``precision::tf32``; float32 maps to
-``float`` and uses full-f32 arithmetic. A reduced-precision mode is not selected
-implicitly. The installed MXCC rejects FP8 MMA
-(``__builtin_mxc_mma_f32_16x16x16f8_e4m3`` is undeclared), so none of TVM's
-e4m3fn/e4m3fnuz/e5m2 encodings are advertised as MMA inputs. The SDK defines no
-mixed-signedness overload. Async GEMM, tensor memory, and tcgen05 remain outside
-this synchronous implementation.
-
-This matrix was validated on C500 with MACA 3.0.0.0, driver 3.6.11 and
-MXCC 1.0.0 (f794f08733), targeting xcore1000. The general SDK type table
-(MXMACA C++ guide CN_V03, sections 1.24.2–1.24.4, pp. 224–225) alone does
-not establish a working compiler signature or its arithmetic semantics.
+TF32 uses FP32 storage, native TF32-truncated multipliers, and FP32
+accumulation/output.
 
 What it accepts
 ---------------

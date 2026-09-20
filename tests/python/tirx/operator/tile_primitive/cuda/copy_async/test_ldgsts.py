@@ -153,8 +153,6 @@ def test_copy_ldgsts_predicate_zero_fill_codegen():
     with target:
         mod = tvm.compile(tvm.IRModule({"main": copy_async}), target=target, tir_pipeline="tirx")
     src = mod.mod.imports[0].inspect_source()
-    with open("copy_async.c", "w") as f:
-        f.write(src)
     assert "__builtin_mxc_ldg_b64_bsm_predicator" in src
     assert "predicate" in src
     assert "s_ptr_ptr" not in src

@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Descriptor-driven C500 Wave64 register MMA tile-primitive GEMM."""
+"""Descriptor-driven Wave64 register MMA tile-primitive GEMM."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -29,7 +29,7 @@ from tvm.tirx.layout import S, TileLayout, laneid
 from tvm.tirx.operator.tile_primitive import DispatchContext
 from tvm.tirx.operator.tile_primitive.dispatcher import fail, predicate, register_dispatch
 
-from ..common import maca_intrinsic_supported
+from ..common import maca_mcpu_is
 
 WAVE_SIZE = 64
 
@@ -40,7 +40,7 @@ WAVE_SIZE = 64
 # innermost, so their products reconstruct the original two matrix dimensions.
 
 
-# Native C500 ``mma_16x16x16*`` fragments use all 64 Wave lanes as a
+# Native ``mma_16x16x16*`` fragments use all 64 Wave lanes as a
 # 16-way row split and a 4-way K split.  The two trailing extent-4 axes are
 # the four values passed in each lane's v4 operand; ``1 @ laneid`` and
 # ``16 @ laneid`` encode the row and K-group lane contributions respectively.
@@ -67,8 +67,7 @@ def _a_layout(rows: int, reduction: int) -> TileLayout:
 
 # B uses the transposed view of the same native fragment: lane ``l`` owns
 # B[(4 * (l // 16) + p, l % 16)].  Keeping this order in registers is what
-# lets the ``maca_mma_m16n16k16_*`` wrappers pass a v4 B fragment directly to
-# ``__builtin_mxc_mma_16x16x16f16/bf16/i8``.
+# lets the native wrappers pass a v4 B fragment directly to the instruction.
 def _b_layout(reduction: int, columns: int) -> TileLayout:
     return TileLayout(
         S[
@@ -89,11 +88,9 @@ def _b_layout(reduction: int, columns: int) -> TileLayout:
     )
 
 
-# C and D have the same per-lane coordinates as B, because the C500 builtin
+# C and D have the same per-lane coordinates as B, because the native builtin
 # returns four output values per lane at the column positions selected by the
-# lane.  This is the accumulator layout consumed by the native f16/bf16/i8
-# wrappers and by ``__builtin_mxc_mma_16x16x4f32`` (the f16-to-f16 wrapper
-# converts that same f32 result back to f16).
+# lane.  This is the accumulator layout consumed by native MMA wrappers.
 def _d_layout(rows: int, columns: int) -> TileLayout:
     return TileLayout(
         S[
@@ -114,7 +111,7 @@ def _d_layout(rows: int, columns: int) -> TileLayout:
     )
 
 
-# The f32 ``mma_16x16x4f32``/``__builtin_mxc_mma_16x16x4f32`` API has one A
+# The f32 m16n16k4 API has one A
 # value and one B value per lane, rather than four.  Lanes still cover a 16x16
 # tile (row/column are lane % 16), while the extent-4 K axis is selected by
 # lane // 16.  The leading ``reduction // 4`` axis then groups those K=4 atoms
@@ -180,96 +177,24 @@ def _f64_d_layout(rows: int, columns: int) -> TileLayout:
     )
 
 
-# Packed int4 and int1 inputs are staged as uint16 backing words.  ``slots``
-# is 4 for nibble MMA (m8n8k32) and 16 for one-bit BMMA (m8n8k128); each lane
-# owns one 8-row fragment and ``slots`` consecutive packed K values.  The
-# software MACA helpers gather these lane chunks with bpermute before doing
-# nibble products (int4/u4) or the AND/popcount sequence (int1).
-def _packed_a_layout(rows: int, reduction: int, slots: int) -> TileLayout:
-    return TileLayout(
-        S[
-            (
-                rows // 8,  # Number of M=8 software MMA atoms.
-                8,  # Row within an M=8 atom; selected by lane % 8.
-                reduction // (8 * slots),  # Number of complete packed K atoms.
-                8,  # Eight packed K groups; selected by lane // 8.
-                slots,  # Logical values packed into this lane's uint16 chunk.
-            ) : (
-                reduction // (8 * slots) * slots,  # Local stride between M atoms.
-                1 @ laneid,  # Map lane % 8 to the row-within-atom axis.
-                slots,  # Number of logical values held per packed K atom.
-                8 @ laneid,  # Map lane // 8 to the packed K-group axis.
-                1,  # Consecutive bit/nibble positions inside the uint16 chunk.
-            )
-        ]
-    )
-
-
-# B is the packed counterpart of A for the m8n8 kernels: lane ``l`` owns the
-# K chunk for column l % 8, with ``slots`` packed values per local fragment.
-# There is no separate native packed-fragment API in this implementation; the
-# layout matches the software bpermute/popcount helpers in intrinsics/mma.py.
-def _packed_b_layout(reduction: int, columns: int, slots: int) -> TileLayout:
-    return TileLayout(
-        S[
-            (
-                reduction // (8 * slots),  # Number of complete packed K atoms.
-                8,  # Eight packed K groups; selected by lane // 8.
-                slots,  # Logical values packed into this lane's uint16 chunk.
-                columns // 8,  # Number of N=8 software MMA atoms.
-                8,  # Column within an N=8 atom; selected by lane % 8.
-            ) : (
-                columns // 8 * slots,  # Local stride between packed K atoms.
-                8 @ laneid,  # Map lane // 8 to the packed K-group axis.
-                1,  # Consecutive bit/nibble positions inside the uint16 chunk.
-                slots,  # Number of logical values held per N atom.
-                1 @ laneid,  # Map lane % 8 to the column-within-atom axis.
-            )
-        ]
-    )
-
-
-# Packed m8n8 accumulators have one scalar result per lane.  The two extent-8
-# axes split rows and columns, and the lane terms select (l // 8, l % 8), as
-# required by the software int4 and ``bmma_m8n8k128_b1_i32`` implementations.
-def _packed_d_layout(rows: int, columns: int) -> TileLayout:
-    return TileLayout(
-        S[
-            (
-                rows // 8,  # Number of M=8 output atoms.
-                8,  # Row within an M=8 atom; selected by lane // 8.
-                columns // 8,  # Number of N=8 output atoms.
-                8,  # Column within an N=8 atom; selected by lane % 8.
-            ) : (
-                columns // 8,  # Local stride between adjacent M atoms.
-                8 @ laneid,  # Map lane // 8 to the output-row axis.
-                1,  # One lane-local accumulator per N atom.
-                1 @ laneid,  # Map lane % 8 to the output-column axis.
-            )
-        ]
-    )
-
-
 @dataclass(frozen=True)
 class MmaSignature:
-    """A native or software atom and its logical per-lane storage contract."""
+    """A native MMA atom and its logical per-lane storage contract."""
 
     # Logical operand/accumulator dtypes in the order A, B, C, D.  This is the
     # TIR-side contract used to select the matching MACA intrinsic overload.
     dtypes: tuple[str, str, str, str]
-    # ISA atom dimensions (M, N, K), e.g. 16x16x16 or the packed 8x8x32
-    # software-compatible path.  The dispatcher rejects a signature whose
+    # ISA atom dimensions (M, N, K).  The dispatcher rejects a signature whose
     # dimensions do not match the registered tile-primitive variant.
     atom: tuple[int, int, int]
     # Number of scalar values each lane contributes for A, B, and D/C.  Native
-    # 16x16 MMA returns four accumulator values per lane; packed m8n8 paths
-    # carry packed input slots but only one output value.
+    # 16x16 MMA returns four accumulator values per lane.
     slots: tuple[int, int, int]
     # Layout constructors for A, B, and D/C.  They encode the register
     # fragment contract expected by the corresponding MACA builtin/helper.
     layouts: tuple[Callable, Callable, Callable]
     # TIR script wrapper for the MACA operation emitted once per K atom; this
-    # resolves to a native ISA builtin or the software compatibility helper.
+    # resolves to a native ISA builtin.
     intrinsic: Callable
     # Scalar constructor used to initialize D when beta == 0, matching the
     # accumulator dtype expected by the selected intrinsic.
@@ -278,15 +203,14 @@ class MmaSignature:
 
 _NATIVE_LAYOUTS = (_a_layout, _b_layout, _d_layout)
 _F32_LAYOUTS = (_f32_a_layout, _f32_b_layout, _d_layout)
-_I4_LAYOUTS = (
-    lambda m, k: _packed_a_layout(m, k, 4),
-    lambda k, n: _packed_b_layout(k, n, 4),
-    _packed_d_layout,
-)
-_B1_LAYOUTS = (
-    lambda m, k: _packed_a_layout(m, k, 16),
-    lambda k, n: _packed_b_layout(k, n, 16),
-    _packed_d_layout,
+_TF32_LAYOUTS = (
+    lambda m, k: TileLayout(
+        S[(m // 16, 16, k // 8, 4, 2) : (k // 8 * 2, 1 @ laneid, 2, -16 @ laneid, 1)] + 48 @ laneid
+    ),
+    lambda k, n: TileLayout(
+        S[(k // 8, 4, 2, n // 16, 16) : (n // 16 * 2, -16 @ laneid, 1, 2, 1 @ laneid)] + 48 @ laneid
+    ),
+    _d_layout,
 )
 _SIGNATURES = (
     MmaSignature(
@@ -306,27 +230,11 @@ _SIGNATURES = (
         T.float32,
     ),
     MmaSignature(
-        ("float16", "float16", "float16", "float16"),
-        (16, 16, 16),
-        (4, 4, 4),
-        _NATIVE_LAYOUTS,
-        T.maca.mma_m16n16k16_f16_f16,
-        T.float16,
-    ),
-    MmaSignature(
         ("int8", "int8", "int32", "int32"),
         (16, 16, 16),
         (4, 4, 4),
         _NATIVE_LAYOUTS,
         T.maca.mma_m16n16k16_i8_i32,
-        T.int32,
-    ),
-    MmaSignature(
-        ("uint8", "uint8", "int32", "int32"),
-        (16, 16, 16),
-        (4, 4, 4),
-        _NATIVE_LAYOUTS,
-        T.maca.mma_m16n16k16_u8_i32,
         T.int32,
     ),
     MmaSignature(
@@ -338,6 +246,14 @@ _SIGNATURES = (
         T.float32,
     ),
     MmaSignature(
+        ("float32", "float32", "float32", "float32"),
+        (16, 16, 8),
+        (2, 2, 4),
+        _TF32_LAYOUTS,
+        T.maca.mma_m16n16k8_tf32_f32,
+        T.float32,
+    ),
+    MmaSignature(
         ("float64", "float64", "float64", "float64"),
         (16, 16, 4),
         (1, 1, 4),
@@ -345,32 +261,7 @@ _SIGNATURES = (
         T.maca.mma_m16n16k4_f64_f64,
         T.float64,
     ),
-    MmaSignature(
-        ("int4", "int4", "int32", "int32"),
-        (8, 8, 32),
-        (4, 4, 1),
-        _I4_LAYOUTS,
-        T.maca.mma_m8n8k32_i4_i32,
-        T.int32,
-    ),
-    MmaSignature(
-        ("uint4", "uint4", "int32", "int32"),
-        (8, 8, 32),
-        (4, 4, 1),
-        _I4_LAYOUTS,
-        T.maca.mma_m8n8k32_u4_i32,
-        T.int32,
-    ),
-    MmaSignature(
-        ("int1", "int1", "int32", "int32"),
-        (8, 8, 128),
-        (16, 16, 1),
-        _B1_LAYOUTS,
-        T.maca.bmma_m8n8k128_b1_i32,
-        T.int32,
-    ),
 )
-_SIGNATURE_BY_DTYPE = {signature.dtypes: signature for signature in _SIGNATURES}
 
 
 def _full_wave64(_op_call: TilePrimitiveCall, sctx: DispatchContext) -> tuple[bool, str | None]:
@@ -496,7 +387,18 @@ def _lower_mma(op_call: TilePrimitiveCall, sctx: DispatchContext, atom) -> PrimF
     # Select the descriptor by the complete A/B/C/D dtype contract, then make
     # sure it belongs to this dispatch variant's ISA atom.
     dtype = tuple(str(buffer.dtype) for buffer in (a_buffer, b_buffer, c_buffer, d_buffer))
-    signature = _SIGNATURE_BY_DTYPE.get(dtype)
+    signature = next(
+        (
+            candidate
+            for candidate in _SIGNATURES
+            if candidate.dtypes == dtype and candidate.atom == atom
+        ),
+        None,
+    )
+    if atom == (16, 16, 8) and op_call.config.get("precision") != "tf32":
+        fail("TF32 MMA requires precision='tf32'")
+    if atom != (16, 16, 8) and op_call.config.get("precision") == "tf32":
+        fail("precision='tf32' requires the m16n16k8 TF32 MMA")
     if signature is None or signature.atom != atom:
         fail(f"MMA atom {atom} does not support dtype signature {dtype}")
 
@@ -512,8 +414,8 @@ def _lower_mma(op_call: TilePrimitiveCall, sctx: DispatchContext, atom) -> PrimF
     if transpose_a not in (0.0, 1.0) or transpose_b not in (0.0, 1.0):
         fail("MMA requires constant transpose flags")
 
-    # m/n/k are the dimensions of one instruction (or software-compatible)
-    # atom.  _matrix_region checks the caller-visible orientation and returns
+    # m/n/k are the dimensions of one instruction.
+    # _matrix_region checks the caller-visible orientation and returns
     # the full buffer shape plus (start, extent) for both region axes.
     m, n, k = signature.atom
     a_shape, a_axes = _matrix_region(a_region, analyzer, "A", (k, m) if transpose_a else (m, k))
@@ -591,10 +493,8 @@ def _lower_mma(op_call: TilePrimitiveCall, sctx: DispatchContext, atom) -> PrimF
 
     # Slot counts convert a flattened atom number to its first lane-local
     # scalar.  beta=1 copies C into D; beta=0 constructs an accumulator zero.
-    # All registered m8 atoms are the packed int4/int1 software paths.
     a_slots, b_slots, d_slots = signature.slots
     use_c = beta_value == 1.0
-    packed = m == 8
 
     @T.prim_func(check_well_formed=False)
     def impl():
@@ -617,72 +517,53 @@ def _lower_mma(op_call: TilePrimitiveCall, sctx: DispatchContext, atom) -> PrimF
                     # grids.  Each call accumulates into the same D atom.
                     a_offset = ((am + row_tile) * a_stride + ak + reduction_tile) * a_slots
                     b_offset = ((bk + reduction_tile) * b_stride + bn + column_tile) * b_slots
-                    if packed:
-                        # Sub-byte address_of rounds to a 32-bit backing word.
-                        # Each atom occupies only 16 bits, so address its halfword
-                        # explicitly, including the odd atom in each backing word.
-                        signature.intrinsic(
-                            T.address_of(d_local[d_offset]),
-                            T.ptr_byte_offset(
-                                T.address_of(a_local[0]), a_offset // a_slots * 2, "int32"
-                            ),
-                            T.ptr_byte_offset(
-                                T.address_of(b_local[0]), b_offset // b_slots * 2, "int32"
-                            ),
-                            T.address_of(d_local[d_offset]),
-                        )
-                    else:
-                        # Native MACA wrappers take pointers to the first
-                        # lane-local A, B, C, and D register slot for the atom.
-                        signature.intrinsic(
-                            T.address_of(d_local[d_offset]),
-                            T.address_of(a_local[a_offset]),
-                            T.address_of(b_local[b_offset]),
-                            T.address_of(d_local[d_offset]),
-                        )
+                    signature.intrinsic(
+                        T.address_of(d_local[d_offset]),
+                        T.address_of(a_local[a_offset]),
+                        T.address_of(b_local[b_offset]),
+                        T.address_of(d_local[d_offset]),
+                    )
 
     return impl
 
 
-def _predicates(intrinsic: str):
+def _precision_is(
+    op_call: TilePrimitiveCall, _sctx: DispatchContext, expected: str | None
+) -> tuple[bool, str | None]:
+    actual = TilePrimitiveCall.downcast(op_call).config.get("precision")
+    if actual == expected:
+        return True, None
+    if expected == "tf32":
+        return False, "TF32 MMA requires precision='tf32'"
+    if actual is not None:
+        return False, f"unsupported GEMM precision {actual!r}"
+    return False, "ordinary FP32 MMA does not accept an explicit precision"
+
+
+def _predicates(precision: str | None = None):
     return [
-        predicate("maca_intrinsic", maca_intrinsic_supported, intrinsic=intrinsic),
+        predicate("mcpu", maca_mcpu_is, supported=("xcore1000",)),
+        predicate("precision", _precision_is, expected=precision),
         predicate("full_wave64", _full_wave64),
         predicate("no_replica", _no_replica),
     ]
 
 
-@register_dispatch(
-    "gemm", "maca", variant="mma.m16n16k16", priority=10, when=_predicates("mma.m16n16k16")
-)
+@register_dispatch("gemm", "maca", variant="mma.m16n16k16", priority=10, when=_predicates())
 def mma_m16n16k16(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc:
     """Lower a 16x16x16 native MMA signature."""
     return _lower_mma(op_call, sctx, (16, 16, 16))
 
 
-@register_dispatch(
-    "gemm", "maca", variant="mma.m16n16k4", priority=11, when=_predicates("mma.m16n16k4")
-)
+@register_dispatch("gemm", "maca", variant="mma.m16n16k4", priority=11, when=_predicates())
 def mma_m16n16k4(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc:
     """Lower a 16x16x4 full-F32 MMA signature."""
     return _lower_mma(op_call, sctx, (16, 16, 4))
 
 
 @register_dispatch(
-    "gemm", "maca", variant="mma.m8n8k32", priority=12, when=_predicates("mma.m8n8k32")
+    "gemm", "maca", variant="mma.m16n16k8.tf32", priority=12, when=_predicates("tf32")
 )
-def mma_m8n8k32(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc:
-    """Lower an 8x8x32 signed or unsigned packed 4-bit signature."""
-    return _lower_mma(op_call, sctx, (8, 8, 32))
-
-
-@register_dispatch(
-    "gemm",
-    "maca",
-    variant="mma.m8n8k128",
-    priority=12,
-    when=_predicates("bmma.m8n8k128"),
-)
-def mma_m8n8k128(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc:
-    """Lower an 8x8x128 one-bit AND/popcount signature."""
-    return _lower_mma(op_call, sctx, (8, 8, 128))
+def mma_m16n16k8_tf32(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc:
+    """Lower explicit FP32-storage TF32 m16n16k8 MMA."""
+    return _lower_mma(op_call, sctx, (16, 16, 8))
