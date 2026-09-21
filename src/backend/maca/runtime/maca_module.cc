@@ -58,12 +58,25 @@ class MACAModuleNode : public ffi::ModuleObj {
     std::fill(module_.begin(), module_.end(), nullptr);
   }
   // destructor
-  ~MACAModuleNode() {
+  ~MACAModuleNode() noexcept {
+    int previous_device = -1;
+    mcError_t get_device_err = mcGetDevice(&previous_device);
+
     for (size_t i = 0; i < module_.size(); ++i) {
-      if (module_[i] != nullptr) {
-        MACA_CALL(mcSetDevice(static_cast<int>(i)));
-        MACA_DRIVER_CALL(mcModuleUnload(module_[i]));
+      if (module_[i] == nullptr) {
+        continue;
       }
+
+      mcError_t set_device_err = mcSetDevice(static_cast<int>(i));
+      if (set_device_err != mcSuccess && set_device_err != mcErrorDeinitialized) {
+        continue;
+      }
+
+      (void)mcModuleUnload(module_[i]);
+    }
+
+    if (get_device_err == mcSuccess) {
+      (void)mcSetDevice(previous_device);
     }
   }
 

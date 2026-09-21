@@ -80,7 +80,7 @@ def test_cuda_ndarray_destructor_preserves_current_device():
     original_device = torch.cuda.current_device()
     try:
         torch.cuda.set_device(0)
-        data = tvm.runtime.tensor(np.zeros(1, dtype="int32"), device=tvm.cuda(0))
+        data = tvm.runtime.tensor(np.zeros(1, dtype="int32"), device=tvm.maca(0))
 
         torch.cuda.set_device(1)
         del data
@@ -100,16 +100,16 @@ def test_cuda_stream_free_preserves_current_device():
     stream = None
     try:
         torch.cuda.set_device(0)
-        stream = tvm.cuda(0).create_raw_stream()
+        stream = tvm.maca(0).create_raw_stream()
 
         torch.cuda.set_device(1)
-        tvm.cuda(0).free_raw_stream(stream)
+        tvm.maca(0).free_raw_stream(stream)
         stream = None
 
         assert torch.cuda.current_device() == 1
     finally:
         if stream is not None:
-            tvm.cuda(0).free_raw_stream(stream)
+            tvm.maca(0).free_raw_stream(stream)
         torch.cuda.set_device(original_device)
 
 
@@ -125,13 +125,13 @@ def test_cuda_module_destructor_preserves_current_device():
         if tx == 0:
             A[0] = A[0] + 1
 
-    _, mod = _get_source(main, target="cuda")
+    _, mod = _get_source(main, target="maca")
     original_device = torch.cuda.current_device()
     try:
         torch.cuda.set_device(0)
-        data = tvm.runtime.tensor(np.zeros(1, dtype="int32"), device=tvm.cuda(0))
+        data = tvm.runtime.tensor(np.zeros(1, dtype="int32"), device=tvm.maca(0))
         mod["main"](data)
-        tvm.cuda(0).sync()
+        tvm.maca(0).sync()
         del data
         gc.collect()
 
