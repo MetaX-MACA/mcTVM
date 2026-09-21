@@ -368,6 +368,7 @@ def test_cuda_gemm_mma_variant_is_registered():
 
 
 @pytest.mark.parametrize("dtype", ["bfloat16", "float16"])
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.gpu
 def test_cuda_gemm_mma_lowers_to_mma_sync(dtype):
     """beta=0: the dispatch clears D, then issues a single accumulating mma with
@@ -391,6 +392,7 @@ def test_cuda_gemm_mma_lowers_to_mma_sync(dtype):
         assert f"b_words[{r}]" in script
 
 
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.gpu
 def test_cuda_gemm_mma_accumulates_c_when_beta_one():
     """beta=1: the accumulator is initialized by copying C instead of zeroing."""
@@ -603,6 +605,7 @@ def test_cuda_gemm_mma_numerical_transpose(transpose_A, transpose_B, dtype):
         (2, 2, 3, 8),  # k8, every dim tiled
     ],
 )
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.gpu
 def test_cuda_gemm_mma_lowers_tiled(Mt, Nt, Kt, kinst):
     """Every tiling we expect to dispatch must lower, selecting the right mma.
@@ -649,6 +652,7 @@ def test_cuda_gemm_mma_codegen_issue_count(Mt, Nt, Kt, kinst):
     "transpose_A, transpose_B",
     [(False, False), (True, False), (False, True), (True, True)],
 )
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.gpu
 def test_cuda_gemm_mma_lowers_transpose(transpose_A, transpose_B):
     """All four A/B orientations dispatch to the same m16n8k16. transpose only
