@@ -29,6 +29,22 @@ from tvm.tirx.operator.tile_primitive import DispatchContext, fail
 from tvm.tirx.stmt import TilePrimitiveCall
 
 
+def _target_mcpu(sctx: DispatchContext) -> str:
+    """Return the compile target's canonical MACA ``mcpu`` name."""
+    return str(sctx.target.attrs.get("mcpu", ""))
+
+
+def maca_mcpu_is(
+    _op_call: TilePrimitiveCall,
+    sctx: DispatchContext,
+    supported: tuple[str, ...],
+) -> tuple[bool, str | None]:
+    """Check whether the MACA target has one of the exact ``mcpu`` names."""
+    mcpu = _target_mcpu(sctx)
+    ok = mcpu in supported
+    return ok, None if ok else f"MACA mcpu {mcpu!r} is not one of {supported!r}"
+
+
 def next_power_of_2(x: int) -> int:
     """Return the smallest power of 2 greater than or equal to x."""
     if x <= 1:

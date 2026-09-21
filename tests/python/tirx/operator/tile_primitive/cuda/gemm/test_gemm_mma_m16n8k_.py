@@ -28,7 +28,7 @@ The fragment layouts below are the standard m16n8 register maps (PTX ISA
     B[K, N]:   N = g,         K = 2*t + p + 8*kHi,   mb   = p + 2*kHi
 
 Most assertions run the CPU-only ``LowerTIRx`` transform; the numerical check
-is guarded by ``requires_maca`` since it needs a real device.
+is guarded by ``requires_cuda`` since it needs a real device.
 """
 
 import numpy as np
@@ -41,11 +41,6 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import S, TileLayout, laneid
 from tvm.tirx.operator.tile_primitive import list_registered_schedules
-
-MACA_XFAIL = pytest.mark.xfail(
-    reason=("TODO(maca): [tile-primitive-gemm-mma] support MMA sync GEMM lowering and codegen"),
-    strict=False,
-)
 
 # Single-tile m16n8k8 fragment layouts -- the smallest unit everything else is
 # built from. A is 16x8, B is 8x8 as [K, N], D/C is 16x8 (the accumulator does
@@ -357,7 +352,7 @@ def _build_transpose_numeric(transpose_A, transpose_B, dtype="float16"):
 
 
 def _lower(func):
-    with tvm.target.Target("maca"):
+    with tvm.target.Target("cuda"):
         return tvm.tirx.transform.LowerTIRx()(tvm.IRModule({"main": func}))
 
 
@@ -373,8 +368,8 @@ def test_cuda_gemm_mma_variant_is_registered():
 
 
 @pytest.mark.parametrize("dtype", ["bfloat16", "float16"])
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.gpu
-@MACA_XFAIL
 def test_cuda_gemm_mma_lowers_to_mma_sync(dtype):
     """beta=0: the dispatch clears D, then issues a single accumulating mma with
     the registers laid out in the fixed PTX fragment order."""
@@ -397,8 +392,8 @@ def test_cuda_gemm_mma_lowers_to_mma_sync(dtype):
         assert f"b_words[{r}]" in script
 
 
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.gpu
-@MACA_XFAIL
 def test_cuda_gemm_mma_accumulates_c_when_beta_one():
     """beta=1: the accumulator is initialized by copying C instead of zeroing."""
     script = _lower(_build_gemm(alpha=1.0, beta=1.0))["main"].script()
@@ -423,8 +418,7 @@ def test_cuda_gemm_mma_rejects_fractional_beta():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
 def test_cuda_gemm_mma_numerical(dtype):
     """End-to-end D = A @ B on a single m16n8k16 tile (one warp).
@@ -478,8 +472,8 @@ def test_cuda_gemm_mma_numerical(dtype):
             rM = s // 2
             D_g[lane // 4 + 8 * rM, 2 * (lane % 4) + rN] = D_reg[s]
 
-    with tvm.target.Target("maca"):
-        mod = tvm.compile(tvm.IRModule({"main": gemm}), target="maca", tir_pipeline="tirx")
+    with tvm.target.Target("cuda"):
+        mod = tvm.compile(tvm.IRModule({"main": gemm}), target="cuda", tir_pipeline="tirx")
 
     np.random.seed(0)
     A_np = np.random.uniform(-1, 1, (16, 16)).astype(np.float32)
@@ -487,7 +481,7 @@ def test_cuda_gemm_mma_numerical(dtype):
     golden = A_np @ B_np
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A_dev = tvm.runtime.tensor(A_np.astype(np_dtype), dev)
         B_dev = tvm.runtime.tensor(B_np.astype(np_dtype), dev)
         D_dev = tvm.runtime.tensor(np.zeros((16, 8), np.float32), dev)
@@ -521,8 +515,7 @@ _TILED_MODES = [
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.parametrize("Mt, Nt, Kt, kinst", _TILED_SHAPES)
 @pytest.mark.parametrize("dtype, beta", _TILED_MODES)
 def test_cuda_gemm_mma_numerical_tiled(dtype, beta, Mt, Nt, Kt, kinst):
@@ -538,8 +531,8 @@ def test_cuda_gemm_mma_numerical_tiled(dtype, beta, Mt, Nt, Kt, kinst):
         np_dtype = np.float16
 
     func, M, N, K = _build_tiled_numeric(Mt, Nt, Kt, kinst, beta, dtype)
-    with tvm.target.Target("maca"):
-        mod = tvm.compile(tvm.IRModule({"main": func}), target="maca", tir_pipeline="tirx")
+    with tvm.target.Target("cuda"):
+        mod = tvm.compile(tvm.IRModule({"main": func}), target="cuda", tir_pipeline="tirx")
 
     np.random.seed(0)
     A_np = np.random.uniform(-1, 1, (M, K)).astype(np.float32)
@@ -548,7 +541,7 @@ def test_cuda_gemm_mma_numerical_tiled(dtype, beta, Mt, Nt, Kt, kinst):
     golden = A_np @ B_np + (C_np if beta == 1.0 else 0.0)
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A_dev = tvm.runtime.tensor(A_np.astype(np_dtype), dev)
         B_dev = tvm.runtime.tensor(B_np.astype(np_dtype), dev)
         C_dev = tvm.runtime.tensor(C_np, dev)
@@ -560,8 +553,7 @@ def test_cuda_gemm_mma_numerical_tiled(dtype, beta, Mt, Nt, Kt, kinst):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
 @pytest.mark.parametrize(
     "transpose_A, transpose_B",
@@ -579,8 +571,8 @@ def test_cuda_gemm_mma_numerical_transpose(transpose_A, transpose_B, dtype):
         np_dtype = np.float16
 
     func = _build_transpose_numeric(transpose_A, transpose_B, dtype)
-    with tvm.target.Target("maca"):
-        mod = tvm.compile(tvm.IRModule({"main": func}), target="maca", tir_pipeline="tirx")
+    with tvm.target.Target("cuda"):
+        mod = tvm.compile(tvm.IRModule({"main": func}), target="cuda", tir_pipeline="tirx")
 
     np.random.seed(0)
     A_log = np.random.uniform(-1, 1, (16, 16)).astype(np.float32)  # logical A[M, K]
@@ -590,7 +582,7 @@ def test_cuda_gemm_mma_numerical_transpose(transpose_A, transpose_B, dtype):
     golden = A_log @ B_log
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A_dev = tvm.runtime.tensor(A_buf, dev)
         B_dev = tvm.runtime.tensor(B_buf, dev)
         D_dev = tvm.runtime.tensor(np.zeros((16, 8), np.float32), dev)
@@ -613,8 +605,8 @@ def test_cuda_gemm_mma_numerical_transpose(transpose_A, transpose_B, dtype):
         (2, 2, 3, 8),  # k8, every dim tiled
     ],
 )
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.gpu
-@MACA_XFAIL
 def test_cuda_gemm_mma_lowers_tiled(Mt, Nt, Kt, kinst):
     """Every tiling we expect to dispatch must lower, selecting the right mma.
 
@@ -627,8 +619,7 @@ def test_cuda_gemm_mma_lowers_tiled(Mt, Nt, Kt, kinst):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.parametrize(
     "Mt, Nt, Kt, kinst",
     [
@@ -643,7 +634,7 @@ def test_cuda_gemm_mma_lowers_tiled(Mt, Nt, Kt, kinst):
 def test_cuda_gemm_mma_codegen_issue_count(Mt, Nt, Kt, kinst):
     """Full pipeline (UnrollLoop + CUDA codegen) emits one mma per (Mt, Nt, Kt)
     tile; K-tiles accumulate in place, so D is cleared once per output tile."""
-    target = tvm.target.Target({"kind": "maca", "arch": "sm_80"})
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_80"})
     with target:
         mod = tvm.compile(
             tvm.IRModule({"main": _build_tiled(Mt, Nt, Kt, kinst, store=True)}),
@@ -661,8 +652,8 @@ def test_cuda_gemm_mma_codegen_issue_count(Mt, Nt, Kt, kinst):
     "transpose_A, transpose_B",
     [(False, False), (True, False), (False, True), (True, True)],
 )
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.gpu
-@MACA_XFAIL
 def test_cuda_gemm_mma_lowers_transpose(transpose_A, transpose_B):
     """All four A/B orientations dispatch to the same m16n8k16. transpose only
     describes the input's logical orientation; the .row.col mma is unchanged."""
@@ -672,15 +663,14 @@ def test_cuda_gemm_mma_lowers_transpose(transpose_A, transpose_B):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.parametrize(
     "transpose_A, transpose_B",
     [(False, False), (True, False), (False, True), (True, True)],
 )
 def test_cuda_gemm_mma_codegen_transpose(transpose_A, transpose_B):
     """Every orientation codegens to a valid m16n8k16 kernel."""
-    target = tvm.target.Target({"kind": "maca", "arch": "sm_80"})
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_80"})
     with target:
         mod = tvm.compile(
             tvm.IRModule({"main": _build_transpose(transpose_A, transpose_B, store=True)}),

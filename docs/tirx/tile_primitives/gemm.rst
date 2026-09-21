@@ -30,6 +30,92 @@ tile, accumulating over K in place. Source:
 ``python/tvm/backend/cuda/tile_primitive/gemm/mma_m16n8k_.py``. (For the
 Blackwell async tensor-core path see :doc:`gemm_async`.)
 
+MACA
+--------------
+
+MACA registers synchronous Wave64 variants. All variants
+require non-replicated ``local`` register fragments, full Wave64 participation,
+constant transpose flags, ``alpha == 1.0``, and ``beta`` equal to 0 or 1. The
+verified signature matrix is:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 20 24 30
+
+   * - A / B / C / D
+     - Atom
+     - Intrinsic
+     - Arithmetic and layout
+   * - ``float16 / float16 / float32 / float32``
+     - ``m16n16k16``
+     - ``mma_16x16x16f16``
+     - f32 accumulation; four f32 result slots per lane
+   * - ``bfloat16 / bfloat16 / float32 / float32``
+     - ``m16n16k16``
+     - ``mma_16x16x16bf16``
+     - BF16 payload bits are preserved; f32 accumulation
+   * - ``float32 / float32 / float32 / float32``
+     - ``m16n16k4``
+     - ``mma_16x16x4f32``
+     - full-f32 arithmetic; A/B have one element per lane
+   * - ``float32 / float32 / float32 / float32`` (``precision="tf32"``)
+     - ``m16n16k8``
+     - ``mma_16x16x8tf32``
+     - FP32 storage; native TF32-truncated multipliers and FP32 accumulation/output
+   * - ``float64 / float64 / float64 / float64``
+     - ``m16n16k4``
+     - ``mma_16x16x4f64``
+     - double-precision arithmetic; one A/B and four C/D elements per lane
+   * - ``int8 / int8 / int32 / int32``
+     - ``m16n16k16``
+     - ``mma_16x16x16i8``
+     - packed byte payloads and int32 accumulation
+
+Every row supports all four transpose orientations, multiple M/N/K atoms,
+aligned nonzero regions, and exact in-place C=D. Regions must be positive,
+in bounds, and aligned to the atom dimensions in their logical orientation.
+Beta=0 never reads C; beta=1 initializes each output from C once before the
+K loop. Ordinary FP32 always selects full-FP32 ``m16n16k4``; it is never
+silently reduced. TF32 requires explicit ``precision="tf32"``.
+
+For one atom, lane ``l`` and local element ``p`` own these logical coordinates:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Family
+     - A (row, K)
+     - B (K, column)
+     - C/D (row, column)
+   * - 16x16x16
+     - ``(l % 16, 4*(l // 16) + p)``, p=0..3
+     - ``(4*(l // 16) + p, l % 16)``, p=0..3
+     - ``(4*(l // 16) + p, l % 16)``, p=0..3
+   * - 16x16x4, f32
+     - ``(l % 16, l // 16)``
+     - ``(l // 16, l % 16)``
+     - ``(4*(l // 16) + p, l % 16)``, p=0..3
+   * - 16x16x8, TF32
+     - ``(l % 16, ((l // 16) << 1) ^ 7)`` then its preceding K coordinate
+     - ``(((l // 16) << 1) ^ 7, l % 16)`` then its preceding K coordinate
+     - ``(4*(l // 16) + p, l % 16)``, p=0..3
+   * - 16x16x4, f64
+     - ``(l % 16, l // 16)``
+     - ``(l // 16, l % 16)``
+     - ``(l // 16 + 4*p, l % 16)``, p=0..3
+
+Per-lane storage orders atoms as A[M-tile, K-tile, p],
+B[K-tile, N-tile, p], and C/D[M-tile, N-tile, p]. Transposition permutes
+the logical axes while preserving that physical order. These mappings use
+all 64 lanes without replication. The paired A/B K ordering models the
+native reversed group order exactly.
+
+The implementation rejects mixed signedness, incompatible accumulator types,
+non-matching layouts, narrowed execution scopes, unsupported target architectures,
+and shifted overlapping C/D views before code generation. D may not alias A/B.
+TF32 uses FP32 storage, native TF32-truncated multipliers, and FP32
+accumulation/output.
+
 What it accepts
 ---------------
 

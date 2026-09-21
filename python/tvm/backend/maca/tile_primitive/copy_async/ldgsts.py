@@ -36,6 +36,7 @@ from tvm.tirx.operator.tile_primitive.dispatcher import fail, predicate, registe
 from tvm.tirx.operator.tile_primitive.registry import DispatchContext
 from tvm.tirx.stmt import TilePrimitiveCall
 
+from ..common import maca_mcpu_is
 from ..copy._common import _TID_AXIS_FOR_SCOPE, _thread_cnt, align_layouts_gs
 from ..copy.utils import _is_valid_copy, _scope_allowed
 from ..copy.vec_auto_reg import _all_threads_active, _axis_decl, _ptr_off
@@ -230,6 +231,9 @@ def _has_bsm_vector(op_call: TilePrimitiveCall, sctx: DispatchContext) -> tuple[
 def _is_ldgsts(op_call: TilePrimitiveCall, sctx: DispatchContext) -> tuple[bool, str | None]:
     if not sctx.is_target("maca"):
         return False, "non-maca target"
+    ok, reason = maca_mcpu_is(op_call, sctx, supported=("xcore1000",))
+    if not ok:
+        return False, reason
     if sctx.scope_kind not in ("thread", "warp", "warpgroup", "cta"):
         return False, f"unsupported exec_scope {sctx.scope_kind}"
     for check in (

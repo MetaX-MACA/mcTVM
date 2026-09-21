@@ -201,6 +201,36 @@ def maca_barrier_inst():
     return call_intrin("void", "tirx.maca.barrier_inst")
 
 
+def maca_mma_m16n16k16_f16_f32(d, a, b, c):
+    """Issue a Wave64 m16n16k16 F16 MMA with F32 accumulation."""
+    return call_intrin("void", "tirx.maca.mma_m16n16k16_f16_f32", d, a, b, c)
+
+
+def maca_mma_m16n16k16_bf16_f32(d, a, b, c):
+    """Issue a Wave64 m16n16k16 BF16 MMA with F32 accumulation."""
+    return call_intrin("void", "tirx.maca.mma_m16n16k16_bf16_f32", d, a, b, c)
+
+
+def maca_mma_m16n16k16_i8_i32(d, a, b, c):
+    """Issue a Wave64 signed int8 m16n16k16 MMA."""
+    return call_intrin("void", "tirx.maca.mma_m16n16k16_i8_i32", d, a, b, c)
+
+
+def maca_mma_m16n16k4_f32_f32(d, a, b, c):
+    """Issue a Wave64 m16n16k4 full-F32 MMA."""
+    return call_intrin("void", "tirx.maca.mma_m16n16k4_f32_f32", d, a, b, c)
+
+
+def maca_mma_m16n16k8_tf32_f32(d, a, b, c):
+    """Issue m16n16k8 TF32 MMA: FP32 storage/output with FP32 accumulation."""
+    return call_intrin("void", "tirx.maca.mma_m16n16k8_tf32_f32", d, a, b, c)
+
+
+def maca_mma_m16n16k4_f64_f64(d, a, b, c):
+    """Issue a Wave64 m16n16k4 double-precision MMA."""
+    return call_intrin("void", "tirx.maca.mma_m16n16k4_f64_f64", d, a, b, c)
+
+
 def maca_wmma_load(fragment, buffer_ptr, stride, layout, index=0):
     """Load one 16x16x16 MACA WMMA fragment from shared memory."""
     return tir.tvm_load_matrix_sync(fragment, 16, 16, 16, index, buffer_ptr, stride, layout)
