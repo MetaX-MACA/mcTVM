@@ -62,6 +62,38 @@ class MACAThreadEntry {
   // get the threadlocal workspace
   static MACAThreadEntry* ThreadLocal();
 };
+
+/*!
+ * \brief RAII guard that preserves the current MACA device.
+ *
+ * Switches to the requested device during the guard's lifetime and restores
+ * the previous device when it goes out of scope.
+ */
+class MACADeviceGuard {
+ public:
+  explicit MACADeviceGuard(int device_id) : previous_device_(-1), changed_(false) {
+    if (mcGetDevice(&previous_device_) != mcSuccess) {
+      return;
+    }
+
+    if (previous_device_ != device_id) {
+      if (mcSetDevice(device_id) == mcSuccess) {
+        changed_ = true;
+      }
+    }
+  }
+
+  ~MACADeviceGuard() noexcept {
+    if (changed_) {
+      (void)mcSetDevice(previous_device_);
+    }
+  }
+
+ private:
+  int previous_device_;
+  bool changed_;
+};
+
 }  // namespace runtime
 }  // namespace tvm
 #endif  // TVM_BACKEND_MACA_RUNTIME_MACA_COMMON_H_

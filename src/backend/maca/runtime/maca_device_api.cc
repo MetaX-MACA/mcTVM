@@ -158,10 +158,11 @@ class MACADeviceAPI final : public DeviceAPI {
   void FreeDataSpace(Device dev, void* ptr) final {
     if (dev.device_type == kDLMACAHost) {
       MACA_CALL(mcFreeHost(ptr));
-    } else {
-      MACA_DRIVER_CALL(mcSetDevice(dev.device_id));
-      MACA_DRIVER_CALL(mcFree(ptr));
+      return;
     }
+
+    MACADeviceGuard guard(dev.device_id);
+    MACA_DRIVER_CALL(mcFree(ptr));
   }
 
  protected:
@@ -206,9 +207,8 @@ class MACADeviceAPI final : public DeviceAPI {
   }
 
   void FreeStream(Device dev, TVMStreamHandle stream) {
-    MACA_CALL(mcSetDevice(dev.device_id));
-    mcStream_t mc_stream = static_cast<mcStream_t>(stream);
-    MACA_CALL(mcStreamDestroy(mc_stream));
+    MACADeviceGuard guard(dev.device_id);
+    MACA_DRIVER_CALL(mcStreamDestroy(static_cast<mcStream_t>(stream)));
   }
 
   void SyncStreamFromTo(Device dev, TVMStreamHandle event_src, TVMStreamHandle event_dst) {
