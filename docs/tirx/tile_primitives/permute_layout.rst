@@ -28,23 +28,21 @@ The CUDA variant (``warp_xor_swizzle``) uses Warp32 and an optional PTX shared
 memory path. Source:
 ``python/tvm/backend/cuda/tile_primitive/permute_layout/warp_xor_swizzle.py``.
 
-MACA C500 variant
+MACA variant
 -----------------
 
-``wave64_halfwarp_xor_swizzle`` targets exactly ``maca -mcpu=xcore1000``. It
+``wave64_halfwarp_xor_swizzle``
 requires warp scope, a one-dimensional full Wave64 lane range ``[0, 64)``,
 matching plain ``TileLayout`` slices, and equal 32-bit source and destination
 dtypes (``uint32``, ``int32``, or ``float32``). The slice volume must be
 divisible by 32, with ``P = volume / 32`` a power of two no larger than 32;
 both regrouped layouts must be bijections and admit a conflict-free XOR
 schedule. Ordinary typed buffer loads and stores are used for global, shared,
-and local buffers; no CUDA PTX, inline assembly, TCGEN05, TMA, tensor-memory,
-or BSM-permute builtin is involved.
+and local buffers.
 
 All 64 lanes execute both ``T.maca.warp_sync()`` barriers unconditionally.
-Only lanes 0--31 issue memory operations because C500 shared memory has 32
-four-byte banks and the proven CUDA schedule models one consecutive 32-lane
-cohort. The first barrier follows the complete register-load phase, which is
+Only lanes 0--31 issue memory operations because MACA shared memory has 32
+four-byte banks. The first barrier follows the complete register-load phase, which is
 required for aliased views; the second completes the store phase before the
 caller reuses the tile.
 

@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""MACA C500 permute_layout dispatch: Wave64 register-staged in-place transpose.
+"""MACA permute_layout dispatch: Wave64 register-staged in-place transpose.
 
 The optional per-lane XOR swizzle avoids SMEM bank conflicts on the write phase.
 

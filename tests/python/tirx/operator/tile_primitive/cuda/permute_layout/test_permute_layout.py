@@ -435,39 +435,6 @@ def test_reject_non_warp_scope():
     assert "warp" in str(exc_info.value)
 
 
-def test_reject_non_32_bit_elements():
-    shape = (4, 32)
-    pre = TileLayout(S[shape : (32, 1)])
-    post = TileLayout(S[shape : (1, 4)])
-    _build_and_assert_rejected(shape, pre, post, "uint16", "requires 32-bit elements")
-
-
-def test_permute_layout_schedule_is_registered_for_maca():
-    schedules = list_registered_schedules()
-    assert "wave64_halfwarp_xor_swizzle" in schedules["tirx.tile.permute_layout"]["maca"]
-
-
-def test_reject_unsupported_maca_architecture():
-    shape = (4, 32)
-    pre = TileLayout(S[shape : (32, 1)])
-    post = TileLayout(S[shape : (1, 4)])
-
-    @T.prim_func
-    def f(A: T.handle, B: T.handle):
-        A_buf = T.match_buffer(A, shape, "uint32", layout=pre)
-        B_buf = T.match_buffer(B, shape, "uint32", layout=post)
-        T.device_entry()
-        T.cta_id([1])
-        T.warp_id([1])
-        T.lane_id([64])
-        Tx.warp.permute_layout(B_buf, A_buf)
-
-    target = tvm.target.Target({"kind": "maca", "mcpu": "xcore9999"})
-    with target, pytest.raises(RuntimeError) as exc_info:
-        tvm.compile(tvm.IRModule({"main": f}), target=target, tir_pipeline="tirx")
-    assert "MACA mcpu 'xcore9999' is not one of ('xcore1000',)" in str(exc_info.value)
-
-
 @pytest.mark.parametrize("dtype", ["uint32", "float32"])
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
@@ -518,6 +485,39 @@ def test_shared_memory_in_place_alias_safety(dtype):
     assert "__syncwarp()" in src
     for cuda_only_spelling in ("ld.shared", "st.shared", "asm volatile", "tcgen05"):
         assert cuda_only_spelling not in src
+
+
+def test_reject_non_32_bit_elements():
+    shape = (4, 32)
+    pre = TileLayout(S[shape : (32, 1)])
+    post = TileLayout(S[shape : (1, 4)])
+    _build_and_assert_rejected(shape, pre, post, "uint16", "requires 32-bit elements")
+
+
+def test_permute_layout_schedule_is_registered_for_maca():
+    schedules = list_registered_schedules()
+    assert "wave64_halfwarp_xor_swizzle" in schedules["tirx.tile.permute_layout"]["maca"]
+
+
+def test_reject_unsupported_maca_architecture():
+    shape = (4, 32)
+    pre = TileLayout(S[shape : (32, 1)])
+    post = TileLayout(S[shape : (1, 4)])
+
+    @T.prim_func
+    def f(A: T.handle, B: T.handle):
+        A_buf = T.match_buffer(A, shape, "uint32", layout=pre)
+        B_buf = T.match_buffer(B, shape, "uint32", layout=post)
+        T.device_entry()
+        T.cta_id([1])
+        T.warp_id([1])
+        T.lane_id([64])
+        Tx.warp.permute_layout(B_buf, A_buf)
+
+    target = tvm.target.Target({"kind": "maca", "mcpu": "xcore9999"})
+    with target, pytest.raises(RuntimeError) as exc_info:
+        tvm.compile(tvm.IRModule({"main": f}), target=target, tir_pipeline="tirx")
+    assert "MACA mcpu 'xcore9999' is not one of ('xcore1000',)" in str(exc_info.value)
 
 
 if __name__ == "__main__":
