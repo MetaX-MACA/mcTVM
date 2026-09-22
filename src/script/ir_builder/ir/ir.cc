@@ -19,6 +19,7 @@
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/module.h>
+#include <tvm/relax/global_info.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/script/ir_builder/ir/ir.h>
 
@@ -31,11 +32,13 @@ namespace ir {
 
 using tvm::script::ir_builder::details::Namer;
 
-TVM_STATIC_IR_FUNCTOR(Namer, vtable)
-    .set_dispatch<tvm::VarNode>([](const ffi::ObjectRef& node, ffi::String name) -> void {
-      VarNode* var = const_cast<VarNode*>(node.as<VarNode>());
-      var->name = name;
-    });
+TVM_FFI_STATIC_INIT_BLOCK() {
+  Namer::vtable().SetDispatch<tvm::VarNode>(
+      [](const ffi::ObjectRef& node, ffi::String name) -> void {
+        VarNode* var = const_cast<VarNode*>(node.as<VarNode>());
+        var->name = name;
+      });
+}
 
 IRModuleFrame IRModule() {
   ffi::ObjectPtr<IRModuleFrameNode> n = ffi::make_object<IRModuleFrameNode>();
@@ -148,7 +151,7 @@ void ModuleGlobalInfos(ffi::Map<ffi::String, ffi::Array<GlobalInfo>> global_info
   }
 }
 
-VDevice LookupVDevice(ffi::String target_kind, int device_index) {
+relax::VDevice LookupVDevice(ffi::String target_kind, int device_index) {
   if (IRBuilder::IsInScope()) {
     IRModuleFrame frame = FindModuleFrame();
     if (frame->global_infos.empty()) {
@@ -160,11 +163,11 @@ VDevice LookupVDevice(ffi::String target_kind, int device_index) {
       TVM_FFI_THROW(ValueError) << "The target VDevice in the GlobalInfos was not found.";
     }
     if (target_kind == "vdevice") {
-      return vdevices[device_index].as_or_throw<VDevice>();
+      return vdevices[device_index].as_or_throw<relax::VDevice>();
     }
     int count = 0;
     for (auto vdevice : vdevices) {
-      auto vdev = vdevice.as_or_throw<VDevice>();
+      auto vdev = vdevice.as_or_throw<relax::VDevice>();
       if (vdev->target->kind->name == target_kind) {
         if (count == device_index) {
           return vdev;
@@ -174,7 +177,7 @@ VDevice LookupVDevice(ffi::String target_kind, int device_index) {
     }
   }
   LOG(WARNING) << "The annotated device was not found, please check your vdevice list.";
-  return VDevice();
+  return relax::VDevice();
 }
 
 bool LookupName(const ffi::String& name) {

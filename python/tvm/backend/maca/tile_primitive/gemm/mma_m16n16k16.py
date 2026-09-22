@@ -22,8 +22,8 @@ from dataclasses import dataclass
 
 import tvm_ffi
 
-from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as T
+from tvm.sym.analyzer import Analyzer
 from tvm.tirx import PrimFunc, TilePrimitiveCall
 from tvm.tirx.layout import S, TileLayout, laneid
 from tvm.tirx.operator.tile_primitive import DispatchContext
@@ -283,7 +283,7 @@ def _full_wave64(_op_call: TilePrimitiveCall, sctx: DispatchContext) -> tuple[bo
 def _no_replica(op_call: TilePrimitiveCall, _sctx: DispatchContext) -> tuple[bool, str | None]:
     op_call = TilePrimitiveCall.downcast(op_call)
     for region, name in zip(op_call.args[:4], ("D", "A", "B", "C"), strict=True):
-        layout = region.buffer.layout
+        layout = region.source.layout
         if not isinstance(layout, TileLayout):
             return False, f"MMA requires a TileLayout for {name}"
         if len(layout.replica) != 0:
@@ -306,7 +306,7 @@ def _const_scalar(expr, analyzer: Analyzer) -> float | None:
 
 
 def _matrix_region(region, analyzer, name, alignment):
-    buffer = region.buffer
+    buffer = region.source
     if buffer.scope() != "local":
         fail(f"MMA requires local {name} fragments")
     if len(buffer.shape) != 2 or len(region.region) != 2:
@@ -342,9 +342,9 @@ def _check_aliases(d_region, a_region, b_region, c_region, analyzer, sctx):
     def root(buffer):
         return roots.get(buffer, buffer)
 
-    d_buffer, c_buffer = d_region.buffer, c_region.buffer
+    d_buffer, c_buffer = d_region.source, c_region.source
     for region, name in ((a_region, "A"), (b_region, "B")):
-        if root(d_buffer).same_as(root(region.buffer)):
+        if root(d_buffer).same_as(root(region.source)):
             fail(f"MMA D must not alias {name}")
     if root(d_buffer).same_as(root(c_buffer)):
         exact = d_buffer.same_as(c_buffer) and tvm_ffi.structural_equal(
@@ -378,10 +378,10 @@ def _lower_mma(op_call: TilePrimitiveCall, sctx: DispatchContext, atom) -> PrimF
         fail(reason)
     d_region, a_region, b_region, c_region, trans_a, trans_b, alpha, beta = op_call.args
     d_buffer, a_buffer, b_buffer, c_buffer = (
-        d_region.buffer,
-        a_region.buffer,
-        b_region.buffer,
-        c_region.buffer,
+        d_region.source,
+        a_region.source,
+        b_region.source,
+        c_region.source,
     )
 
     # Select the descriptor by the complete A/B/C/D dtype contract, then make

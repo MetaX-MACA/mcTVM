@@ -157,8 +157,11 @@ class CodeGenVM : public ExprFunctor<Instruction::Arg(const Expr&)> {
       } else {
         // every "normal" operator is lowered to a global var in the IRModule. The Attrs for those
         // ops are handled in a pass when lowering them to TIR.
-        TVM_FFI_THROW(InternalError) << "CodeGenVM cannot handle this intrinsic now:\n"
-                                     << call_node->op;
+        TVM_FFI_THROW(InternalError)
+            << "CodeGenVM cannot emit this Relax operator directly. "
+            << "Run the appropriate lowering pass, or route the operator to an external "
+            << "codegen before VM codegen.\nOffending call:\n"
+            << call;
       }
     } else {
       EmitNormalCall(call, dst_reg);
@@ -221,8 +224,8 @@ class CodeGenVM : public ExprFunctor<Instruction::Arg(const Expr&)> {
     return VisitExpr_(static_cast<const VarNode*>(op));
   }
 
-  Instruction::Arg VisitExpr_(const ConstantNode* op) final {
-    auto arg = builder_->ConvertConstant(op->data);
+  Instruction::Arg VisitExpr_(const GenericConstNode* op) final {
+    auto arg = builder_->ConvertConstant(op->value);
 
     if (auto tensor_ty = op->ty.as<TensorTypeNode>()) {
       if (tensor_ty->vdevice.has_value()) {
@@ -237,7 +240,7 @@ class CodeGenVM : public ExprFunctor<Instruction::Arg(const Expr&)> {
     std::vector<int64_t> shape;
     for (PrimExpr e : op->values) {
       if (auto* int_value = e.as<IntImmNode>()) {
-        shape.push_back(int_value->value);
+        shape.push_back(static_cast<int64_t>(int_value->value));
       } else {
         TVM_FFI_THROW(InternalError)
             << "Should only use constant shape after shape lowering: " << op->values;
@@ -255,10 +258,6 @@ class CodeGenVM : public ExprFunctor<Instruction::Arg(const Expr&)> {
   }
 
   Instruction::Arg VisitExpr_(const StringImmNode* op) final {
-    return builder_->ConvertConstant(op->value);
-  }
-
-  Instruction::Arg VisitExpr_(const DataTypeImmNode* op) final {
     return builder_->ConvertConstant(op->value);
   }
 
@@ -353,7 +352,7 @@ class CodeGenVM : public ExprFunctor<Instruction::Arg(const Expr&)> {
     }
     int64_t vdevice_index = -1;
     if (const auto* int_imm = call_node->args[4].as<IntImmNode>()) {
-      vdevice_index = int_imm->value;
+      vdevice_index = int_imm->value.as<int>().value();
     }
     auto vdevice = GetGlobalVDevice(ctx_mod_, vdevice_index);
 

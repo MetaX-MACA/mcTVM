@@ -22,7 +22,7 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/expr.h>
 #include <tvm/ir/function.h>
-#include <tvm/ir/node_functor.h>
+#include <tvm/ir/object_functor.h>
 
 #include <vector>
 
@@ -49,7 +49,7 @@ namespace ir_builder {
  *
  * \endcode
  *
- * The `T::MatchBuffer` below instead generates `MatchBufferRegion` in a TIR block:
+ * The `T::MatchBuffer` below instead generates `s_tir::MatchBufferRegion` in a TIR block:
  *
  * \code {.cpp}
  *
@@ -269,7 +269,7 @@ namespace details {
 
 class Namer {
  public:
-  using FType = NodeFunctor<void(const ffi::ObjectRef&, ffi::String)>;
+  using FType = ObjectFunctor<void(const ffi::ObjectRef&, ffi::String)>;
   static FType& vtable();
   static void Name(ffi::ObjectRef node, ffi::String name);
 };

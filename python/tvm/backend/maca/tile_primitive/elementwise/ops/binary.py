@@ -22,8 +22,9 @@ from __future__ import annotations
 import functools
 import operator
 
+from tvm.ir import TensorRegion as BufferRegion
 from tvm.script import tirx as T
-from tvm.tirx import BufferRegion, TilePrimitiveCall
+from tvm.tirx import TilePrimitiveCall
 
 from . import OpSpec, Plan, SrcSpec
 

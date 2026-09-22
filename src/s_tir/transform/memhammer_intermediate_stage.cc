@@ -17,12 +17,13 @@
  * under the License.
  */
 #include <tvm/ffi/cast.h>
+#include <tvm/ffi/extra/structural_mutate.h>
+#include <tvm/ffi/extra/structural_visit.h>
 
 #include "memhammer_rewrite_rule.h"
 
 namespace tvm {
 namespace s_tir {
-using namespace tvm::prim;
 using namespace tvm::tirx;
 
 Stmt CopyLoopChain(const std::vector<const ForNode*> loops, const Stmt& inner_body, int ith = -1,
@@ -73,8 +74,9 @@ std::pair<Stmt, For> LiftThreadBindingLoops(Stmt stmt) {
  * will be in the form of floormod(floordiv(x, a), b).
  * Rank promotion removes strided access, thus enabling further buffer compacting
  */
-class IndexPatternFinder : public ExprVisitor {
+class IndexPatternFinder : public StmtExprVisitor {
  public:
+  using StmtExprVisitor::Visit_;
   IndexPatternFinder(const ffi::Map<Var, Range>& var_range, ffi::Array<PrimExpr>* resulting_index)
       : var_range_(var_range), resulting_index_(resulting_index) {}
   struct Operator {
@@ -94,16 +96,16 @@ class IndexPatternFinder : public ExprVisitor {
   static ffi::Array<PrimExpr> getRankPromotedShape(ffi::Array<PrimExpr> indices,
                                                    const ffi::Map<Var, Range>& var_range,
                                                    ffi::Array<PrimExpr>* rewrite_indices) {
-    ffi::Map<Var, arith::IntSet> var_dom = arith::AsIntSet(var_range);
+    ffi::Map<Var, sym::IntSet> var_dom = sym::AsIntSet(var_range);
     ffi::Array<PrimExpr> new_shape;
     for (const PrimExpr& expr : indices) {
       ffi::Array<PrimExpr> indices_dim;
-      IndexPatternFinder extractor(var_range, &indices_dim);
-      extractor(expr);
-      if (!extractor.success_) {
+      auto extractor = ffi::make_object<IndexPatternFinder>(var_range, &indices_dim);
+      extractor->Visit(expr);
+      if (!extractor->success_) {
         return {};
       }
-      ffi::Array<PrimExpr> access_shape = extractor.access_shape_;
+      ffi::Array<PrimExpr> access_shape = extractor->access_shape_;
       PrimExpr product_shape = 1;
       for (PrimExpr e : access_shape) {
         product_shape *= e;
@@ -119,13 +121,13 @@ class IndexPatternFinder : public ExprVisitor {
   }
 
  private:
-  void VisitExpr_(const VarNode* op) final {
+  ffi::Optional<VisitInterrupt> Visit_(const VarNode* op) final {
     if (!success_) {
-      return;
+      return std::nullopt;
     }
     if (ffi::Optional<Range> range = var_range_.Get(ffi::GetRef<Var>(op))) {
       PrimExpr index = ffi::GetRef<Var>(op).as_or_throw<PrimExpr>();
-      int64_t max = range.value()->extent.as<IntImmNode>()->value;
+      int64_t max = static_cast<int64_t>(range.value()->extent.as<IntImmNode>()->value);
       int64_t extent = max;
       for (int i = static_cast<int>(operator_stack.size()) - 1; i >= 0; i--) {
         Operator o = operator_stack[i];
@@ -137,7 +139,7 @@ class IndexPatternFinder : public ExprVisitor {
           case Operator::OpKind::FloorDiv:
             if (max % o.operand != 0 && o.operand % max != 0) {
               success_ = false;
-              return;
+              return std::nullopt;
             }
             max = max / o.operand;
             if (extent > max) {
@@ -145,7 +147,7 @@ class IndexPatternFinder : public ExprVisitor {
             }
             if (max % extent != 0) {
               success_ = false;
-              return;
+              return std::nullopt;
             }
             index = floordiv(index, IntImm::Int32(o.operand));
             break;
@@ -153,7 +155,7 @@ class IndexPatternFinder : public ExprVisitor {
             int64_t step = max / extent;
             if (step % o.operand != 0 && o.operand % step != 0) {
               success_ = false;
-              return;
+              return std::nullopt;
             }
             if (step % o.operand == 0) {
               extent = 1;
@@ -171,27 +173,31 @@ class IndexPatternFinder : public ExprVisitor {
         resulting_index_->push_back(floordiv(index, max / extent));
       }
     }
+    return std::nullopt;
   }
 
-  void VisitExpr_(const FloorDivNode* op) final {
-    int64_t b = op->b.as<IntImmNode>()->value;
+  ffi::Optional<VisitInterrupt> Visit_(const FloorDivNode* op) final {
+    int64_t b = static_cast<int64_t>(op->b.as<IntImmNode>()->value);
     operator_stack.push_back(Operator{Operator::OpKind::FloorDiv, b});
-    ExprVisitor::VisitExpr_(op);
+    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(StmtExprVisitor::Visit_(op));
     operator_stack.pop_back();
+    return std::nullopt;
   }
 
-  void VisitExpr_(const FloorModNode* op) final {
-    int64_t b = op->b.as<IntImmNode>()->value;
+  ffi::Optional<VisitInterrupt> Visit_(const FloorModNode* op) final {
+    int64_t b = static_cast<int64_t>(op->b.as<IntImmNode>()->value);
     operator_stack.push_back(Operator{Operator::OpKind::FloorMod, b});
-    ExprVisitor::VisitExpr_(op);
+    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(StmtExprVisitor::Visit_(op));
     operator_stack.pop_back();
+    return std::nullopt;
   }
 
-  void VisitExpr_(const MulNode* op) final {
-    int64_t b = op->b.as<IntImmNode>()->value;
+  ffi::Optional<VisitInterrupt> Visit_(const MulNode* op) final {
+    int64_t b = static_cast<int64_t>(op->b.as<IntImmNode>()->value);
     operator_stack.push_back(Operator{Operator::OpKind::Mul, b});
-    ExprVisitor::VisitExpr_(op);
+    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(StmtExprVisitor::Visit_(op));
     operator_stack.pop_back();
+    return std::nullopt;
   }
 
   ffi::Map<Var, Range> var_range_;
@@ -203,14 +209,17 @@ class IndexPatternFinder : public ExprVisitor {
 
 class BufferLoadReplacer : public StmtExprMutator {
  public:
+  using StmtExprMutator::Mutate;
+  using StmtExprMutator::Mutate_;
+
   BufferLoadReplacer(const BufferVar& tgt_buffer, const TensorLoad& new_buffer_load)
       : tgt_buffer_(tgt_buffer), new_buffer_load_(new_buffer_load) {}
 
-  Expr VisitExpr_(const TensorLoadNode* op) {
+  UnchangedOr<PrimExpr> Mutate_(const TensorLoadNode* op, InplaceMode inplace_mode) {
     if (op->source.as_or_throw<tvm::tirx::BufferVar>().same_as(tgt_buffer_)) {
       return new_buffer_load_;
     }
-    return StmtExprMutator::VisitExpr_(op);
+    return StmtExprMutator::Mutate_(op, inplace_mode);
   }
 
  private:
@@ -279,29 +288,28 @@ std::pair<Stmt, SeqStmt> InsertCacheStage(Stmt stmt, bool is_write_cache, ffi::S
     }
   }
 
-  arith::Analyzer analyzer;
+  sym::Analyzer analyzer;
   const TensorLoadNode* target_buffer_load = nullptr;
   if (is_write_cache) {
-    tirx::PreOrderVisit(stmt, [&](const ffi::ObjectRef& obj) {
-      if (const auto* buffer_load = obj.as<TensorLoadNode>()) {
-        if (buffer_load->source.as_or_throw<tvm::tirx::BufferVar>().scope() == "wmma.accumulator" ||
-            buffer_load->source.as_or_throw<tvm::tirx::BufferVar>().scope() == "m16n8k8.matrixC") {
-          if (target_buffer_load == nullptr) {
-            target_buffer_load = buffer_load;
-          } else {
-            TVM_FFI_ICHECK(target_buffer_load->source.as_or_throw<tvm::tirx::BufferVar>().same_as(
-                buffer_load->source.as_or_throw<tvm::tirx::BufferVar>()))
-                << "More than one target buffer found";
-            TVM_FFI_ICHECK(target_buffer_load->indices.size() == buffer_load->indices.size());
-            for (size_t i = 0; i < target_buffer_load->indices.size(); i++) {
-              TVM_FFI_ICHECK(
-                  analyzer->CanProveEqual(target_buffer_load->indices[i], buffer_load->indices[i]));
-            }
+    auto walk_fn = [&](const TensorLoad& buffer_load) -> ffi::Expected<ffi::WalkResult> {
+      if (buffer_load->source.as_or_throw<tvm::tirx::BufferVar>().scope() == "wmma.accumulator" ||
+          buffer_load->source.as_or_throw<tvm::tirx::BufferVar>().scope() == "m16n8k8.matrixC") {
+        if (target_buffer_load == nullptr) {
+          target_buffer_load = buffer_load.get();
+        } else {
+          TVM_FFI_ICHECK(target_buffer_load->source.as_or_throw<tvm::tirx::BufferVar>().same_as(
+              buffer_load->source.as_or_throw<tvm::tirx::BufferVar>()))
+              << "More than one target buffer found";
+          TVM_FFI_ICHECK(target_buffer_load->indices.size() == buffer_load->indices.size());
+          for (size_t i = 0; i < target_buffer_load->indices.size(); i++) {
+            TVM_FFI_ICHECK(
+                analyzer->CanProveEqual(target_buffer_load->indices[i], buffer_load->indices[i]));
           }
         }
       }
-      return true;
-    });
+      return ffi::WalkResult::Advance();
+    };
+    ffi::StructuralWalk<ffi::WalkOrder::kPreOrder>(stmt, walk_fn);
     TVM_FFI_ICHECK(target_buffer_load);
   }
 
@@ -349,15 +357,21 @@ std::pair<Stmt, SeqStmt> InsertCacheStage(Stmt stmt, bool is_write_cache, ffi::S
       cache_indices.push_back(loop->loop_var);
     }
   }
+  auto map_var = [&subst_map](const Var& var) -> ffi::Expected<ffi::UnchangedOr<ffi::Any>> {
+    if (auto repl = subst_map.Get(var)) return ffi::Any(*std::move(repl));
+    return ffi::Unchanged();
+  };
   ffi::Array<PrimExpr> subst_indices;
   ffi::Array<PrimExpr> subst_cache_indices;
   if (is_write_cache) {
     for (PrimExpr e : buf_store->indices) {
-      subst_indices.push_back(Substitute(e, subst_map));
+      subst_indices.push_back(
+          ffi::StructuralMap<ffi::WalkOrder::kPreOrder>(e, map_var).as_or_throw<PrimExpr>());
     }
   }
   for (PrimExpr e : cache_indices) {
-    subst_cache_indices.push_back(Substitute(e, subst_map));
+    subst_cache_indices.push_back(
+        ffi::StructuralMap<ffi::WalkOrder::kPreOrder>(e, map_var).as_or_throw<PrimExpr>());
   }
 
   BufferVar new_buffer;
@@ -379,19 +393,27 @@ std::pair<Stmt, SeqStmt> InsertCacheStage(Stmt stmt, bool is_write_cache, ffi::S
     // copy from wmma to new cache buffer
     TensorLoad new_buffer_load = BufferLoad(new_buffer, cache_indices);
     generate_body =
-        BufferLoadReplacer(target_buffer_load->source.as_or_throw<tvm::tirx::BufferVar>(),
-                           new_buffer_load)(ffi::GetRef<Stmt>(buf_store));
-    generate_body = Substitute(generate_body, subst_map);
+        ffi::make_object<BufferLoadReplacer>(
+            target_buffer_load->source.as_or_throw<tvm::tirx::BufferVar>(), new_buffer_load)
+            ->Mutate(ffi::GetRef<Stmt>(buf_store))
+            .ValueOrUnchanged(ffi::GetRef<Stmt>(buf_store));
+    generate_body =
+        ffi::StructuralMap<ffi::WalkOrder::kPreOrder>(generate_body, map_var).as_or_throw<Stmt>();
   } else {
     generate_body =
-        BufferStore(new_buffer, Substitute(buf_store->value, subst_map), subst_cache_indices);
+        BufferStore(new_buffer,
+                    ffi::StructuralMap<ffi::WalkOrder::kPreOrder>(buf_store->value, map_var)
+                        .as_or_throw<PrimExpr>(),
+                    subst_cache_indices);
   }
 
   if (predicate.has_value()) {
     // generated by coalescing
     TVM_FFI_ICHECK_EQ(loops_under_compute_location.size(), 2);
     PrimExpr subst_value = 0;
-    PrimExpr subst_predicate = Substitute(predicate.value(), subst_map);
+    PrimExpr subst_predicate =
+        ffi::StructuralMap<ffi::WalkOrder::kPreOrder>(predicate.value(), map_var)
+            .as_or_throw<PrimExpr>();
     generate_body = IfThenElse(subst_predicate, generate_body);
   }
 

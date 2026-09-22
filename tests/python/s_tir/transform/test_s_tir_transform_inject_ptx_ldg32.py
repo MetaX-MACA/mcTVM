@@ -17,6 +17,7 @@
 # ruff: noqa: F401
 
 import pytest
+import tvm_ffi
 
 import tvm
 import tvm.testing
@@ -35,7 +36,7 @@ def _count_alloc(stmt):
         if isinstance(n, tvm.tirx.AllocBuffer):
             num_alloc[0] += 1
 
-    tvm.tirx.stmt_functor.post_order_visit(stmt, visit)
+    tvm_ffi.structural_walk(stmt, visit)
     return num_alloc[0]
 
 
@@ -46,7 +47,7 @@ def _count_ptx_ldg32(stmt):
         if isinstance(n, tvm.ir.Call) and n.op.name == "tirx.s_tir.ldg32":
             num_call[0] += 1
 
-    tvm.tirx.stmt_functor.post_order_visit(stmt, visit)
+    tvm_ffi.structural_walk(stmt, visit)
     return num_call[0]
 
 

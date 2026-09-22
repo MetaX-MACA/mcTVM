@@ -158,13 +158,13 @@ static PrimExpr DispatchMACAShuffle(const PrimExpr& e) {
 
 void RegisterMACAIntrinRules() {
   // clang-format off
-TVM_REGISTER_OP("tirx.clz").set_attr<FLowerIntrinsic>(
+TVM_REGISTER_OP("prim.clz").set_attr<FLowerIntrinsic>(
     "maca.FLowerIntrinsic", DispatchPureExtern<MACAMath, /*dtype_from_arg=*/true>);
 
 TVM_REGISTER_OP("tirx.floor")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.ceil")
+TVM_REGISTER_OP("prim.ceil")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
 TVM_REGISTER_OP("tirx.trunc")
@@ -197,7 +197,7 @@ TVM_REGISTER_OP("tirx.log")
     .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.log2")
+TVM_REGISTER_OP("prim.log2")
     .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 

@@ -23,9 +23,9 @@ thread-local region, rather than applying CUDA-specific cache semantics or
 vector operations across a non-trivial layout.
 """
 
-from tvm.arith.analyzer import Analyzer
 from tvm.runtime import DataType
 from tvm.script import tirx as T
+from tvm.sym.analyzer import Analyzer
 from tvm.tirx import Buffer, PrimFunc
 from tvm.tirx.operator.tile_primitive.dispatcher import predicate, register_dispatch
 from tvm.tirx.operator.tile_primitive.registry import DispatchContext
@@ -58,7 +58,7 @@ def _can_prove_zero(value) -> bool:
 
 def _region_is_contiguous(buffer_region: BufferRegion) -> bool:
     """Whether a rectangular logical region is one flat physical interval."""
-    buffer: Buffer = buffer_region.buffer
+    buffer: Buffer = buffer_region.source
     region = list(buffer_region.region)
     for pivot in range(len(region)):
         if not all(_can_prove_equal(outer.extent, 1) for outer in region[:pivot]):
@@ -72,7 +72,7 @@ def _region_is_contiguous(buffer_region: BufferRegion) -> bool:
 
 
 def _vector_region_supported(buffer_region: BufferRegion, num_bytes: int):
-    buffer: Buffer = buffer_region.buffer
+    buffer: Buffer = buffer_region.source
     layout = buffer.layout
     if layout is None or not layout.is_trivial():
         return False, f"{buffer.scope()} buffer has non-trivial layout"
@@ -120,8 +120,8 @@ def _is_forced_vec_copy(
         return False, scope_reason
 
     op_call = TilePrimitiveCall.downcast(op_call)
-    src: Buffer = op_call.src.buffer
-    dst: Buffer = op_call.dst.buffer
+    src: Buffer = op_call.src.source
+    dst: Buffer = op_call.dst.source
     if src.dtype != dst.dtype:
         return False, f"dtype mismatch: src={src.dtype}, dst={dst.dtype}"
 
@@ -149,8 +149,8 @@ def _emit_forced_vec_copy(
     op_call: TilePrimitiveCall, _sctx: DispatchContext, num_bytes: int
 ) -> PrimFunc:
     op_call = TilePrimitiveCall.downcast(op_call)
-    src: Buffer = op_call.src.buffer
-    dst: Buffer = op_call.dst.buffer
+    src: Buffer = op_call.src.source
+    dst: Buffer = op_call.dst.source
     src_ptr = src.ptr_to(_region_start(op_call.src))
     dst_ptr = dst.ptr_to(_region_start(op_call.dst))
     copy_op = getattr(T.maca, f"copy_{num_bytes * 8}b")

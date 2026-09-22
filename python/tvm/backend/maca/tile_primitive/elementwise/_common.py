@@ -30,10 +30,10 @@ from __future__ import annotations
 import functools
 import operator
 
-from tvm.arith.analyzer import Analyzer
+from tvm.ir import TensorRegion as BufferRegion
 from tvm.runtime import DataType
 from tvm.script import tirx as T
-from tvm.tirx import BufferRegion
+from tvm.sym.analyzer import Analyzer
 from tvm.tirx.layout import Axis, Iter, TileLayout
 
 from ..common import get_indices, get_st_extent
@@ -68,10 +68,10 @@ def dtype_bits(dtype) -> int:
 
 def compute_dtype_of(plan) -> str:
     """Widest dtype in bits across dst + buffer/scalar srcs (dst breaks ties)."""
-    candidates = [dtype_name(plan.dst.buffer.dtype)]
+    candidates = [dtype_name(plan.dst.source.dtype)]
     for s in plan.srcs:
         if s.buf_region is not None:
-            candidates.append(dtype_name(s.buf_region.buffer.dtype))
+            candidates.append(dtype_name(s.buf_region.source.dtype))
         elif s.scalar is not None:
             candidates.append(scalar_dtype(s.scalar))
     widest = candidates[0]
@@ -205,8 +205,8 @@ def preprocess_operand(op_br, anchor_tshape):
     Raises ``ValueError`` if the lift is not broadcast-compatible (caller
     should have verified via ``shape_broadcast_compat`` in the predicate).
     """
-    op_layout = op_br.buffer.layout
-    op_shape = op_br.buffer.shape
+    op_layout = op_br.source.layout
+    op_shape = op_br.source.shape
     op_region = [(r.min, r.min + r.extent) for r in op_br.region]
     sliced = op_layout.slice(list(op_shape), op_region).canonicalize()
     sliced = _extract_tile(sliced, op_region)
@@ -286,8 +286,8 @@ def align_operands_to_anchor(anchor_br, layout_others_br):
     Uses ``_align_layouts_no_post_canon`` (not copy's ``align_layouts_raw``
     directly) so ``anchor_p.shard`` length matches ``op_seps`` groupings.
     """
-    anchor_layout = anchor_br.buffer.layout
-    anchor_shape = anchor_br.buffer.shape
+    anchor_layout = anchor_br.source.layout
+    anchor_shape = anchor_br.source.shape
     anchor_region = [(r.min, r.min + r.extent) for r in anchor_br.region]
 
     per_op_aligned: dict = {}
@@ -301,8 +301,8 @@ def align_operands_to_anchor(anchor_br, layout_others_br):
         return anchor_p, per_op_aligned
 
     for op_br in layout_others_br:
-        op_layout = op_br.buffer.layout
-        op_shape = op_br.buffer.shape
+        op_layout = op_br.source.layout
+        op_shape = op_br.source.shape
         op_region = [(r.min, r.min + r.extent) for r in op_br.region]
         r_p, op_p, op_seps = _align_layouts_no_post_canon(
             anchor_layout,
@@ -371,7 +371,7 @@ def fetch_src_value(src, fused, dst_indices, dst_start, dst_extent):
         idx = _broadcast_indices(dst_indices, dst_start, dst_extent, src_st, src_ext)
     else:
         idx = get_indices(fused, src_st, src_ext)
-    return region.buffer[tuple(idx)]
+    return region.source[tuple(idx)]
 
 
 def emit_scope_sync(scope_kind: str):

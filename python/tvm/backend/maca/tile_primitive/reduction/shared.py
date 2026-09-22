@@ -26,8 +26,8 @@ import functools
 import math
 import operator
 
-from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as T
+from tvm.sym.analyzer import Analyzer
 from tvm.tirx import BufferRegion, PrimFunc, TilePrimitiveCall
 from tvm.tirx.operator.tile_primitive import DispatchContext, fail
 from tvm.tirx.operator.tile_primitive.common import ReduceOpType
@@ -54,7 +54,7 @@ def validate_reduction_shared(
         return False, f"unsupported exec_scope {sctx.scope_kind} for shared reduction"
 
     op = TilePrimitiveCall.downcast(op)
-    dst, src = op.output.buffer, op.input.buffer
+    dst, src = op.output.source, op.input.source
     if not (src.scope().startswith("shared") and dst.scope().startswith("shared")):
         return False, "expected shared scope for both src and dst"
     if src.dtype != dst.dtype:
@@ -99,7 +99,7 @@ def _emit_reduction_shared_wave(
 ) -> PrimFunc:
     scope_kind = sctx.scope_kind
     thread_count = sctx.launch_params["threadIdx.x"].dom.extent if scope_kind == "cta" else 64
-    dst, src = dst_br.buffer, src_br.buffer
+    dst, src = dst_br.source, src_br.source
     src_st, src_extent = get_st_extent(src_br)
     dst_st, dst_extent = get_st_extent(dst_br)
     spatial_len = functools.reduce(operator.mul, [src_extent[dim] for dim in spatial_dims], 1)
@@ -135,7 +135,7 @@ def _emit_reduction_shared_wave(
             T.maca.warp_sync()
 
     # fmt: off
-    @T.prim_func
+    @T.prim_func(check_well_formed=False)
     def impl():
         tid_in_scope = get_tid_in_scope()
         thread_data = T.alloc_buffer([1], dtype=src.dtype, scope="local")
@@ -181,7 +181,7 @@ def _emit_reduction_shared_thread(
     reduce_dims: list[int],
     spatial_dims: list[int],
 ) -> PrimFunc:
-    dst, src = dst_br.buffer, src_br.buffer
+    dst, src = dst_br.source, src_br.source
     src_st, src_extent = get_st_extent(src_br)
     dst_st, dst_extent = get_st_extent(dst_br)
     spatial_len = functools.reduce(operator.mul, [src_extent[dim] for dim in spatial_dims], 1)
@@ -190,7 +190,7 @@ def _emit_reduction_shared_thread(
     init_value = reduce_default_value_table(src.dtype)[reduce_op]
 
     # fmt: off
-    @T.prim_func
+    @T.prim_func(check_well_formed=False)
     def impl():
         for spatial_fused in T.serial(spatial_len):
             dst_indices = T.meta_var(get_indices(spatial_fused, dst_st, dst_extent))

@@ -21,9 +21,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from tvm.ir import TensorRegion as BufferRegion
 from tvm.ir import is_prim_expr
 from tvm.script import tirx as T
-from tvm.tirx import BufferRegion, TilePrimitiveCall
+from tvm.tirx import TilePrimitiveCall
 from tvm.tirx.expr import FloatImm
 
 from .._common import scalar_dtype

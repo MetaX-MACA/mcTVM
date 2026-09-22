@@ -16,8 +16,11 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-#include <tvm/arith/int_set.h>
 #include <tvm/ffi/cast.h>
+#include <tvm/ffi/extra/structural_mutate.h>
+#include <tvm/ffi/extra/structural_visit.h>
+#include <tvm/s_tir/stmt.h>
+#include <tvm/sym/int_set.h>
 
 #include "../../../tirx/transform/replace_selected_expr.h"
 #include "../utils.h"
@@ -25,7 +28,6 @@
 
 namespace tvm {
 namespace s_tir {
-using namespace tvm::prim;
 using namespace tvm::tirx;
 
 /******** Helper Functions/Classes ********/
@@ -59,8 +61,8 @@ struct IndexInfo {
  * \param range The range of the integer.
  * \returns A data type that covers the input range.
  */
-PrimType DeterminePrimType(const arith::IntSet& range) {
-  arith::Analyzer ana;
+PrimType DeterminePrimType(const sym::IntSet& range) {
+  sym::Analyzer ana;
   if (ana->CanProve(range.min() >= INT32_MIN && range.max() <= INT32_MAX)) {
     return PrimType::Int(32);
   } else {
@@ -73,6 +75,8 @@ PrimType DeterminePrimType(const arith::IntSet& range) {
 /*! \brief Collect the index info to be cached */
 class IndexInfoCollector : public StmtExprVisitor {
  public:
+  using StmtExprVisitor::Visit_;
+
   /*!
    * \brief Collect the index info for cache_index and write into the IndexInfo
    * \param self The state of the schedule \param block_sref The sref of the target
@@ -81,14 +85,14 @@ class IndexInfoCollector : public StmtExprVisitor {
    */
   static void Collect(const ScheduleState& self, const StmtSRef& block_sref,
                       const StmtSRef& scope_sref, IndexInfo* info) {
-    IndexInfoCollector collector(self, block_sref, scope_sref, info->cse_thresh);
-    collector(ffi::GetRef<Stmt>(scope_sref->stmt));
-    info->loc_pos = collector.loc_pos_;
-    info->index_exprs = collector.exprs_;
-    info->range_map = collector.range_map_;
+    auto collector =
+        ffi::make_object<IndexInfoCollector>(self, block_sref, scope_sref, info->cse_thresh);
+    collector->Visit(ffi::GetRef<Stmt>(scope_sref->stmt));
+    info->loc_pos = collector->loc_pos_;
+    info->index_exprs = collector->exprs_;
+    info->range_map = collector->range_map_;
   }
 
- private:
   /*!
    * \brief Constructor
    * \param self The state of the schedule
@@ -100,24 +104,26 @@ class IndexInfoCollector : public StmtExprVisitor {
                      const StmtSRef& scope_sref, int cse_thresh)
       : self_(self), block_sref_(block_sref), scope_sref_(scope_sref), cse_thresh_(cse_thresh) {}
 
-  void VisitStmt_(const SeqStmtNode* seq_stmt) final {
+ private:
+  ffi::Optional<VisitInterrupt> Visit_(const SeqStmtNode* seq_stmt) final {
     for (size_t i = 0; i < seq_stmt->size(); ++i) {
       if (loc_pos_ != -1) {
         break;
       }
-      VisitStmt(seq_stmt->seq[i]);
+      TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(Visit(seq_stmt->seq[i]));
       // `pos` can be assigned only once when we visited `block_sref`
       if (visited_block_ && loc_pos_ == -1 && update_seq_pos_) {
         // The offset of insert position from the block
         loc_pos_ = i;
-        return;
+        return std::nullopt;
       }
     }
+    return std::nullopt;
   }
 
-  void VisitStmt_(const SBlockNode* block) final {
+  ffi::Optional<VisitInterrupt> Visit_(const SBlockNode* block) final {
     visiting_target_sblock = static_cast<bool>(block_sref_->stmt == block);
-    StmtVisitor::VisitStmt_(block);
+    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(StmtExprVisitor::Visit_(block));
     visiting_target_sblock = false;
     if (block == scope_sref_->stmt) {
       // The block vistied is the current parent scope
@@ -132,18 +138,20 @@ class IndexInfoCollector : public StmtExprVisitor {
     if (visited_block_ && self_->stmt2ref.at(block)->parent == scope_sref_.get()) {
       update_seq_pos_ = true;
     }
+    return std::nullopt;
   }
 
-  void VisitStmt_(const ForNode* loop) final {
+  ffi::Optional<VisitInterrupt> Visit_(const ForNode* loop) final {
     range_map_.Set(loop->loop_var, Range::FromMinExtent(loop->min, loop->extent));
-    StmtVisitor::VisitStmt_(loop);
+    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(StmtExprVisitor::Visit_(loop));
     // Update seq pos only at top scope
     if (visited_block_ && self_->stmt2ref.at(loop)->parent == scope_sref_.get()) {
       update_seq_pos_ = true;
     }
+    return std::nullopt;
   }
 
-  void VisitStmt_(const BufferStoreNode* store) final {
+  ffi::Optional<VisitInterrupt> Visit_(const BufferStoreNode* store) final {
     // Only analyze the cache candidate for stores in target block
     if (visiting_target_sblock) {
       auto IsEligibleComputation = [](const PrimExpr& expr) {
@@ -172,27 +180,27 @@ class IndexInfoCollector : public StmtExprVisitor {
 
       // Record the final sub expr with repeat time greater than cse_thresh_
       // In order to make the result stable, sort it by post order and then by complexity
-      PostOrderVisit(store->value, [&semantic_comp_done_by_stmt, this](const ffi::ObjectRef& node) {
-        if (auto prim = node.as<PrimExpr>()) {
-          PrimExpr this_expr = prim.value();
-          for (auto& it : semantic_comp_done_by_stmt) {
-            if (it.second >= this->cse_thresh_ && EquivalentTerms(this_expr, it.first, true)) {
-              auto find_result =
-                  std::find_if(this->exprs_.begin(), this->exprs_.end(),
-                               [&](PrimExpr expr) { return expr.get() == it.first.get(); });
-              if (find_result == this->exprs_.end()) {
-                this->exprs_.push_back(it.first);
-              }
+      auto walk_fn = [&semantic_comp_done_by_stmt,
+                      this](const PrimExpr& this_expr) -> ffi::Expected<ffi::WalkResult> {
+        for (auto& it : semantic_comp_done_by_stmt) {
+          if (it.second >= this->cse_thresh_ && EquivalentTerms(this_expr, it.first, true)) {
+            auto find_result =
+                std::find_if(this->exprs_.begin(), this->exprs_.end(),
+                             [&](PrimExpr expr) { return expr.get() == it.first.get(); });
+            if (find_result == this->exprs_.end()) {
+              this->exprs_.push_back(it.first);
             }
           }
         }
-      });
+        return ffi::WalkResult::Advance();
+      };
+      ffi::StructuralWalk<ffi::WalkOrder::kPostOrder>(store->value, walk_fn);
       auto cmp = [&](const PrimExpr& lhs, const PrimExpr& rhs) -> bool {
         return CalculateExprComplexity(lhs) > CalculateExprComplexity(rhs);
       };
       std::stable_sort(exprs_.begin(), exprs_.end(), cmp);
     }
-    StmtVisitor::VisitStmt_(store);
+    return StmtExprVisitor::Visit_(store);
   }
 
   /*! \brief The schedule class */
@@ -235,9 +243,10 @@ ffi::Array<SBlock> MakeIndexCacheStage(IndexInfo* info, const ffi::String& stora
 
     // Collect the block vars in original index computation
     info->origin_block_vars.push_back({});
-    PostOrderVisit(index_expr, [&info, &expr_index](const ffi::ObjectRef& node) {
-      if (auto var = node.as<PrimVar>()) {
-        Var iter_var = var.value();
+    auto collect_origin_var = [&info,
+                               &expr_index](const Var& var) -> ffi::Expected<ffi::WalkResult> {
+      if (auto prim_var = var.as<PrimVar>()) {
+        Var iter_var = prim_var.value();
         const ffi::Array<Var>& origin_block_var = info->origin_block_vars[expr_index];
         auto find_result = std::find_if(origin_block_var.begin(), origin_block_var.end(),
                                         [&](Var it) { return it.get() == iter_var.get(); });
@@ -245,21 +254,25 @@ ffi::Array<SBlock> MakeIndexCacheStage(IndexInfo* info, const ffi::String& stora
           info->origin_block_vars[expr_index].push_back(iter_var);
         }
       }
-    });
+      return ffi::WalkResult::Advance();
+    };
+    ffi::StructuralWalk<ffi::WalkOrder::kPostOrder>(index_expr, collect_origin_var);
 
     // Collect the loop vars corresponding to collected block vars,
     // which will be used to create new loop vars
     std::vector<Var> iter_vars;
-    for (const Var& it : info->origin_block_vars[expr_index]) {
-      PostOrderVisit(info->var_binding.at(it), [/*&info,*/ &iter_vars](const ffi::ObjectRef& node) {
-        if (auto var = node.as<PrimVar>()) {
-          Var iter_var = var.value();
-          if (std::find_if(iter_vars.begin(), iter_vars.end(),
-                           [&](Var it) { return it.get() == iter_var.get(); }) == iter_vars.end()) {
-            iter_vars.push_back(iter_var);
-          }
+    auto collect_iter_var = [&iter_vars](const Var& var) -> ffi::Expected<ffi::WalkResult> {
+      if (auto prim_var = var.as<PrimVar>()) {
+        Var iter_var = prim_var.value();
+        if (std::find_if(iter_vars.begin(), iter_vars.end(),
+                         [&](Var it) { return it.get() == iter_var.get(); }) == iter_vars.end()) {
+          iter_vars.push_back(iter_var);
         }
-      });
+      }
+      return ffi::WalkResult::Advance();
+    };
+    for (const Var& it : info->origin_block_vars[expr_index]) {
+      ffi::StructuralWalk<ffi::WalkOrder::kPostOrder>(info->var_binding.at(it), collect_iter_var);
     }
 
     PrimType data_ty = index_expr.ty();
@@ -267,7 +280,7 @@ ffi::Array<SBlock> MakeIndexCacheStage(IndexInfo* info, const ffi::String& stora
     ffi::Array<PrimExpr> buffer_shape;
     for (const Var& it : info->origin_block_vars[expr_index]) {
       buffer_shape.push_back(
-          arith::EvalSet(info->var_binding.at(it), arith::AsIntSet(info->range_map)).max() + 1);
+          sym::EvalSet(info->var_binding.at(it), sym::AsIntSet(info->range_map)).max() + 1);
     }
     info->cache_buffer.push_back(BufferVar(
         index_buffer_name, BufferType(storage_scope, data_ty, buffer_shape, {1}, {0}, 0, 0)));
@@ -276,15 +289,22 @@ ffi::Array<SBlock> MakeIndexCacheStage(IndexInfo* info, const ffi::String& stora
     std::vector<PrimVar> loop_vars;
     ffi::Map<Var, Var> replace_table;
     for (const Var& it : iter_vars) {
-      PrimType data_ty = DeterminePrimType(arith::IntSet::FromRange(info->range_map.at(it)));
+      PrimType data_ty = DeterminePrimType(sym::IntSet::FromRange(info->range_map.at(it)));
       PrimVar loop_var("ax" + std::to_string(replace_table.size()), data_ty);
       loop_vars.push_back(loop_var);
       replace_table.Set(it, loop_var);
     }
     // Create iter_values from the original block.
     std::vector<PrimExpr> iter_values;
+    auto f_substitute =
+        [&replace_table](const Var& var) -> ffi::Expected<ffi::UnchangedOr<ffi::Any>> {
+      if (auto repl = replace_table.Get(var)) return ffi::Any(*std::move(repl));
+      return ffi::Unchanged();
+    };
     for (const Var& it : info->origin_block_vars[expr_index]) {
-      iter_values.push_back(Substitute(info->var_binding.at(it), replace_table));
+      iter_values.push_back(
+          ffi::StructuralMap<ffi::WalkOrder::kPreOrder>(info->var_binding.at(it), f_substitute)
+              .as_or_throw<PrimExpr>());
     }
     // block variables
     ffi::Array<IterVar> block_vars;
@@ -310,7 +330,14 @@ ffi::Array<SBlock> MakeIndexCacheStage(IndexInfo* info, const ffi::String& stora
     }
 
     // Create the index computing block
-    PrimExpr new_expr = Substitute(index_expr, block_var_map);
+    auto f_substitute_block =
+        [&block_var_map](const Var& var) -> ffi::Expected<ffi::UnchangedOr<ffi::Any>> {
+      if (auto repl = block_var_map.Get(var)) return ffi::Any(*std::move(repl));
+      return ffi::Unchanged();
+    };
+    PrimExpr new_expr =
+        ffi::StructuralMap<ffi::WalkOrder::kPreOrder>(index_expr, f_substitute_block)
+            .as_or_throw<PrimExpr>();
     SBlock block(
         /*iter_vars=*/std::move(block_vars),
         /*reads=*/{},
@@ -365,6 +392,9 @@ Stmt InsertIndexStage(const Stmt& stmt, int pos, const Stmt& stage) {
 /*! \brief Mutator for CacheIndex. */
 class CacheIndexRewriter : public StmtExprMutator {
  public:
+  using StmtExprMutator::Mutate;
+  using StmtExprMutator::Mutate_;
+
   /*!
    * \brief Rewrite the AST and add stages of writting precomputed index
    * \param scope_sref The parent scope of this mutation
@@ -372,11 +402,11 @@ class CacheIndexRewriter : public StmtExprMutator {
    * \return The new AST rooting at the original parent scope
    */
   static Stmt Rewrite(const StmtSRef& scope_sref, IndexInfo* info) {
-    CacheIndexRewriter rewriter(scope_sref, info);
-    return rewriter(ffi::GetRef<Stmt>(scope_sref->stmt));
+    auto rewriter = ffi::make_object<CacheIndexRewriter>(scope_sref, info);
+    return rewriter->Mutate(ffi::GetRef<Stmt>(scope_sref->stmt))
+        .ValueOrUnchanged(ffi::GetRef<Stmt>(scope_sref->stmt));
   }
 
- private:
   explicit CacheIndexRewriter(const StmtSRef& scope_sref, IndexInfo* info)
       : scope_sref_(scope_sref), info_(info) {
     cache_indices_.reserve(info_->origin_block_vars.size());
@@ -388,11 +418,14 @@ class CacheIndexRewriter : public StmtExprMutator {
     }
   }
 
-  Stmt VisitStmt_(const SBlockNode* block) final {
+ private:
+  UnchangedOr<Stmt> Mutate_(const SBlockNode* block, InplaceMode inplace_mode) final {
     SBlock old_stmt = ffi::GetRef<SBlock>(block);
     // Mutate the body
     visiting_target_sblock = static_cast<bool>(block == info_->target_sblock->stmt);
-    SBlock stmt = StmtMutator::VisitStmt_(block).as_or_throw<SBlock>();
+    SBlock stmt = StmtExprMutator::Mutate_(block, inplace_mode)
+                      .ValueOrUnchanged(ffi::GetRef<Stmt>(block))
+                      .as_or_throw<SBlock>();
     visiting_target_sblock = false;
 
     // Check if it is the block corresponding to the parent scope
@@ -409,8 +442,9 @@ class CacheIndexRewriter : public StmtExprMutator {
     return stmt;
   }
 
-  Stmt VisitStmt_(const BufferStoreNode* store) final {
-    Stmt ret_stmt = StmtMutator::VisitStmt_(store);
+  UnchangedOr<Stmt> Mutate_(const BufferStoreNode* store, InplaceMode inplace_mode) final {
+    Stmt ret_stmt =
+        StmtExprMutator::Mutate_(store, inplace_mode).ValueOrUnchanged(ffi::GetRef<Stmt>(store));
     // Replace common sub expr for target block, with cached buffer load
     if (visiting_target_sblock) {
       for (size_t i = 0; i < info_->index_exprs.size(); i++) {
@@ -428,7 +462,6 @@ class CacheIndexRewriter : public StmtExprMutator {
     return ret_stmt;
   }
 
- private:
   /*! \brief The parent scope of the insertion */
   const StmtSRef& scope_sref_;
   /*! \brief The info for inserting cache stage */
@@ -480,7 +513,7 @@ ffi::Array<StmtSRef> CacheIndex(ScheduleState self, const StmtSRef& block_sref,
     if (result_block_sref->parent == nullptr) {
       affine_binding = true;
     } else {
-      arith::Analyzer analyzer;
+      sym::Analyzer analyzer;
       StmtSRef parent_sref = ffi::GetRef<StmtSRef>(result_block_sref->parent);
       affine_binding = IsAffineBinding(/*realize=*/GetSBlockRealize(self, result_block_sref),
                                        /*loop_var_ranges=*/LoopDomainOfSRefTreePath(parent_sref),
@@ -509,7 +542,7 @@ struct CacheIndexTraits : public UnpackedInstTraits<CacheIndexTraits> {
   static ffi::Array<SBlockRV> UnpackedApplyToSchedule(Schedule sch, SBlockRV block,
                                                       ffi::String storage_scope,
                                                       IntImm cse_thresh) {
-    return sch->CacheIndex(block, storage_scope, cse_thresh->value);
+    return sch->CacheIndex(block, storage_scope, cse_thresh->value.as<int>().value());
   }
 
   static ffi::String UnpackedAsPython(ffi::Array<ffi::String> outputs, ffi::String block,
@@ -517,7 +550,7 @@ struct CacheIndexTraits : public UnpackedInstTraits<CacheIndexTraits> {
     PythonAPICall py("cache_index");
     py.Input("block", block);
     py.Input("storage_scope", storage_scope);
-    py.Input("cse_thresh", cse_thresh->value);
+    py.Input("cse_thresh", cse_thresh->value.as<int>().value());
     py.OutputList(outputs);
     return py.Str();
   }

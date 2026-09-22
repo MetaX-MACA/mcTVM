@@ -41,26 +41,33 @@ namespace tvm {
 namespace codegen {
 namespace maca {
 
-class VisitPipelineCommitQueueScope : public StmtExprVisitor {
+class VisitPipelineCommitQueueScope : public tirx::StmtExprVisitor {
  public:
   // info of each pipeline commit queue scope
   std::queue<size_t> total_cp_async_nums;
   std::queue<size_t> last_cp_async_size;
 
-  void VisitExpr_(const CallNode* op) final { StmtExprVisitor::VisitExpr_(op); }
-  void VisitStmt_(const AttrStmtNode* op) final {
+  ffi::Optional<VisitInterrupt> Visit_(const CallNode* op) final {
+    static const Op& cp_async_op = Op::Get("tirx.s_tir.cp_async_raw");
+    if (op->op.same_as(cp_async_op)) {
+      mxc_cp_async_calls.push_back(op);
+    }
+    return tirx::StmtExprVisitor::Visit_(op);
+  }
+  ffi::Optional<VisitInterrupt> Visit_(const AttrStmtNode* op) final {
     mxc_cp_async_calls.clear();
     if (op->attr_key == s_tir::attr::async_commit_queue_scope) {
-      this->VisitStmt(op->body);
+      this->Visit(op->body);
     }
     if (!mxc_cp_async_calls.empty()) {
       this->total_cp_async_nums.push(mxc_cp_async_calls.size());
-      size_t last_cp_size = mxc_cp_async_calls.back()->args[4].as_or_throw<IntImm>()->value;
+      size_t last_cp_size =
+          mxc_cp_async_calls.back()->args[4].as_or_throw<IntImm>()->value.as<size_t>().value();
       TVM_FFI_ICHECK(last_cp_size == 4 || last_cp_size == 8 || last_cp_size == 16)
           << "For MACA, the size of an memcpy_async must be 4/8/16.";
       this->last_cp_async_size.push(last_cp_size);
     }
-    StmtExprVisitor::VisitStmt_(op);
+    return tirx::StmtExprVisitor::Visit_(op);
   }
 
  private:
@@ -81,7 +88,7 @@ class CodeGenMACA final : public CodeGenC {
   void PrintFunctionSignature(const ffi::String& function_name, const PrimFunc& func,
                               std::ostream& os) final;
   void PrintExtraAttrs(const PrimFunc& f, std::ostream& os) final;  // NOLINT(*)
-  void VisitStmt_(const ForNode* op) final;
+  void Dispatch_(const ForNode* op) final;
   void PrintStorageSync(const CallNode* op) final;
   void PrintStorageScope(const std::string& scope, std::ostream& os) final;  // NOLINT(*)
   using CodeGenC::PrintType;
@@ -99,17 +106,17 @@ class CodeGenMACA final : public CodeGenC {
   std::string CastFromTo(std::string value, const PrimType& from, const PrimType& target) final;
   void AddUtilFunction(const std::string& name, const std::string& code);
   // overload visitor
-  void VisitExpr_(const prim::RampNode* op, std::ostream& os) final;       // NOLINT(*)
-  void VisitExpr_(const prim::SelectNode* op, std::ostream& os) final;     // NOLINT(*)
-  void VisitExpr_(const prim::BroadcastNode* op, std::ostream& os) final;  // NOLINT(*)
-  void VisitExpr_(const FloatImmNode* op, std::ostream& os) final;
-  void VisitExpr_(const CallNode* op, std::ostream& os) final;
-  void VisitExpr_(const prim::CastNode* op, std::ostream& os) final;
-  void VisitStmt_(const EvaluateNode* op) final;
-  void VisitStmt_(const ReturnNode* op) final;
-  void VisitStmt_(const AllocBufferNode* op) final;
-  void VisitStmt_(const AttrStmtNode* op) final;
-  void VisitStmt_(const DeclBufferNode* op) final;
+  void Dispatch_(const prim::RampNode* op, std::ostream& os) final;       // NOLINT(*)
+  void Dispatch_(const prim::SelectNode* op, std::ostream& os) final;     // NOLINT(*)
+  void Dispatch_(const prim::BroadcastNode* op, std::ostream& os) final;  // NOLINT(*)
+  void Dispatch_(const FloatImmNode* op, std::ostream& os) final;
+  void Dispatch_(const CallNode* op, std::ostream& os) final;
+  void Dispatch_(const prim::CastNode* op, std::ostream& os) final;
+  void Dispatch_(const EvaluateNode* op) final;
+  void Dispatch_(const ReturnNode* op) final;
+  void Dispatch_(const AllocBufferNode* op) final;
+  void Dispatch_(const AttrStmtNode* op) final;
+  void Dispatch_(const DeclBufferNode* op) final;
 
  protected:
   void PrintCallExtern(Type ret_type, ffi::String global_symbol, const ffi::Array<Expr>& args,

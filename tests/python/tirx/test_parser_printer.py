@@ -17,11 +17,12 @@
 import math
 
 import pytest
+import tvm_ffi
 
 import tvm
 import tvm.script
 import tvm.testing
-from tvm.ir import PointerType, PrimType, assert_structural_equal
+from tvm.ir import PointerType, PrimType, TensorRegion, assert_structural_equal
 from tvm.script import ir as I
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
@@ -1031,6 +1032,16 @@ def test_buffer():
     assert_structural_equal(test, from_source(code))
 
 
+def test_buffer_shape_repeated_var_prints_out_of_line():
+    n = tvm.tirx.Var("n", "int32")
+    buffer = tvm.tirx.decl_buffer((n + n,), name="A")
+    func = tvm.tirx.PrimFunc([buffer], tvm.tirx.Evaluate(0))
+
+    code = func.script()
+    assert "n = T.int32()" in code
+    assert_structural_equal(func, from_source(code))
+
+
 def test_kwargs_op_call():
     # fmt: off
     @T.prim_func(private=True)
@@ -1266,7 +1277,7 @@ def test_tuple_let_binding_and_traversal():
 
     def tuple_value(func):
         visited = []
-        tvm.tirx.stmt_functor.post_order_visit(func.body, visited.append)
+        tvm_ffi.structural_walk(func.body, visited.append)
         bind = next(node for node in visited if isinstance(node, tvm.tirx.Bind))
         return bind.value
 
@@ -1378,7 +1389,7 @@ def _collect_buffers(func):
         if isinstance(node, tvm.tirx.DeclBuffer | tvm.tirx.AllocBuffer):
             bufs[node.buffer.name] = node.buffer
 
-    tvm.tirx.stmt_functor.post_order_visit(func.body, _visit)
+    tvm_ffi.structural_walk(func.body, _visit)
     return bufs
 
 
@@ -1390,7 +1401,7 @@ def _collect_buffer_sources(func):
         if isinstance(node, tvm.tirx.DeclBuffer):
             sources[node.buffer.name] = node.data
 
-    tvm.tirx.stmt_functor.post_order_visit(func.body, _visit)
+    tvm_ffi.structural_walk(func.body, _visit)
     return sources
 
 
@@ -1710,7 +1721,7 @@ def test_pointer_expression_assignment_uses_bind():
     # fmt: on
 
     binds = []
-    tvm.tirx.stmt_functor.post_order_visit(
+    tvm_ffi.structural_walk(
         func.body, lambda node: binds.append(node) if isinstance(node, tvm.tirx.Bind) else None
     )
     assert len(binds) == 1
@@ -1747,7 +1758,7 @@ def func() -> None:
     func = tvm.script.from_source(source, extra_vars={"T": T, "ptr": object()})
 
     binds = []
-    tvm.tirx.stmt_functor.post_order_visit(
+    tvm_ffi.structural_walk(
         func.body, lambda node: binds.append(node) if isinstance(node, tvm.tirx.Bind) else None
     )
     assert len(binds) == 1
@@ -1904,7 +1915,7 @@ def test_buffer_sub_multi_iter_dim_ir():
     bufs = _collect_buffers(func)
     a_buf, b_buf = bufs["A"], bufs["B"]
     # 5 -> (5 // 4, 5 % 4) = (1, 1) -> 1 * 1024 + 1 * 64
-    assert int(tvm.arith.Analyzer().simplify(b_buf.elem_offset - a_buf.elem_offset)) == 1088
+    assert int(tvm.sym.Analyzer().simplify(b_buf.elem_offset - a_buf.elem_offset)) == 1088
     assert [int(s) for s in b_buf.shape] == [16]
     assert_structural_equal(b_buf.layout, tvm.tirx.layout.TileLayout(T.S[(16,) : (1,)]))
 
@@ -1942,11 +1953,11 @@ def test_buffer_sub_ir():
     a_buf, b_buf, c_buf = bufs["A"], bufs["B"], bufs["C"]
     # sub[1, 2:6]: drop dim 0 at 1 (1 * 256) then narrow dim 1 to [2, 6) (2 * 16)
     assert [int(s) for s in b_buf.shape] == [4, 16]
-    assert int(tvm.arith.Analyzer().simplify(b_buf.elem_offset - a_buf.elem_offset)) == 288
+    assert int(tvm.sym.Analyzer().simplify(b_buf.elem_offset - a_buf.elem_offset)) == 288
     assert_structural_equal(b_buf.layout, tvm.tirx.layout.TileLayout(T.S[(4, 16) : (16, 1)]))
     # sub[:, 1::2]: keep dim 0, split dim 1 into (4, 2) and fix the remainder at 1
     assert [int(s) for s in c_buf.shape] == [4, 4, 16]
-    assert int(tvm.arith.Analyzer().simplify(c_buf.elem_offset - a_buf.elem_offset)) == 16
+    assert int(tvm.sym.Analyzer().simplify(c_buf.elem_offset - a_buf.elem_offset)) == 16
     assert_structural_equal(
         c_buf.layout, tvm.tirx.layout.TileLayout(T.S[(4, 4, 16) : (256, 32, 1)])
     )
@@ -1994,14 +2005,14 @@ def test_buffer_sub_swizzle_commutation():
     placements must be address-equivalent to the parent layout."""
 
     def addr(buf, base, *coords):
-        analyzer = tvm.arith.Analyzer()
+        analyzer = tvm.sym.Analyzer()
         if len(coords) == 1:
             rel = buf.layout.apply(coords[0])["m"]
         else:
             rel = buf.layout.apply(*coords, shape=[int(s) for s in buf.shape])["m"]
         return int(analyzer.simplify((buf.elem_offset - base) + rel))
 
-    analyzer = tvm.arith.Analyzer()
+    analyzer = tvm.sym.Analyzer()
     compose = T.ComposeLayout(
         3, 3, 3, T.TileLayout(T.S[(4, 1024) : (1024, 1)])
     )  # period = 2^(3+3+3) = 512 elements
@@ -2192,8 +2203,6 @@ def test_buffer_chunk_ir():
     into n equal chunks. chunk(spec)[picks] is the exact same BufferRegion as
     the hand-written a*k:(a+1)*k slice — no reshape, no extra dim."""
 
-    from tvm.tirx.stmt import BufferRegion
-
     compose = T.ComposeLayout(3, 3, 3, T.TileLayout(T.S[(4, 512) : (512, 1)]))
     A = tvm.tirx.decl_buffer(
         (4, 8, 16), "float16", layout=tvm.tirx.layout.TileLayout(T.S[(4, 8, 16) : (128, 16, 1)])
@@ -2203,7 +2212,7 @@ def test_buffer_chunk_ir():
     # chunk((None, None, 2))[:, :, 1] narrows dim 2 (extent 16) to chunk 1 of 2
     # → [8:16] (k = 16 // 2 = 8); rank preserved, dims 0/1 pass through as ':'.
     reg = A.chunk((None, None, 2))[:, :, 1]
-    assert isinstance(reg, BufferRegion)
+    assert isinstance(reg, TensorRegion)
     assert len(reg.region) == 3  # rank-preserving: no extra extent-1 chunk dim
     assert (int(reg.region[2].min), int(reg.region[2].extent)) == (8, 8)
     assert_structural_equal(reg, A[:, :, 8:16])
@@ -2266,12 +2275,11 @@ def test_buffer_view_dtype_ir():
 
 def test_buffer_slice_region():
     """Verify A[slice] returns BufferRegion (not DeclBuffer)."""
-    from tvm.tirx.stmt import BufferRegion
 
     buf = tvm.tirx.decl_buffer((128, 64), "float16")
     br = buf[32:64, 0:32]
-    assert isinstance(br, BufferRegion)
-    assert br.buffer.same_as(buf)
+    assert isinstance(br, TensorRegion)
+    assert br.source.same_as(buf)
     assert int(br.region[0].extent) == 32
     assert int(br.region[1].extent) == 32
 
@@ -2279,11 +2287,11 @@ def test_buffer_slice_region():
     assert isinstance(load, tvm.ir.TensorLoad)
 
     partial = buf[1]
-    assert isinstance(partial, BufferRegion)
+    assert isinstance(partial, TensorRegion)
 
     narrowed = br[4:12, 2:10]
-    assert isinstance(narrowed, BufferRegion)
-    assert narrowed.buffer.same_as(buf)
+    assert isinstance(narrowed, TensorRegion)
+    assert narrowed.source.same_as(buf)
     assert [(int(dim.min), int(dim.extent)) for dim in narrowed.region] == [
         (36, 8),
         (2, 8),
@@ -2295,7 +2303,7 @@ def test_buffer_slice_region():
     assert [int(index) for index in chained_load.indices] == [35, 4]
 
     point_then_region = br[3]
-    assert isinstance(point_then_region, BufferRegion)
+    assert isinstance(point_then_region, TensorRegion)
     assert [(int(dim.min), int(dim.extent)) for dim in point_then_region.region] == [
         (35, 1),
         (0, 32),
@@ -2735,7 +2743,7 @@ def test_roundtrip_tmem_decl_buffer():
         with T.launch_thread("blockIdx.x", 1):
             T.launch_thread("threadIdx.x", 128)
             addr = T.alloc_shared((1,), "uint32", layout=None)
-            addr_alias = T.Buffer((1,), "uint32", data=addr.data, scope="shared")
+            addr_alias = T.decl_buffer((1,), "uint32", data=addr.data, scope="shared")
             buf = T.decl_buffer((64,), scope="tmem", layout=None, allocated_addr=addr_alias[0])
     # fmt: on
 
@@ -2743,11 +2751,12 @@ def test_roundtrip_tmem_decl_buffer():
     assert from_source(code).script() == code
     assert_structural_equal(func, from_source(code))
     decls = []
-    tvm.tirx.stmt_functor.post_order_visit(
+    tvm_ffi.structural_walk(
         func.body,
         lambda node: decls.append(node) if isinstance(node, tvm.tirx.DeclBuffer) else None,
     )
-    assert len(decls) == 1
+    # The shared alias has an explicit definition before the tensor-memory use.
+    assert len(decls) == 2
     tmem_decl = next(decl for decl in decls if decl.buffer.scope() == "tmem")
     assert tmem_decl.data.op.name == "tirx.reinterpret"
 
@@ -3002,7 +3011,7 @@ def test_scope_id_dtype_uint32():
     # fmt: on
 
     scope_defs = []
-    tvm.tirx.stmt_functor.post_order_visit(
+    tvm_ffi.structural_walk(
         func.body,
         lambda s: (
             scope_defs.append(getattr(s, "def")) if isinstance(s, tvm.tirx.ScopeIdDefStmt) else None
@@ -3071,7 +3080,7 @@ def test_scope_id_dtype_uint32_deferred_extent():
     # fmt: on
 
     scope_defs = []
-    tvm.tirx.stmt_functor.post_order_visit(
+    tvm_ffi.structural_walk(
         func.body,
         lambda s: (
             scope_defs.append(getattr(s, "def")) if isinstance(s, tvm.tirx.ScopeIdDefStmt) else None

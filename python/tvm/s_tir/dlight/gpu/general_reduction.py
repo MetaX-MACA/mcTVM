@@ -17,7 +17,9 @@
 # pylint: disable=invalid-name
 """Reduction rule for operators including softmax, layer norm, RMS norm, etc"""
 
-from tvm import arith, ir, s_tir, tirx
+import tvm_ffi
+
+from tvm import s_tir, sym, tirx
 from tvm.target import Target
 
 from ..analysis import get_root_block, normalize_prim_func
@@ -71,20 +73,20 @@ class GeneralReduction(GPUScheduleRule):
                 # preserving global scope for buffers accessed by another block.
                 blocks = [sch.get(info.block_rv) for info in block_infos]
                 alloc_buffers = list(sch.get(get_root_block(sch)).alloc_buffers)
-                analyzer = arith.Analyzer()
+                analyzer = sym.Analyzer()
                 for block_index, (info, block) in enumerate(zip(block_infos[:-1], blocks[:-1])):
                     loops = sch.get_loops(info.block_rv)
                     if not all(analyzer.can_prove_equal(sch.get(loop).extent, 1) for loop in loops):
                         continue
 
                     other_block_buffers = [
-                        region.buffer
+                        region.source
                         for other_index, other_block in enumerate(blocks)
                         if other_index != block_index
                         for region in (*other_block.reads, *other_block.writes)
                     ]
                     for buffer_index, write in enumerate(block.writes):
-                        buffer = write.buffer
+                        buffer = write.source
                         is_allocated = any(buffer.same_as(other) for other in alloc_buffers)
                         is_cross_block = any(buffer.same_as(other) for other in other_block_buffers)
                         if buffer.scope() == "global" and is_allocated and not is_cross_block:
@@ -104,7 +106,7 @@ class GeneralReduction(GPUScheduleRule):
                 return sch
 
             def f_layout_mapping(*iters):
-                analyzer = arith.Analyzer()
+                analyzer = sym.Analyzer()
                 # Try to match the iters of last block to the iters of the first block.
                 # For matched positions, use the iter from the input `iters`.
                 # For unmatched positions, use a new iter which is constant 0.
@@ -150,7 +152,7 @@ class GeneralReduction(GPUScheduleRule):
             reduced_buffers = []
             for block_info in block_infos[:-1]:
                 for buffer_write in sch.get(block_info.block_rv).writes:
-                    reduced_buffers.append(buffer_write.buffer)
+                    reduced_buffers.append(buffer_write.source)
 
             spatial_block = sch.get(block_infos[-1].block_rv)
             spatial_loops = set()
@@ -159,16 +161,20 @@ class GeneralReduction(GPUScheduleRule):
             for block_iter, loop_rv in zip(spatial_block.iter_vars, loops):
                 block_var_to_loop_var[block_iter.var] = sch.get(loop_rv).loop_var
 
-            def _visit_expr(e: tirx.Expr):
-                if ir.is_prim_var(e) and e in block_var_to_loop_var:
+            def _visit_expr(e: tirx.Var):
+                if e in block_var_to_loop_var:
                     spatial_loops.add(block_var_to_loop_var[e])
 
             for buffer_read in spatial_block.reads:
-                buffer = buffer_read.buffer
+                buffer = buffer_read.source
                 if buffer in reduced_buffers:
                     for read_range in buffer_read.region:
-                        tirx.stmt_functor.post_order_visit(read_range.min, _visit_expr)
-                        tirx.stmt_functor.post_order_visit(read_range.extent, _visit_expr)
+                        tvm_ffi.structural_walk(
+                            read_range.min, (tirx.Var, _visit_expr), order="post"
+                        )
+                        tvm_ffi.structural_walk(
+                            read_range.extent, (tirx.Var, _visit_expr), order="post"
+                        )
 
             s_loops = []
             other_loops = []

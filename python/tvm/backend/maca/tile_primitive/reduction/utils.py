@@ -19,8 +19,8 @@
 
 import math
 
-from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as T
+from tvm.sym.analyzer import Analyzer
 from tvm.tirx import BufferRegion, TilePrimitiveCall
 from tvm.tirx.layout import laneid
 from tvm.tirx.operator.tile_primitive import DispatchContext
@@ -56,8 +56,8 @@ def _match_reduction_storage_scope(
 ) -> tuple[bool, str | None]:
     """Check that source and destination match one accepted storage scope."""
     op = TilePrimitiveCall.downcast(op)
-    dst_scope = op.output.buffer.scope()
-    src_scope = op.input.buffer.scope()
+    dst_scope = op.output.source.scope()
+    src_scope = op.input.source.scope()
     ok = any(
         match_scope(dst_scope, pattern) and match_scope(src_scope, pattern)
         for pattern in expected_scope

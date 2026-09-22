@@ -2223,6 +2223,7 @@ def test_gemm_tcgen05_arbitrary_tiles(task):
 
 
 @pytest.mark.parametrize("a_layout_kind", ["column_major", "packed_16b"])
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda")
 def test_gemm_tcgen05_no_swizzle_smem_descriptor_codegen(a_layout_kind):
     M, K, N = 64, 64, 256
     B_N = N // 2
@@ -2279,6 +2280,7 @@ def test_gemm_tcgen05_no_swizzle_smem_descriptor_codegen(a_layout_kind):
     assert "encode_instr_descriptor" not in src
 
 
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda")
 def test_gemm_tcgen05_cta_group_2_accepts_replicated_tmem_a_codegen():
     """A-in-TMEM for cta_group::2 may declare the physical +64 lane mirror.
 
