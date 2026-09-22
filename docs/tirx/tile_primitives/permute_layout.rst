@@ -28,35 +28,34 @@ The CUDA variant (``warp_xor_swizzle``) uses Warp32 and an optional PTX shared
 memory path. Source:
 ``python/tvm/backend/cuda/tile_primitive/permute_layout/warp_xor_swizzle.py``.
 
-MACA variant
------------------
+MACA variants
+-------------
 
-``wave64_halfwarp_xor_swizzle``
-requires warp scope, a one-dimensional full Wave64 lane range ``[0, 64)``,
-matching plain ``TileLayout`` slices, and equal 32-bit source and destination
-dtypes (``uint32``, ``int32``, or ``float32``). The slice volume must be
-divisible by 32, with ``P = volume / 32`` a power of two no larger than 32;
-both regrouped layouts must be bijections and admit a conflict-free XOR
-schedule. Ordinary typed buffer loads and stores are used for global, shared,
-and local buffers.
+MACA C500 registers ``wave64_xor`` (priority 40), ``wave64_direct`` (30),
+``wave64_shared_two_batch`` (25), and ``wave64_generic`` (10). All require
+``mcpu=xcore1000``, warp scope, a one-dimensional full Wave64 lane range
+``[0, 64)``, equal static slice extents, plain ``TileLayout`` objects, and
+bijective sliced layouts. Element widths of 1, 2, 4, and 8 bytes are supported.
 
-All 64 lanes execute both ``T.maca.warp_sync()`` barriers unconditionally.
-Only lanes 0--31 issue memory operations because MACA shared memory has 32
-four-byte banks. The first barrier follows the complete register-load phase, which is
-required for aliased views; the second completes the store phase before the
-caller reuses the tile.
+For volume ``V``, the active lane count is
+``min(64, next_power_of_two(V))`` and each lane gets
+``ceil(V / active_lanes)`` register slots. Every memory access is guarded by
+``lane_id < active_lanes`` and ``flat < V``, so non-power-of-two volumes are
+valid. ``wave64_xor`` is only an optimization for 4-byte data, power-of-two
+slots, and a certified common XOR schedule. If that schedule is unavailable,
+dispatch falls through to direct/shared/generic lowering; bank conflicts never
+make a valid operation fail.
 
-The MACA implementation intentionally rejects 8/16/64/128-bit elements,
-``ComposeLayout`` or swizzled wrappers, CTA scope, multi-dimensional
-``threadIdx``, partial or strided Wave64 ranges, unsupported ``mcpu`` names,
-and layouts for which the bank model cannot find a common XOR schedule. A
-full-Wave64 or native BSM permutation remains future work requiring separate
-layout, bank, and hardware certification.
+Every variant performs complete register loads, an unconditional
+``T.maca.warp_sync()``, complete stores, and a second unconditional barrier
+across all 64 lanes. This ordering supports aliasing views. The implementation
+uses ordinary typed buffer accesses and does not use PTX, inline assembly,
+TCGEN05, TMA, tensor-memory, or unverified BSM permutation intrinsics.
 
 What it accepts
 ---------------
 
-The implementation first runs its ``_why_reject`` validator:
+The implementation first builds a common permutation plan:
 
 .. code-block:: python
 
@@ -64,12 +63,12 @@ The implementation first runs its ``_why_reject`` validator:
     if "threadIdx.y" in launch or "threadIdx.z" in launch: return "multi-dim threadIdx"
     if src_buf.dtype != dst_buf.dtype:             return "dtype mismatch"
     if src_ext_i != dst_ext_i:                     return "extent mismatch"
-    if dtype_bytes != 4:                            return "requires 32-bit elements"
+    if dtype_bytes not in (1, 2, 4, 8):             return "unsupported element width"
     if not isinstance(src_buf.layout, TileLayout): return "src not a plain TileLayout"
     if not isinstance(dst_buf.layout, TileLayout): return "dst not a plain TileLayout"
     # + layouts must slice, regroup, and define bijections on the slice
-    # + V % 32 == 0 and P = V/32 is a power of two in [1, 32]
-    # + _choose_xor_k must find a valid k (else fail)
+    # + volume is nonzero and both layouts are bijections
+    # Variant-specific XOR checks only select an optimization.
 
 .. list-table::
    :header-rows: 1
@@ -78,22 +77,19 @@ The implementation first runs its ``_why_reject`` validator:
    * - Property
      - Requirement
    * - target / scope / priority
-     - ``cuda``; **warp** scope only; priority ``20``
+     - ``maca``; **warp** scope only; ``xcore1000``; priorities ``40/30/25/10``
    * - operands
      - equal dtype, equal (compile-time) extents; both plain ``TileLayout`` (no
-       swizzle wrapper); dtype byte width ∈ {1, 2, 4, 8, 16}. The dispatcher has
-       no storage-scope predicate; shared 32/64-bit operands use direct PTX
-       ``ld.shared`` / ``st.shared``, while other accepted cases use ordinary
+       swizzle wrapper); dtype byte width ∈ {1, 2, 4, 8}; ordinary typed
        buffer loads and stores
    * - launch / volume
-     - one-dimensional ``threadIdx``; slice volume ``V`` is divisible by 32 and
-       ``P = V/32`` is a power of two in ``[1, 32]``
+     - one-dimensional full Wave64; any nonzero static slice volume
    * - layout mapping
      - after slicing and regrouping, source and destination describe the same
        iteration extents and each is a bijection on the slice
    * - bank-freedom
-     - ``_choose_xor_k`` must find an XOR-bit count ``k ∈ [0, log2(P)]`` that makes
-       **both** phases bank-conflict-free, else the dispatch declines (``fail``)
+     - XOR bank-freedom is required only by ``wave64_xor``; lower-priority
+       variants remain eligible when no schedule exists
 
 Demonstration program
 ----------------------
@@ -113,7 +109,7 @@ canonical SF-transpose, from ``test_permute_layout.py``):
     def f(A: Tx.handle, B: Tx.handle):
         A_buf = Tx.match_buffer(A, shape, dtype, layout=pre)
         B_buf = Tx.match_buffer(B, shape, dtype, layout=post)
-        Tx.device_entry(); Tx.cta_id([1]); Tx.thread_id([32])
+        Tx.device_entry(); Tx.cta_id([1]); Tx.warp_id([1]); Tx.lane_id([64])
         for s in Tx.serial(0, pipe):
             Tx.tile.warp.permute_layout(B_buf[s, 0:1, 0:4, 0:32], A_buf[s, 0:1, 0:4, 0:32])
 
@@ -124,35 +120,34 @@ Algorithm
 canonicalized; if their shards differ in structure (a linear layout collapses to 1-D
 under canon, a transposed one keeps its multi-dim shape) the source is regrouped to
 the destination's shape. From the destination shard come the iteration ``extent``
-and the per-side strides ``src_str`` / ``dst_str``. ``P`` = elements per lane =
-``prod(extent) / 32`` (here ``4``).
+and the per-side strides ``src_str`` / ``dst_str``. The plan computes
+``active_lanes`` and ``slots = ceil(volume / active_lanes)``.
 
-**2. Choose the XOR swizzle.** ``_choose_xor_k`` simulates the shared-memory bank
-pattern at shard granularity for ``k = 0, 1, … log2(P)`` and picks the smallest
-``k`` whose ``shift`` / ``mask`` make *both* phases conflict-free (here ``shift = 3``,
-``mask = 3``).
+**2. Choose a variant.** ``wave64_xor`` simulates both 32-lane C500 service
+batches and chooses the smallest conflict-free XOR schedule. If none exists,
+the direct/shared/generic variants remain eligible.
 
-**3. Emit two local-staged phases.** Each lane reads its ``P`` elements through
+**3. Emit two local-staged phases.** Each lane reads its ``slots`` elements through
 the source layout into a local temporary (the swizzle permutes which slot holds
 which iteration), a ``warp_sync`` follows, then the elements are written back through the
 destination layout:
 
 .. code-block:: python
 
-    regs = Tx.alloc_buffer((P,), dtype, scope="local")
-    for r in Tx.unroll(0, P):                                   # read via src layout
-        j   = r ^ ((lane_id >> shift) & mask)
-        idx = decompose(lane_id + j * 32, extent)
-        regs[r] = src_buf[project(idx, src_st)]
-    Tx.cuda.warp_sync()
-    for r in Tx.unroll(0, P):                                   # write via dst layout
-        j   = r ^ ((lane_id >> shift) & mask)
-        idx = decompose(lane_id + j * 32, extent)
-        dst_buf[project(idx, dst_st)] = regs[r]
-    Tx.cuda.warp_sync()
+    regs = Tx.alloc_buffer((slots,), dtype, scope="local")
+    for r in Tx.unroll(0, slots):
+        flat = lane_id + r * active_lanes
+        if lane_id < active_lanes and flat < volume:
+            regs[r] = src_buf[project(decompose(flat, extent), src_st)]
+    Tx.maca.warp_sync()
+    for r in Tx.unroll(0, slots):
+        flat = lane_id + r * active_lanes
+        if lane_id < active_lanes and flat < volume:
+            dst_buf[project(decompose(flat, extent), dst_st)] = regs[r]
+    Tx.maca.warp_sync()
 
-Generated TIRx IR
------------------
+CUDA reference TIRx IR
+----------------------
 
 .. code-block:: python
 
@@ -161,8 +156,8 @@ Generated TIRx IR
     B_buf[s*128 + tx * 4 + (r ^ ((tx >> 3) & 3)) % 4] = regs[r]    # phase 2 (dst order)
     Tx.cuda.warp_sync()
 
-Generated CUDA
---------------
+CUDA reference source
+---------------------
 
 .. code-block:: c++
 
@@ -189,13 +184,13 @@ How inputs change the algorithm
    * - input
      - effect
    * - layout strides (the permutation)
-     - define ``extent`` / ``src_str`` / ``dst_str`` and hence ``P`` and the
+     - define ``extent`` / ``src_str`` / ``dst_str`` and hence slot indexing and the
        per-element index math (the transpose pattern)
    * - dtype byte width
-     - feeds the bank simulation in ``_choose_xor_k``; no dtype width alone
-       guarantees a match, and any layout whose two phases cannot both be made
-       bank-free causes the dispatch to fail
+     - feeds the bank simulation in ``_choose_xor_k`` for the optional 4-byte
+       XOR path; unsupported XOR simply falls through to a generic variant
    * - chosen ``k``
      - sets ``shift`` / ``mask`` of the XOR swizzle (``k = 0`` ⇒ no swizzle)
-   * - ``P`` (= elements/lane)
-     - the number of staged local elements and unrolled iterations per phase
+   * - active lanes / slots
+     - active lanes are ``min(64, next_power_of_two(volume))`` and slots are
+       ``ceil(volume / active_lanes)``; non-power-of-two slots are valid

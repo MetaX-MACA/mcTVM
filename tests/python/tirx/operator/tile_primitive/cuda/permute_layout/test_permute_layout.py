@@ -221,11 +221,9 @@ def test_sf_blockwise_transpose(name, pipe, blk, dtype):
 
     [_, B_out], src = _compile_and_run(f, [A_np, B_np])
 
-    # The dispatcher must have picked the XOR-swizzled variant; check that
-    # the generated CUDA contains the per-lane XOR pattern.  This is the
-    # "no perf regression" smoke test: any future variant that omits the
-    # XOR would re-introduce 4-way bank conflicts.
-    assert ">> 3" in src, f"expected XOR-swizzle (lane>>3) in MACA source for {name}"
+    # The optimized Wave64 path retains lane-dependent slot arithmetic and
+    # unconditional MACA barriers in the generated source.
+    assert "threadIdx.x" in src and ">>" in src
     assert "syncwarp" in src
 
     # Byte-for-byte equality via numpy reference.
@@ -487,16 +485,67 @@ def test_shared_memory_in_place_alias_safety(dtype):
         assert cuda_only_spelling not in src
 
 
-def test_reject_non_32_bit_elements():
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@needs_maca
+@pytest.mark.parametrize("dtype", ["uint8", "uint16", "uint64"])
+def test_supported_non_32_bit_elements(dtype):
     shape = (4, 32)
     pre = TileLayout(S[shape : (32, 1)])
     post = TileLayout(S[shape : (1, 4)])
-    _build_and_assert_rejected(shape, pre, post, "uint16", "requires 32-bit elements")
+    @T.prim_func
+    def f(A: T.handle, B: T.handle):
+        A_buf = T.match_buffer(A, shape, dtype, layout=pre)
+        B_buf = T.match_buffer(B, shape, dtype, layout=post)
+        T.device_entry()
+        T.cta_id([1])
+        T.warp_id([1])
+        T.lane_id([64])
+        Tx.warp.permute_layout(B_buf, A_buf)
+
+    np.random.seed(0)
+    A_np = tvm.testing.generate_random_array(dtype, shape)
+    B_np = np.zeros_like(A_np)
+    [_, B_out], _ = _compile_and_run(f, [A_np, B_np])
+    ref = _expected_permute(A_np.reshape(-1), [32, 1], [1, 4], list(shape))
+    np.testing.assert_array_equal(B_out.reshape(-1), ref)
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@needs_maca
+@pytest.mark.parametrize("volume", [3, 17, 33, 96, 127])
+def test_arbitrary_volume_uses_generic_wave64_path(volume):
+    """Non-power-of-two volumes must use guarded generic staging correctly."""
+    shape = (volume,)
+    layout = TileLayout(S[shape : (1,)])
+
+    @T.prim_func
+    def f(A: T.handle, B: T.handle):
+        A_buf = T.match_buffer(A, shape, "uint16", layout=layout)
+        B_buf = T.match_buffer(B, shape, "uint16", layout=layout)
+        T.device_entry()
+        T.cta_id([1])
+        T.warp_id([1])
+        T.lane_id([64])
+        Tx.warp.permute_layout(B_buf, A_buf)
+
+    np.random.seed(volume)
+    A_np = tvm.testing.generate_random_array("uint16", shape)
+    B_np = np.zeros_like(A_np)
+    [_, B_out], src = _compile_and_run(f, [A_np, B_np])
+    np.testing.assert_array_equal(B_out, A_np)
+    assert "tvm_builtin_maca_warp_sync();" in src
 
 
 def test_permute_layout_schedule_is_registered_for_maca():
     schedules = list_registered_schedules()
-    assert "wave64_halfwarp_xor_swizzle" in schedules["tirx.tile.permute_layout"]["maca"]
+    assert schedules["tirx.tile.permute_layout"]["maca"] == [
+        "wave64_xor",
+        "wave64_direct",
+        "wave64_shared_two_batch",
+        "wave64_generic",
+    ]
 
 
 def test_reject_unsupported_maca_architecture():
