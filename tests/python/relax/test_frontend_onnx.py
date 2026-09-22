@@ -582,6 +582,56 @@ def test_concat_with_param_tensor_keeps_runtime_param():
     np.testing.assert_array_equal(params["main"][0].numpy(), weight_np)
 
 
+@pytest.mark.parametrize(
+    "op_name,np_op",
+    [
+        ("Less", np.less),
+        ("LessOrEqual", np.less_equal),
+        ("Greater", np.greater),
+        ("GreaterOrEqual", np.greater_equal),
+    ],
+)
+@pytest.mark.parametrize("np_dtype", ["int32", "float32"])
+def test_constant_comparison_outputs_bool(op_name, np_op, np_dtype):
+    a_np = np.array([[1], [5]], dtype=np_dtype)
+    b_np = np.array([[3]], dtype=np_dtype)
+    rhs_np = np.array([[3]], dtype=np_dtype)
+    graph = helper.make_graph(
+        [
+            helper.make_node("Identity", ["d"], ["dummy"]),
+            helper.make_node("Concat", ["a", "b"], ["lhs"], axis=0),
+            helper.make_node(op_name, ["lhs", "rhs"], ["y"]),
+        ],
+        "constant_comparison",
+        [helper.make_tensor_value_info("d", TensorProto.INT32, [1])],
+        [
+            helper.make_tensor_value_info("y", TensorProto.BOOL, [3, 1]),
+            helper.make_tensor_value_info("dummy", TensorProto.INT32, [1]),
+        ],
+        initializer=[
+            numpy_helper.from_array(a_np, "a"),
+            numpy_helper.from_array(b_np, "b"),
+            numpy_helper.from_array(rhs_np, "rhs"),
+        ],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 18)], ir_version=9)
+    onnx.checker.check_model(model)
+
+    mod = from_onnx(model, opset=18, shape_dict={"d": [1]}, keep_params_in_input=False)
+    constants = []
+
+    def collect_constants(expr):
+        if isinstance(expr, tvm.ir.GenericConst):
+            constants.append(expr.value.numpy())
+
+    relax.analysis.post_order_visit(mod["main"].body, collect_constants)
+    folded_outputs = [arr for arr in constants if arr.shape == (3, 1)]
+    assert len(folded_outputs) == 1
+    expected = np_op(np.concatenate([a_np, b_np], axis=0), rhs_np)
+    np.testing.assert_array_equal(folded_outputs[0], expected)
+    assert folded_outputs[0].dtype == np.dtype("bool")
+
+
 @pytest.mark.parametrize("op_name", ["Add", "Sub", "Mul", "Div", "Pow"])
 def test_binary(op_name: str):
     verify_binary(op_name, [1, 32], [1, 32], [1, 32])
@@ -633,6 +683,36 @@ def test_div_integer_constant_folding_truncates_toward_zero():
             return gv
 
     tvm.ir.assert_structural_equal(tvm_model, Expected)
+
+
+def test_div_integer_constant_folding_preserves_int64_precision():
+    dividend_values = np.array([2**53 + 1, 2**53 + 3, -(2**53 + 3), -5, 5], dtype=np.int64)
+    divisor_values = np.array([1, 1, 1, 2, -2], dtype=np.int64)
+    expected = np.array([2**53 + 1, 2**53 + 3, -(2**53 + 3), -2, -2], dtype=np.int64)
+
+    a = numpy_helper.from_array(dividend_values, name="a")
+    b = numpy_helper.from_array(divisor_values, name="b")
+    node = helper.make_node("Div", ["a", "b"], ["y"])
+    graph = helper.make_graph(
+        [node],
+        "div_integer_constant_precision",
+        [],
+        [helper.make_tensor_value_info("y", TensorProto.INT64, [5])],
+        initializer=[a, b],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 18)])
+    model.ir_version = 9
+
+    tvm_model = from_onnx(model, opset=18, keep_params_in_input=False)
+    folded_outputs = []
+
+    def collect_constants(expr):
+        if isinstance(expr, tvm.ir.GenericConst):
+            folded_outputs.append(expr.value.numpy())
+
+    relax.analysis.post_order_visit(tvm_model["main"].body, collect_constants)
+    assert len(folded_outputs) == 1
+    np.testing.assert_array_equal(folded_outputs[0], expected)
 
 
 @pytest.mark.parametrize(
@@ -1166,6 +1246,41 @@ def test_multi_input_constant_single_input(op_name, shape):
     check_correctness(helper.make_model(graph), opset=13)
 
 
+@pytest.mark.parametrize("op_name", ["Min", "Max", "Sum", "Mean"])
+@pytest.mark.parametrize("num_inputs", [1, 2, 3])
+def test_multi_input_unknown_static_shape(op_name, num_inputs):
+    """An input with no static shape imports instead of raising len(None).
+
+    A Slice with runtime starts/ends lowers to R.dynamic_strided_slice, whose
+    struct info is R.Tensor(dtype=..., ndim=k) with shape None. That reaches
+    MultiInputBase, where compute_broadcast_shape used to call len() on it.
+    The model is valid ONNX and onnxruntime executes it.
+    """
+    slice_node = helper.make_node(
+        "Slice", ["x", "starts", "ends", "axes"], ["sliced"], name="slice0"
+    )
+    other_names = [f"y{i}" for i in range(num_inputs - 1)]
+    op_node = helper.make_node(op_name, ["sliced", *other_names], ["output"], name="op0")
+
+    graph = helper.make_graph(
+        [slice_node, op_node],
+        f"slice_then_{op_name.lower()}",
+        inputs=[
+            helper.make_tensor_value_info("x", TensorProto.FLOAT, [4, 3]),
+            helper.make_tensor_value_info("starts", TensorProto.INT64, [1]),
+            helper.make_tensor_value_info("ends", TensorProto.INT64, [1]),
+            helper.make_tensor_value_info("axes", TensorProto.INT64, [1]),
+        ]
+        + [helper.make_tensor_value_info(name, TensorProto.FLOAT, [2, 3]) for name in other_names],
+        outputs=[helper.make_tensor_value_info("output", TensorProto.FLOAT, [2, 3])],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+    onnx.checker.check_model(model, full_check=True)
+
+    tvm_model = from_onnx(model, keep_params_in_input=True)
+    assert "dynamic_strided_slice" in str(tvm_model)
+
+
 @pytest.mark.parametrize("op_name", ["And", "Or", "Xor"])
 def test_binary_bool(op_name: str):
     verify_binary(op_name, [32, 32], [32, 32], [32, 32], dtype=TensorProto.BOOL)
@@ -1686,6 +1801,93 @@ def test_cast_nan_inf_to_int8():
     expected = np.array([44, 0, 0, 0, 50, -50], dtype=np.int8)
     assert out_np.dtype == np.int8
     np.testing.assert_array_equal(out_np, expected)
+
+
+def test_castlike_ir():
+    castlike_node = helper.make_node("CastLike", ["a", "b"], ["c"])
+    graph = helper.make_graph(
+        [castlike_node],
+        "castlike_test",
+        inputs=[
+            helper.make_tensor_value_info("a", TensorProto.INT32, [1, 32]),
+            helper.make_tensor_value_info("b", TensorProto.FLOAT, [1]),
+        ],
+        outputs=[helper.make_tensor_value_info("c", TensorProto.FLOAT, [1, 32])],
+    )
+    model = helper.make_model(graph, producer_name="castlike_test")
+    tvm_model = from_onnx(model, opset=15, keep_params_in_input=True)
+
+    @I.ir_module
+    class Expected:
+        @R.function
+        def main(
+            a: R.Tensor((1, 32), dtype="int32"),
+            b: R.Tensor((1,), dtype="float32"),
+        ) -> R.Tensor((1, 32), dtype="float32"):
+            R.func_attr({"num_input": 2})
+            with R.dataflow():
+                gv: R.Tensor((1, 32), dtype="float32") = R.astype(a, "float32")
+                R.output(gv)
+            return gv
+
+    tvm.ir.assert_structural_equal(tvm_model, Expected)
+
+
+def test_castlike_nan_inf_to_int8():
+    vals = np.array([np.nan, np.inf, -np.inf, 1.9, -1.9], dtype=np.float32)
+    castlike_node = helper.make_node("CastLike", ["data", "like"], ["output"])
+    graph = helper.make_graph(
+        [castlike_node],
+        "castlike_nan_inf_test",
+        inputs=[
+            helper.make_tensor_value_info("data", TensorProto.FLOAT, list(vals.shape)),
+            helper.make_tensor_value_info("like", TensorProto.INT8, [1]),
+        ],
+        outputs=[helper.make_tensor_value_info("output", TensorProto.INT8, list(vals.shape))],
+    )
+    model = helper.make_model(graph, producer_name="castlike_nan_inf_test")
+    inputs = {"data": vals, "like": np.array([0], dtype=np.int8)}
+    check_correctness(model, inputs=inputs, opset=15, check_dtypes=True)
+
+
+@pytest.mark.parametrize("symbolic", [False, True], ids=["static", "symbolic"])
+def test_castlike_shape_expr_data(symbolic: bool):
+    shape_node = helper.make_node("Shape", ["data"], ["data_shape"])
+    castlike_node = helper.make_node("CastLike", ["data_shape", "like"], ["output"])
+    data_shape = ["n", 3] if symbolic else [2, 3]
+    graph = helper.make_graph(
+        [shape_node, castlike_node],
+        "castlike_shape_data_test",
+        inputs=[
+            helper.make_tensor_value_info("data", TensorProto.FLOAT, data_shape),
+            helper.make_tensor_value_info("like", TensorProto.FLOAT, [1]),
+        ],
+        outputs=[helper.make_tensor_value_info("output", TensorProto.FLOAT, [2])],
+    )
+    model = helper.make_model(graph, producer_name="castlike_shape_data_test")
+    inputs = None
+    if symbolic:
+        inputs = {
+            "data": np.ones((2, 3), dtype="float32"),
+            "like": np.zeros((1,), dtype="float32"),
+        }
+    check_correctness(model, inputs=inputs, opset=15, check_dtypes=True)
+
+
+def test_castlike_shape_expr_target():
+    shape_node = helper.make_node("Shape", ["like"], ["like_shape"])
+    castlike_node = helper.make_node("CastLike", ["data", "like_shape"], ["output"])
+    graph = helper.make_graph(
+        [shape_node, castlike_node],
+        "castlike_shape_target_test",
+        inputs=[
+            helper.make_tensor_value_info("data", TensorProto.FLOAT, [3]),
+            helper.make_tensor_value_info("like", TensorProto.FLOAT, [2, 3]),
+        ],
+        outputs=[helper.make_tensor_value_info("output", TensorProto.INT64, [3])],
+    )
+    model = helper.make_model(graph, producer_name="castlike_shape_target_test")
+    check_correctness(model, opset=15, check_dtypes=True)
 
 
 def test_gather():
@@ -4091,7 +4293,7 @@ def test_shape_start_end_scalar():
 
 def test_trilu():
     def verify_trilu(upper: bool):
-        node = helper.make_node("Trilu", ["x"], ["y"], upper=upper)
+        node = helper.make_node("Trilu", ["x", ""], ["y"], upper=upper)
         graph = helper.make_graph(
             [node],
             "trilu_test",
@@ -4125,6 +4327,117 @@ def test_trilu_with_const_k(k_value: int):
 
     model = helper.make_model(graph, producer_name="trilu_graph")
     check_correctness(model)
+
+
+def test_trilu_initializer_with_params_in_input():
+    k_value = np.array(1, dtype="int64")
+    graph = helper.make_graph(
+        [helper.make_node("Trilu", inputs=["x", "k"], outputs=["y"])],
+        "trilu_initializer_test",
+        inputs=[helper.make_tensor_value_info("x", TensorProto.FLOAT, [2, 3])],
+        initializer=[numpy_helper.from_array(k_value, name="k")],
+        outputs=[helper.make_tensor_value_info("y", TensorProto.FLOAT, [2, 3])],
+    )
+    model = helper.make_model(
+        graph,
+        producer_name="trilu_initializer_test",
+        opset_imports=[helper.make_opsetid("", 14)],
+    )
+
+    tvm_model = from_onnx(model, opset=14, keep_params_in_input=True)
+    assert len(tvm_model["main"].attrs["params"]) == 1
+    np.testing.assert_array_equal(tvm_model["main"].attrs["params"][0].numpy(), k_value)
+    tvm_model["main"] = tvm_model["main"].without_attr("params")
+
+    @I.ir_module
+    class Expected:
+        @R.function
+        def main(
+            x: R.Tensor((2, 3), dtype="float32"),
+            k: R.Tensor((), dtype="int64"),
+        ) -> R.Tensor((2, 3), dtype="float32"):
+            R.func_attr({"num_input": 1})
+            with R.dataflow():
+                gv: R.Tensor((2, 3), dtype="float32") = R.triu(x, 1)
+                R.output(gv)
+            return gv
+
+    tvm.ir.assert_structural_equal(tvm_model, Expected)
+
+
+@pytest.mark.parametrize("upper", [True, False])
+def test_trilu_dynamic_k_ir(upper: bool):
+    if upper:
+        nodes = [helper.make_node("Trilu", inputs=["x", "k"], outputs=["y"], upper=True)]
+        inputs = [
+            helper.make_tensor_value_info("x", TensorProto.FLOAT, [2, 3]),
+            helper.make_tensor_value_info("k", TensorProto.INT64, []),
+        ]
+        outputs = [helper.make_tensor_value_info("y", TensorProto.FLOAT, [2, 3])]
+    else:
+        index = numpy_helper.from_array(np.array(0, dtype="int64"), name="index")
+        nodes = [
+            helper.make_node("Shape", ["x"], ["x_shape"]),
+            helper.make_node("Constant", [], ["index"], value=index),
+            helper.make_node("Gather", ["x_shape", "index"], ["k"]),
+            helper.make_node("Trilu", ["x", "k"], ["y"], upper=False),
+        ]
+        inputs = [helper.make_tensor_value_info("x", TensorProto.FLOAT, ["m", 3])]
+        outputs = [helper.make_tensor_value_info("y", TensorProto.FLOAT, ["m", 3])]
+
+    graph = helper.make_graph(nodes, "trilu_dynamic_k_graph", inputs, outputs)
+    model = helper.make_model(graph, producer_name="trilu_dynamic_k_graph")
+    tvm_model = from_onnx(model, opset=14, keep_params_in_input=True)
+
+    if upper:
+
+        @I.ir_module
+        class ExpectedTriu:
+            @R.function
+            def main(
+                x: R.Tensor((2, 3), dtype="float32"),
+                k: R.Tensor((), dtype="int64"),
+            ) -> R.Tensor((2, 3), dtype="float32"):
+                R.func_attr({"num_input": 2})
+                with R.dataflow():
+                    lv: R.Tensor((3,), dtype="int64") = R.arange(0, 3, 1, dtype="int64")
+                    lv1: R.Tensor((1, 3), dtype="int64") = R.reshape(lv, R.shape([1, 3]))
+                    lv2: R.Tensor((2,), dtype="int64") = R.arange(0, 2, 1, dtype="int64")
+                    lv3: R.Tensor((2, 1), dtype="int64") = R.reshape(lv2, R.shape([2, 1]))
+                    lv4: R.Tensor((2, 3), dtype="int64") = R.subtract(lv1, lv3)
+                    lv5: R.Tensor((), dtype="int64") = R.astype(k, dtype="int64")
+                    lv6: R.Tensor((2, 3), dtype="bool") = R.greater_equal(lv4, lv5)
+                    lv7: R.Tensor((2, 3), dtype="bool") = R.broadcast_to(lv6, R.shape([2, 3]))
+                    gv: R.Tensor((2, 3), dtype="float32") = R.where(lv7, x, R.const(0.0, "float32"))
+                    R.output(gv)
+                return gv
+
+        expected = ExpectedTriu
+    else:
+
+        @I.ir_module
+        class ExpectedTril:
+            @R.function
+            def main(x: R.Tensor(("m", 3), dtype="float32")) -> R.Tensor(("m", 3), dtype="float32"):
+                R.func_attr({"num_input": 1})
+                m = T.int64()
+                with R.dataflow():
+                    lv: R.Tensor((1,), dtype="int64") = R.shape_to_tensor(R.shape([m]))
+                    lv1: R.Tensor((3,), dtype="int64") = R.arange(0, 3, 1, dtype="int64")
+                    lv2: R.Tensor((1, 3), dtype="int64") = R.reshape(lv1, R.shape([1, 3]))
+                    lv3: R.Tensor((m,), dtype="int64") = R.arange(0, m, 1, dtype="int64")
+                    lv4: R.Tensor((m, 1), dtype="int64") = R.reshape(lv3, R.shape([m, 1]))
+                    lv5: R.Tensor((m, 3), dtype="int64") = R.subtract(lv2, lv4)
+                    lv6: R.Tensor((), dtype="int64") = R.squeeze(lv, axis=[0])
+                    lv7: R.Tensor((m, 3), dtype="bool") = R.less_equal(lv5, lv6)
+                    lv8: R.Tensor((m, 3), dtype="bool") = R.broadcast_to(lv7, R.shape([m, 3]))
+                    gv: R.Tensor((m, 3), dtype="float32") = R.where(lv8, x, R.const(0.0, "float32"))
+                    R.output(gv)
+                return gv
+
+        expected = ExpectedTril
+
+    tvm.ir.assert_structural_equal(tvm_model, expected)
 
 
 def test_selu():
@@ -11484,6 +11797,36 @@ def test_params_names_start_with_onnx():
     tvm.ir.assert_structural_equal(tvm_model, Expected)
 
 
+@pytest.mark.parametrize(
+    ("initializer_name", "expected_name"),
+    [
+        ("onnx::weight", "weight"),
+        (
+            "neck.lateral_convs.2.conv2.weight_quantized",
+            "neck.lateral_convs.2.conv2.weight_quantized",
+        ),
+    ],
+)
+def test_initializer_name_only_removes_onnx_prefix(initializer_name, expected_name):
+    graph = helper.make_graph(
+        [helper.make_node("Add", ["input", initializer_name], ["output"])],
+        "test_initializer_name_only_removes_onnx_prefix",
+        inputs=[helper.make_tensor_value_info("input", TensorProto.FLOAT, [1])],
+        initializer=[numpy_helper.from_array(np.ones([1], dtype="float32"), initializer_name)],
+        outputs=[helper.make_tensor_value_info("output", TensorProto.FLOAT, [1])],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 14)])
+    model.ir_version = 8
+
+    tvm_model = from_onnx(
+        model,
+        keep_params_in_input=True,
+        sanitize_input_names=False,
+    )
+
+    assert tvm_model["main"].params[-1].name == expected_name
+
+
 def test_shape_dim_string_expression_graph_add():
     identity_node = helper.make_node("Identity", ["x"], ["y"])
 
@@ -11798,7 +12141,7 @@ def test_nms_scalar_shape1_constants():
         outputs=[helper.make_tensor_value_info("selected_indices", TensorProto.INT64, [0, 3])],
     )
     model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 18)])
-    # Default import folds initializers to relax.Constant, exercising the scalar-cast path.
+    # Default import folds initializers to tvm.ir.GenericConst, exercising the scalar-cast path.
     from_onnx(model)
 
 

@@ -19,6 +19,7 @@
 import sys
 
 import pytest
+import tvm_ffi
 
 import tvm
 import tvm.testing
@@ -309,7 +310,7 @@ def test_simplify():
     )
     actual_block = sch.get(block_outer)
     actual = tvm.tirx.PrimFunc(
-        [actual_block.reads[0].buffer, actual_block.writes[0].buffer],
+        [actual_block.reads[0].source, actual_block.writes[0].source],
         sch.get(sch.get_loops(block_outer)[0]),
     )
     tvm.ir.assert_structural_equal(expected, actual)
@@ -402,6 +403,30 @@ def test_transform_block_layout_fail_mixed_iter_type(use_block_name):
             block,
             lambda n, h, w, co, rh, rw, rc: (n * 112 * 112 + h * 112 + w, co * 7 + rh, rw * 3 + rc),
         )
+
+
+def test_mixed_iter_type_detection_interrupts_walk():
+    spatial = tirx.Var("spatial", "int32")
+    reduction = tirx.Var("reduction", "int32")
+    unreachable = tirx.Var("unreachable", "int32")
+    visited = []
+
+    def detect(var):
+        visited.append(var)
+        if var.same_as(reduction):
+            return tvm_ffi.VisitInterrupt()
+        return None
+
+    result = tvm_ffi.structural_walk(
+        (spatial + reduction) + unreachable,
+        (tirx.Var, detect),
+        order="post",
+    )
+
+    assert isinstance(result, tvm_ffi.VisitInterrupt)
+    assert any(var.same_as(spatial) for var in visited)
+    assert any(var.same_as(reduction) for var in visited)
+    assert not any(var.same_as(unreachable) for var in visited)
 
 
 def test_transform_block_layout_int64_extent(use_block_name):
@@ -998,7 +1023,7 @@ def test_padded_transform_repeated_buffer_element():
                     B[vi] = A[vi // 4, vi % 4]
 
     sch = tvm.s_tir.Schedule(Before)
-    A = sch.get(sch.get_sblock("block")).reads[0].buffer
+    A = sch.get(sch.get_sblock("block")).reads[0].source
     sch.transform_layout(
         "block",
         "A",
@@ -1027,7 +1052,7 @@ def test_pad_value_may_not_reference_other_buffer():
                     B[vi] = A[vi]
 
     sch = tvm.s_tir.Schedule(Before)
-    A = sch.get(sch.get_sblock("block")).reads[0].buffer
+    A = sch.get(sch.get_sblock("block")).reads[0].source
     other = tirx.decl_buffer(1, A.ty.dtype, name="other")
     with pytest.raises(tvm.s_tir.schedule.schedule.ScheduleError):
         sch.transform_layout(

@@ -721,6 +721,7 @@ def test_layout_B_rejects_partial_column_copy():
 
 
 @pytest.mark.parametrize("direction", ["ld", "st"])
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda")
 def test_datapath_B_codegen(direction):
     """Both directions emit one physical .32x32b.x32 instruction."""
     n_cols = 64
@@ -1165,6 +1166,7 @@ def test_tcgen05_st_16xnb_store(shape, rep, dtype):
     ],
 )
 @pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda")
 def test_alloc_tcgen05_frag_wrapper_compiles(shape, frag_rows, K_cols):
     """Ensure T.alloc_tcgen05_ldst_frag yields a buffer that ``T.copy_async`` accepts
     and lowers to the correct tcgen05 atom for each supported instr_shape."""
@@ -1215,6 +1217,7 @@ def test_alloc_tcgen05_frag_wrapper_compiles(shape, frag_rows, K_cols):
     )
 
 
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda")
 def test_tcgen05_32x32b_float32_keeps_typed_register_operands():
     """The .32x32b float32 lowering should pass the local fragment's typed
     registers to the PTX helper. The helper reinterprets operands as b32, so a

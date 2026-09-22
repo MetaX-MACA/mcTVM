@@ -46,14 +46,6 @@ uint32_t PackDataTypeKey(DLDataType dtype) {
          static_cast<uint32_t>(dtype.lanes);
 }
 
-int64_t PrimTypeAnyHash(const ffi::Any& src) {
-  return static_cast<int64_t>(PackDataTypeKey(src.cast<PrimType>()->dtype));
-}
-
-bool PrimTypeAnyEqual(const ffi::Any& lhs, const ffi::Any& rhs) {
-  return lhs.cast<PrimType>()->dtype == rhs.cast<PrimType>()->dtype;
-}
-
 ffi::ObjectPtr<PrimTypeNode> GetCachedPrimTypeNode(DLDataType dtype) {
   thread_local std::unordered_map<uint32_t, ffi::ObjectPtr<PrimTypeNode>> cache;
   uint32_t key = PackDataTypeKey(dtype);
@@ -69,26 +61,172 @@ ffi::ObjectPtr<PrimTypeNode> GetCachedPrimTypeNode(DLDataType dtype) {
 
 // Structural traversal hooks
 
+TVMFFIAny TypeVisit(ffi::StructuralVisitorObj*, ffi::AnyView) noexcept {
+  // Type::Missing() is the only concrete TypeNode value; span is ignored debug metadata.
+  return ffi::AnyView(nullptr).CopyToTVMFFIAny();
+}
+
+TVMFFIAny TypeMutate(ffi::StructuralMutatorObj*, ffi::AnyView) noexcept {
+  return ffi::Unchanged().CopyToTVMFFIAny();
+}
+
+TVMFFIAny TypeMaybeInplaceMutate(ffi::StructuralMutatorObj*, ffi::AnyView) noexcept {
+  return ffi::Unchanged().CopyToTVMFFIAny();
+}
+
+TVMFFIAny OpaqueTypeVisit(ffi::StructuralVisitorObj*, ffi::AnyView) noexcept {
+  // OpaqueType is a field-less construction-time marker; span is ignored debug metadata.
+  return ffi::AnyView(nullptr).CopyToTVMFFIAny();
+}
+
+TVMFFIAny OpaqueTypeMutate(ffi::StructuralMutatorObj*, ffi::AnyView) noexcept {
+  return ffi::Unchanged().CopyToTVMFFIAny();
+}
+
+TVMFFIAny OpaqueTypeMaybeInplaceMutate(ffi::StructuralMutatorObj*, ffi::AnyView) noexcept {
+  return ffi::Unchanged().CopyToTVMFFIAny();
+}
+
+int64_t PrimTypeAnyHash(const ffi::Any& src) {
+  return static_cast<int64_t>(PackDataTypeKey(src.cast<PrimType>()->dtype));
+}
+
+bool PrimTypeAnyEqual(const ffi::Any& lhs, const ffi::Any& rhs) {
+  return lhs.cast<PrimType>()->dtype == rhs.cast<PrimType>()->dtype;
+}
+
 TVMFFIAny PrimTypeVisit(ffi::StructuralVisitorObj*, ffi::AnyView) noexcept {
   // dtype is a constant: reflected for StructuralEqual/Hash,
   // not traversed by the visitor/mutator contract.
-  TVM_FFI_S_VISIT_RETURN_NONE();
+  return ffi::AnyView(nullptr).CopyToTVMFFIAny();
 }
 
-TVMFFIAny PrimTypeMutate(ffi::StructuralMutatorObj*, ffi::AnyView value) noexcept {
+TVMFFIAny PrimTypeMutate(ffi::StructuralMutatorObj*, ffi::AnyView) noexcept {
   // dtype is a constant: reflected for StructuralEqual/Hash,
   // not traversed by the visitor/mutator contract.
-  const PrimTypeNode* self =
-      ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const PrimTypeNode>(value);
-  return ffi::details::ExpectedUnsafe::MoveToTVMFFIAny(ffi::Expected<ffi::Any>(ffi::Any(self)));
+  return ffi::Unchanged().CopyToTVMFFIAny();
 }
 
-TVMFFIAny PrimTypeMaybeInplaceMutate(ffi::StructuralMutatorObj*, ffi::AnyView value) noexcept {
+TVMFFIAny PrimTypeMaybeInplaceMutate(ffi::StructuralMutatorObj*, ffi::AnyView) noexcept {
   // dtype is a constant: reflected for StructuralEqual/Hash,
   // not traversed by the visitor/mutator contract.
-  const PrimTypeNode* self =
-      ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const PrimTypeNode>(value);
-  return ffi::details::ExpectedUnsafe::MoveToTVMFFIAny(ffi::Expected<ffi::Any>(ffi::Any(self)));
+  return ffi::Unchanged().CopyToTVMFFIAny();
+}
+
+TVMFFIAny PointerTypeVisit(ffi::StructuralVisitorObj* visitor, ffi::AnyView value) noexcept {
+  // skips: storage_scope (scalar)
+  const PointerTypeNode* self =
+      ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const PointerTypeNode>(value);
+  TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(self->element_type));
+  return ffi::AnyView(nullptr).CopyToTVMFFIAny();
+}
+
+TVMFFIAny PointerTypeMutate(ffi::StructuralMutatorObj* mutator, ffi::AnyView value) noexcept {
+  // skips: storage_scope (scalar)
+  const PointerTypeNode* self =
+      ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const PointerTypeNode>(value);
+  TVM_FFI_S_MUTATE_ASSIGN_OR_RETURN(ffi::UnchangedOr<Type>, mapped_element_type_u,
+                                    mutator->MutateExpected(self->element_type));
+  if (mapped_element_type_u.UnchangedOrSameAs(self->element_type)) {
+    return ffi::Unchanged().CopyToTVMFFIAny();
+  }
+  ffi::ObjectPtr<PointerTypeNode> copy = ffi::make_object<PointerTypeNode>(*self);
+  if (!mapped_element_type_u.IsUnchanged())
+    copy->element_type = std::move(mapped_element_type_u).ValueUnchecked();
+  return ffi::details::AnyUnsafe::MoveAnyToTVMFFIAny(ffi::Any(std::move(copy)));
+}
+
+TVMFFIAny PointerTypeMaybeInplaceMutate(ffi::StructuralMutatorObj* mutator,
+                                        ffi::AnyView value) noexcept {
+  // skips: storage_scope (scalar)
+  PointerTypeNode* self = const_cast<PointerTypeNode*>(
+      ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const PointerTypeNode>(value));
+  TVM_FFI_S_MUTATE_ASSIGN_OR_RETURN(
+      ffi::UnchangedOr<Type>, mapped_element_type_u,
+      mutator->MutateExpected(self->element_type, ffi::InplaceMode::kAllow));
+  if (!mapped_element_type_u.UnchangedOrSameAs(self->element_type)) {
+    self->element_type = std::move(mapped_element_type_u).ValueUnchecked();
+  }
+  return ffi::Unchanged().CopyToTVMFFIAny();
+}
+
+TVMFFIAny FuncTypeVisit(ffi::StructuralVisitorObj* visitor, ffi::AnyView value) noexcept {
+  const FuncTypeNode* self =
+      ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const FuncTypeNode>(value);
+  TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(self->arg_types));
+  TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(self->ret_type));
+  return ffi::AnyView(nullptr).CopyToTVMFFIAny();
+}
+
+TVMFFIAny FuncTypeMutate(ffi::StructuralMutatorObj* mutator, ffi::AnyView value) noexcept {
+  const FuncTypeNode* self =
+      ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const FuncTypeNode>(value);
+  TVM_FFI_S_MUTATE_ASSIGN_OR_RETURN(ffi::UnchangedOr<ffi::Array<Type>>, mapped_arg_types_u,
+                                    mutator->MutateExpected(self->arg_types));
+  TVM_FFI_S_MUTATE_ASSIGN_OR_RETURN(ffi::UnchangedOr<Type>, mapped_ret_type_u,
+                                    mutator->MutateExpected(self->ret_type));
+  if (mapped_arg_types_u.UnchangedOrSameAs(self->arg_types) &&
+      mapped_ret_type_u.UnchangedOrSameAs(self->ret_type)) {
+    return ffi::Unchanged().CopyToTVMFFIAny();
+  }
+  ffi::ObjectPtr<FuncTypeNode> copy = ffi::make_object<FuncTypeNode>(*self);
+  if (!mapped_arg_types_u.IsUnchanged())
+    copy->arg_types = std::move(mapped_arg_types_u).ValueUnchecked();
+  if (!mapped_ret_type_u.IsUnchanged())
+    copy->ret_type = std::move(mapped_ret_type_u).ValueUnchecked();
+  return ffi::details::AnyUnsafe::MoveAnyToTVMFFIAny(ffi::Any(std::move(copy)));
+}
+
+TVMFFIAny FuncTypeMaybeInplaceMutate(ffi::StructuralMutatorObj* mutator,
+                                     ffi::AnyView value) noexcept {
+  FuncTypeNode* self = const_cast<FuncTypeNode*>(
+      ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const FuncTypeNode>(value));
+  TVM_FFI_S_MUTATE_ASSIGN_OR_RETURN(
+      ffi::UnchangedOr<ffi::Array<Type>>, mapped_arg_types_u,
+      mutator->MutateExpected(self->arg_types, ffi::InplaceMode::kAllow));
+  TVM_FFI_S_MUTATE_ASSIGN_OR_RETURN(
+      ffi::UnchangedOr<Type>, mapped_ret_type_u,
+      mutator->MutateExpected(self->ret_type, ffi::InplaceMode::kAllow));
+  if (!mapped_arg_types_u.UnchangedOrSameAs(self->arg_types)) {
+    self->arg_types = std::move(mapped_arg_types_u).ValueUnchecked();
+  }
+  if (!mapped_ret_type_u.UnchangedOrSameAs(self->ret_type)) {
+    self->ret_type = std::move(mapped_ret_type_u).ValueUnchecked();
+  }
+  return ffi::Unchanged().CopyToTVMFFIAny();
+}
+
+TVMFFIAny TupleTypeVisit(ffi::StructuralVisitorObj* visitor, ffi::AnyView value) noexcept {
+  const TupleTypeNode* self =
+      ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const TupleTypeNode>(value);
+  TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(self->fields));
+  return ffi::AnyView(nullptr).CopyToTVMFFIAny();
+}
+
+TVMFFIAny TupleTypeMutate(ffi::StructuralMutatorObj* mutator, ffi::AnyView value) noexcept {
+  const TupleTypeNode* self =
+      ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const TupleTypeNode>(value);
+  TVM_FFI_S_MUTATE_ASSIGN_OR_RETURN(ffi::UnchangedOr<ffi::Array<Type>>, mapped_fields_u,
+                                    mutator->MutateExpected(self->fields));
+  if (mapped_fields_u.UnchangedOrSameAs(self->fields)) {
+    return ffi::Unchanged().CopyToTVMFFIAny();
+  }
+  ffi::ObjectPtr<TupleTypeNode> copy = ffi::make_object<TupleTypeNode>(*self);
+  if (!mapped_fields_u.IsUnchanged()) copy->fields = std::move(mapped_fields_u).ValueUnchecked();
+  return ffi::details::AnyUnsafe::MoveAnyToTVMFFIAny(ffi::Any(std::move(copy)));
+}
+
+TVMFFIAny TupleTypeMaybeInplaceMutate(ffi::StructuralMutatorObj* mutator,
+                                      ffi::AnyView value) noexcept {
+  TupleTypeNode* self = const_cast<TupleTypeNode*>(
+      ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const TupleTypeNode>(value));
+  TVM_FFI_S_MUTATE_ASSIGN_OR_RETURN(
+      ffi::UnchangedOr<ffi::Array<Type>>, mapped_fields_u,
+      mutator->MutateExpected(self->fields, ffi::InplaceMode::kAllow));
+  if (!mapped_fields_u.UnchangedOrSameAs(self->fields)) {
+    self->fields = std::move(mapped_fields_u).ValueUnchecked();
+  }
+  return ffi::Unchanged().CopyToTVMFFIAny();
 }
 
 }  // namespace
@@ -102,13 +240,34 @@ Type Type::Missing() {
   return missing;
 }
 
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  TypeNode::RegisterReflection();
+  refl::TypeAttrDef<TypeNode>()
+      .attr(refl::type_attr::kStructuralVisit, reinterpret_cast<void*>(&TypeVisit))
+      .attr(refl::type_attr::kStructuralMutate, reinterpret_cast<void*>(&TypeMutate))
+      .attr(refl::type_attr::kStructuralMaybeInplaceMutate,
+            reinterpret_cast<void*>(&TypeMaybeInplaceMutate));
+  refl::GlobalDef()
+      .def("ir.TypeMissing", []() { return Type::Missing(); })
+      .def("ir.TypeIsMissing", [](Type type) { return type.IsMissing(); });
+}
+
 bool Type::IsMissing() const { return this->same_as(Type::Missing()); }
 
 OpaqueType::OpaqueType() : Type(ffi::UnsafeInit{}) { data_ = ffi::make_object<OpaqueTypeNode>(); }
 
-TVM_FFI_STATIC_INIT_BLOCK() { TypeNode::RegisterReflection(); }
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  OpaqueTypeNode::RegisterReflection();
+  refl::TypeAttrDef<OpaqueTypeNode>()
+      .attr(refl::type_attr::kStructuralVisit, reinterpret_cast<void*>(&OpaqueTypeVisit))
+      .attr(refl::type_attr::kStructuralMutate, reinterpret_cast<void*>(&OpaqueTypeMutate))
+      .attr(refl::type_attr::kStructuralMaybeInplaceMutate,
+            reinterpret_cast<void*>(&OpaqueTypeMaybeInplaceMutate));
 
-TVM_FFI_STATIC_INIT_BLOCK() { OpaqueTypeNode::RegisterReflection(); }
+  refl::GlobalDef().def("ir.OpaqueType", []() { return OpaqueType(); });
+}
 
 // PrimType
 PrimType::PrimType(DLDataType dtype) : Type(ffi::UnsafeInit{}) {
@@ -122,6 +281,20 @@ PrimType::PrimType(DLDataType dtype) : Type(ffi::UnsafeInit{}) {
 PrimType::PrimType(DLDataTypeCode code, int bits, int lanes)
     : PrimType(DLDataType{static_cast<uint8_t>(code), static_cast<uint8_t>(bits),
                           static_cast<uint16_t>(lanes)}) {}
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  PrimTypeNode::RegisterReflection();
+  refl::TypeAttrDef<PrimTypeNode>()
+      .attr(refl::type_attr::kAnyHash, reinterpret_cast<void*>(&PrimTypeAnyHash))
+      .attr(refl::type_attr::kAnyEqual, reinterpret_cast<void*>(&PrimTypeAnyEqual))
+      .attr(refl::type_attr::kStructuralVisit, reinterpret_cast<void*>(&PrimTypeVisit))
+      .attr(refl::type_attr::kStructuralMutate, reinterpret_cast<void*>(&PrimTypeMutate))
+      .attr(refl::type_attr::kStructuralMaybeInplaceMutate,
+            reinterpret_cast<void*>(&PrimTypeMaybeInplaceMutate));
+
+  refl::GlobalDef().def("ir.PrimType", [](DLDataType dtype) { return PrimType(dtype); });
+}
 
 PrimType PrimType::Int(int bits, int lanes) {
   if (lanes == 1) {
@@ -167,21 +340,17 @@ PrimType PrimType::ScalableVector(DLDataTypeCode code, int bits, int lanes) {
   return PrimType(ScalableVectorDType(code, bits, lanes));
 }
 
+StringType::StringType() : Type(ffi::UnsafeInit{}) { data_ = ffi::make_object<StringTypeNode>(); }
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  PrimTypeNode::RegisterReflection();
-  refl::GlobalDef()
-      .def("ir.TypeMissing", []() { return Type::Missing(); })
-      .def("ir.TypeIsMissing", [](Type type) { return type.IsMissing(); })
-      .def("ir.OpaqueType", []() { return OpaqueType(); })
-      .def("ir.PrimType", [](DLDataType dtype) { return PrimType(dtype); });
-  refl::TypeAttrDef<PrimTypeNode>()
-      .attr(refl::type_attr::kAnyHash, reinterpret_cast<void*>(&PrimTypeAnyHash))
-      .attr(refl::type_attr::kAnyEqual, reinterpret_cast<void*>(&PrimTypeAnyEqual))
-      .attr(refl::type_attr::kStructuralVisit, reinterpret_cast<void*>(&PrimTypeVisit))
-      .attr(refl::type_attr::kStructuralMutate, reinterpret_cast<void*>(&PrimTypeMutate))
+  StringTypeNode::RegisterReflection();
+  refl::TypeAttrDef<StringTypeNode>()
+      .attr(refl::type_attr::kStructuralVisit, reinterpret_cast<void*>(&TypeVisit))
+      .attr(refl::type_attr::kStructuralMutate, reinterpret_cast<void*>(&TypeMutate))
       .attr(refl::type_attr::kStructuralMaybeInplaceMutate,
-            reinterpret_cast<void*>(&PrimTypeMaybeInplaceMutate));
+            reinterpret_cast<void*>(&TypeMaybeInplaceMutate));
+  refl::GlobalDef().def("ir.StringType", []() { return StringType(); });
 }
 
 // PointerType
@@ -197,6 +366,20 @@ PointerType::PointerType(Type element_type, ffi::String storage_scope) : Type(ff
   data_ = std::move(n);
 }
 
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  PointerTypeNode::RegisterReflection();
+  refl::TypeAttrDef<PointerTypeNode>()
+      .attr(refl::type_attr::kStructuralVisit, reinterpret_cast<void*>(&PointerTypeVisit))
+      .attr(refl::type_attr::kStructuralMutate, reinterpret_cast<void*>(&PointerTypeMutate))
+      .attr(refl::type_attr::kStructuralMaybeInplaceMutate,
+            reinterpret_cast<void*>(&PointerTypeMaybeInplaceMutate));
+
+  refl::GlobalDef().def("ir.PointerType", [](Type element_type, ffi::String storage_scope = "") {
+    return PointerType(element_type, storage_scope);
+  });
+}
+
 PointerType PointerType::VoidPointerTy(ffi::String storage_scope) {
   return PointerType(PrimType::Void(), std::move(storage_scope));
 }
@@ -210,6 +393,20 @@ FuncType::FuncType(tvm::ffi::Array<Type> arg_types, Type ret_type, Span span)
   data_ = std::move(n);
 }
 
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  FuncTypeNode::RegisterReflection();
+  refl::TypeAttrDef<FuncTypeNode>()
+      .attr(refl::type_attr::kStructuralVisit, reinterpret_cast<void*>(&FuncTypeVisit))
+      .attr(refl::type_attr::kStructuralMutate, reinterpret_cast<void*>(&FuncTypeMutate))
+      .attr(refl::type_attr::kStructuralMaybeInplaceMutate,
+            reinterpret_cast<void*>(&FuncTypeMaybeInplaceMutate));
+
+  refl::GlobalDef().def("ir.FuncType", [](tvm::ffi::Array<Type> arg_types, Type ret_type) {
+    return FuncType(arg_types, ret_type);
+  });
+}
+
 TupleType::TupleType(ffi::Array<Type> fields, Span span) : Type(ffi::UnsafeInit{}) {
   ffi::ObjectPtr<TupleTypeNode> n = ffi::make_object<TupleTypeNode>();
   n->fields = std::move(fields);
@@ -217,38 +414,19 @@ TupleType::TupleType(ffi::Array<Type> fields, Span span) : Type(ffi::UnsafeInit{
   data_ = std::move(n);
 }
 
-TupleType TupleType::Empty() { return TupleType(ffi::Array<Type>()); }
-
-TensorMapType::TensorMapType(Span span) : Type(ffi::UnsafeInit{}) {
-  ffi::ObjectPtr<TensorMapTypeNode> n = ffi::make_object<TensorMapTypeNode>();
-  n->span = std::move(span);
-  data_ = std::move(n);
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  PointerTypeNode::RegisterReflection();
-  refl::GlobalDef().def("ir.PointerType", [](Type element_type, ffi::String storage_scope = "") {
-    return PointerType(element_type, storage_scope);
-  });
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  FuncTypeNode::RegisterReflection();
-  refl::GlobalDef().def("ir.FuncType", [](tvm::ffi::Array<Type> arg_types, Type ret_type) {
-    return FuncType(arg_types, ret_type);
-  });
-}
-
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   TupleTypeNode::RegisterReflection();
-  TensorMapTypeNode::RegisterReflection();
-  refl::GlobalDef()
-      .def("ir.TupleType",
-           [](ffi::Array<Type> fields, Span span) { return TupleType(fields, span); })
-      .def("ir.TensorMapType", [](Span span) { return TensorMapType(span); });
+  refl::TypeAttrDef<TupleTypeNode>()
+      .attr(refl::type_attr::kStructuralVisit, reinterpret_cast<void*>(&TupleTypeVisit))
+      .attr(refl::type_attr::kStructuralMutate, reinterpret_cast<void*>(&TupleTypeMutate))
+      .attr(refl::type_attr::kStructuralMaybeInplaceMutate,
+            reinterpret_cast<void*>(&TupleTypeMaybeInplaceMutate));
+
+  refl::GlobalDef().def("ir.TupleType",
+                        [](ffi::Array<Type> fields, Span span) { return TupleType(fields, span); });
 }
+
+TupleType TupleType::Empty() { return TupleType(ffi::Array<Type>()); }
 
 }  // namespace tvm

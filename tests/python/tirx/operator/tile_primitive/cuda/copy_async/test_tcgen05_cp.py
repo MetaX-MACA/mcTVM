@@ -367,6 +367,7 @@ def test_cp_shape_roundtrip_offsets(shape, multicast, sw, dtype, n_mid, s_row_of
 # Compile-level checks
 
 
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda")
 def test_cp_4x256b_compile_emits_shape_and_count():
     """4x256b, 2 middle iterations → exactly 2 cp instructions of that shape."""
     kernel, _ = _build_case("4x256b", None, 1, "bfloat16", 2)
@@ -377,6 +378,7 @@ def test_cp_4x256b_compile_emits_shape_and_count():
     assert helper_refs - 1 == 2, f"expected 2 cp calls, got {helper_refs - 1}; src=\n{src}"
 
 
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda")
 def test_cp_shape_config_routes_to_generic_planner():
     """``shape=`` without desc_* must use the generic planner, not the
     explicit path: one hoisted descriptor encoded at SMEM base 0 with the
@@ -637,6 +639,7 @@ def test_cp_4x256b_lane_tiled_layout_f_scatter():
             np.testing.assert_array_equal(B_out[lane, :W32], exp, err_msg=f"lane {lane}")
 
 
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda")
 def test_cp_default_32x128b_instruction_sequence_unchanged():
     """Back-compat pin: a config-less smem->tmem copy_async must emit the
     exact legacy 32x128b.warpx4 sequence (hardcoded from the pre-generalization
@@ -1293,6 +1296,7 @@ def test_dispatch_rejects_bad_inputs(bad):
         _compile(kernel)
 
 
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda")
 def test_multi_cp_encodes_descriptor_once_and_patches_addr():
     """Compile-only regression for the shared-descriptor cp path.
 

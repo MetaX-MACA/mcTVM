@@ -19,7 +19,8 @@
 
 from __future__ import annotations
 
-from tvm.tirx import BufferRegion, TilePrimitiveCall
+from tvm.ir import TensorRegion as BufferRegion
+from tvm.tirx import TilePrimitiveCall
 
 from ..vec_emit.cast_vec2 import CAST_VEC2_IMPL
 from . import OpSpec, Plan, SrcSpec

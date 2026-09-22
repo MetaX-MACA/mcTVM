@@ -26,9 +26,9 @@ barrier when appropriate.
 
 from numbers import Integral
 
-from tvm.arith import Analyzer
 from tvm.runtime import DataType
 from tvm.script import tirx as T
+from tvm.sym import Analyzer
 from tvm.tirx import Buffer, PrimFunc
 from tvm.tirx.expr import IntImm as _IntImm
 from tvm.tirx.layout import ComposeLayout, TileLayout
@@ -72,7 +72,7 @@ def _static_complete_layout(
     and rejecting replicas prevents one global transaction from being treated
     as several independent shared writes.
     """
-    buffer: Buffer = buffer_region.buffer
+    buffer: Buffer = buffer_region.source
     layout = buffer.layout
     if layout is None:
         return False, f"{name} has no layout"
@@ -159,7 +159,7 @@ def _bsm_config(op_call: TilePrimitiveCall) -> tuple[bool, str | None, tuple[int
     if has_fill_mode and str(config.get("fill_mode")) != "zero":
         return False, "BSM copy_async only supports fill_mode='zero'", None
 
-    elem_bits = DataType(op_call.src.buffer.dtype).bits
+    elem_bits = DataType(op_call.src.source.dtype).bits
     if "vec_len" not in config:
         return True, None, _BSM_VEC_BITS
     vec_len = _as_static_int(config.get("vec_len"), Analyzer())
@@ -198,8 +198,8 @@ def _has_bsm_vector(op_call: TilePrimitiveCall, sctx: DispatchContext) -> tuple[
         return False, reason
     assert candidates is not None
 
-    src: Buffer = op_call.src.buffer
-    dst: Buffer = op_call.dst.buffer
+    src: Buffer = op_call.src.source
+    dst: Buffer = op_call.dst.source
     src_region = [
         (region_value.min, region_value.min + region_value.extent)
         for region_value in op_call.src.region
@@ -252,8 +252,8 @@ def _is_ldgsts(op_call: TilePrimitiveCall, sctx: DispatchContext) -> tuple[bool,
 
 def _emit_ldgsts(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc:
     op_call = TilePrimitiveCall.downcast(op_call)
-    src: Buffer = op_call.src.buffer
-    dst: Buffer = op_call.dst.buffer
+    src: Buffer = op_call.src.source
+    dst: Buffer = op_call.dst.source
     # The dispatcher predicate guarantees global -> shared only.
     g_buf, g_br = src, op_call.src
     s_buf, s_br = dst, op_call.dst

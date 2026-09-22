@@ -62,12 +62,12 @@ def verify_model(
     tvm.ir.assert_structural_equal(mod, expected, map_free_vars=map_free_vars)
 
 
-def verify_model_numerically(torch_model, example_args, rtol=1e-7, atol=1e-7):
+def verify_model_numerically(torch_model, example_args, rtol=1e-7, atol=1e-7, dynamic_shapes=None):
     """Verify model by comparing numerical outputs between PyTorch and TVM."""
     with torch.no_grad():
         pytorch_output = torch_model(*example_args)
 
-    exported_program = export(torch_model, args=example_args)
+    exported_program = export(torch_model, args=example_args, dynamic_shapes=dynamic_shapes)
     mod = from_exported_program(exported_program)
     target = tvm.target.Target("llvm")
     ex = relax.build(mod, target)
@@ -146,6 +146,24 @@ def test_basic_unary_ops(pytorch_op, relax_op):
             return gv
 
     verify_model(UnaryOp(), example_args, {}, expected)
+
+
+def test_round():
+    class Round(Module):
+        def __init__(self, decimals):
+            super().__init__()
+            self.decimals = decimals
+
+        def forward(self, input):
+            return torch.round(input, decimals=self.decimals)
+
+    # Ties-to-even, negative decimals, and scales that overflow to NaN.
+    x = torch.tensor(
+        [0.5, 1.5, 2.5, 4.5, -0.5, -2.5, 25.0, 125.0, 165.0, 2.25, 0.0],
+        dtype=torch.float32,
+    )
+    for decimals in (0, 1, -1, -2, 309, -309):
+        verify_model_numerically(Round(decimals).eval(), (x,), rtol=1e-6, atol=1e-6)
 
 
 operator_bool_unary = [
@@ -431,7 +449,7 @@ def test_extended_unary_ops():
             return torch.ops.aten.hardswish_(input)
 
     @tvm.script.ir_module
-    class expected_hardswish_for_1_2:
+    class expected_hardswish:
         @R.function
         def main(inp_0: R.Tensor((1, 3, 10, 10), dtype="float32")) -> R.Tuple(
             R.Tensor((1, 3, 10, 10), dtype="float32")
@@ -454,32 +472,8 @@ def test_extended_unary_ops():
                 R.output(gv)
             return gv
 
-    @tvm.script.ir_module
-    class expected_hardswish_for_3:
-        @R.function
-        def main(input: R.Tensor((1, 3, 10, 10), dtype="float32")) -> R.Tuple(
-            R.Tensor((1, 3, 10, 10), dtype="float32")
-        ):
-            with R.dataflow():
-                lv: R.Tensor((1, 3, 10, 10), dtype="float32") = R.add(
-                    input, R.const(3.0, "float32")
-                )
-                lv1: R.Tensor((1, 3, 10, 10), dtype="float32") = R.clip(
-                    lv, R.prim_value(0), R.prim_value(T.float64("inf"))
-                )
-                lv2: R.Tensor((1, 3, 10, 10), dtype="float32") = R.clip(
-                    lv1, R.prim_value(T.float64("-inf")), R.prim_value(6)
-                )
-                lv3: R.Tensor((1, 3, 10, 10), dtype="float32") = R.multiply(input, lv2)
-                lv4: R.Tensor((1, 3, 10, 10), dtype="float32") = R.divide(
-                    lv3, R.const(6.0, "float32")
-                )
-                gv: R.Tuple(R.Tensor((1, 3, 10, 10), dtype="float32")) = (lv4,)
-                R.output(gv)
-            return gv
-
-    verify_model(Hardswish(), example_args, {}, expected_hardswish_for_1_2)
-    verify_model(Hardswish3(), example_args, {}, expected_hardswish_for_3)
+    verify_model(Hardswish(), example_args, {}, expected_hardswish)
+    verify_model(Hardswish3(), example_args, {}, expected_hardswish)
 
     # isfinite
     class IsFinite(Module):
@@ -743,20 +737,7 @@ def test_extended_unary_ops():
         def forward(self, input):
             return torch.ops.aten.silu_(input)
 
-    @tvm.script.ir_module
-    class expected_silu_:
-        @R.function
-        def main(input: R.Tensor((1, 3, 10, 10), dtype="float32")) -> R.Tuple(
-            R.Tensor((1, 3, 10, 10), dtype="float32")
-        ):
-            with R.dataflow():
-                lv: R.Tensor((1, 3, 10, 10), dtype="float32") = R.sigmoid(input)
-                lv1: R.Tensor((1, 3, 10, 10), dtype="float32") = R.multiply(input, lv)
-                gv: R.Tuple(R.Tensor((1, 3, 10, 10), dtype="float32")) = (lv1,)
-                R.output(gv)
-            return gv
-
-    verify_model(SiLU_(), example_args, {}, expected_silu_)
+    verify_model(SiLU_(), example_args, {}, expected_silu)
 
     # square
     class Square(Module):
@@ -1941,16 +1922,10 @@ def test_adaptive_avgpool3d():
 
 def test_addmm():
     class Addmm1(Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, x1, x2, x3):
             return torch.addmm(x1, x2, x3)
 
     class Addmm2(Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, x1, x2, x3):
             return torch.addmm(x1, x2, x3, beta=0.8, alpha=0.5)
 
@@ -2000,16 +1975,10 @@ def test_addmm():
 
 def test_sparse_addmm():
     class SparseAddmm1(Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, x1, x2, x3):
             return torch.sparse.addmm(x1, x2, x3)
 
     class SparseAddmm2(Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, x1, x2, x3):
             return torch.sparse.addmm(x1, x2, x3, beta=0.8, alpha=0.5)
 
@@ -2355,9 +2324,6 @@ def test_avg_pool3d():
 
 def test_baddbmm():
     class BAddBMM1(Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, c, x, y):
             return torch.baddbmm(c, x, y)
 
@@ -2379,9 +2345,6 @@ def test_baddbmm():
             return gv
 
     class BAddBMM2(Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, c, x, y):
             return torch.baddbmm(c, x, y, alpha=2, beta=0)
 
@@ -2405,9 +2368,6 @@ def test_baddbmm():
             return gv
 
     class BAddBMM3(Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, c, x, y):
             return torch.baddbmm(c, x, y, alpha=2, beta=3)
 
@@ -2466,9 +2426,6 @@ def test_baddbmm():
 
 def test_bmm():
     class BMM(Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, x, y):
             return torch.bmm(x, y)
 
@@ -3280,19 +3237,13 @@ def test_pixel_shuffle():
 
 
 def test_einsum():
-    class Einsum1(Module):
-        def __init__(self):
+    class Einsum(Module):
+        def __init__(self, subscripts):
             super().__init__()
+            self.subscripts = subscripts
 
-        def forward(self, x):
-            return torch.einsum("ii", x)
-
-    class Einsum2(Module):
-        def __init__(self):
-            super().__init__()
-
-        def forward(self, x, y):
-            return torch.einsum("i,j->ij", x, y)
+        def forward(self, *args):
+            return torch.einsum(self.subscripts, *args)
 
     @tvm.script.ir_module
     class Expected1:
@@ -3321,10 +3272,98 @@ def test_einsum():
             return gv
 
     example_args = (torch.randn(4, 4, dtype=torch.float32),)
-    verify_model(Einsum1(), example_args, {}, Expected1, run_ep_decomposition=False)
+    verify_model(Einsum("ii"), example_args, {}, Expected1, run_ep_decomposition=False)
 
     example_args = (torch.randn(5, dtype=torch.float32), torch.randn(4, dtype=torch.float32))
-    verify_model(Einsum2(), example_args, {}, Expected2, run_ep_decomposition=False)
+    verify_model(Einsum("i,j->ij"), example_args, {}, Expected2, run_ep_decomposition=False)
+
+    # Default decomposition lowers repeated subscripts through aten.diagonal.
+    @tvm.script.ir_module
+    class Expected:
+        @R.function
+        def main(x: R.Tensor((3, 3), dtype="float32")) -> R.Tuple(R.Tensor((3,), dtype="float32")):
+            with R.dataflow():
+                lv: R.Tensor((3,), dtype="float32") = R.einsum((x,), subscripts="zz->z")
+                lv1: R.Tensor((3,), dtype="float32") = R.permute_dims(lv, axes=[0])
+                lv2: R.Tensor((3,), dtype="float32") = R.permute_dims(lv1, axes=[0])
+                gv: R.Tuple(R.Tensor((3,), dtype="float32")) = (lv2,)
+                R.output(gv)
+            return gv
+
+    example_args = (torch.randn(3, 3, dtype=torch.float32),)
+    verify_model(Einsum("ii->i"), example_args, {}, Expected)
+
+    for subscripts, shapes in [
+        ("ii->", [(4, 4)]),
+        ("...ii->...i", [(2, 3, 3)]),
+        ("abca,abcb->c", [(3, 3, 4, 3), (3, 3, 4, 3)]),
+    ]:
+        verify_model_numerically(Einsum(subscripts), tuple(torch.randn(*shape) for shape in shapes))
+
+    class DirectDiagonal(Module):
+        def __init__(self, offset):
+            super().__init__()
+            self.offset = offset
+
+        def forward(self, x):
+            return torch.diagonal(x, self.offset, 0, 1)
+
+    class DirectTrace(Module):
+        def forward(self, x):
+            return torch.trace(x)
+
+    # For a 3x4 input, 4 and -3 are the first empty diagonals. Larger offsets
+    # in either direction check that negative diagonal lengths are clamped to zero.
+    for offset in [1, 4, 6, -3, -6]:
+        verify_model_numerically(DirectDiagonal(offset), (torch.randn(3, 4),))
+    verify_model_numerically(DirectTrace(), (torch.randn(4, 4),))
+
+    # A square diagonal must read the input directly without O(N^2) copies,
+    # both before and after legalization.
+    n = 8
+    exported_program = export(Einsum("ii->i"), args=(torch.randn(n, n),))
+    mod = from_exported_program(exported_program)
+
+    def rank2_call_results(ir_mod):
+        """Names of calls whose result is a rank-2 (full-size) tensor."""
+        results = []
+        for func in ir_mod.functions.values():
+            if not isinstance(func, relax.Function):
+                continue
+            for block in func.body.blocks:
+                for binding in block.bindings:
+                    if not (
+                        isinstance(binding.value, relax.Call)
+                        and isinstance(binding.value.op, tvm.ir.Op)
+                    ):
+                        continue
+                    if isinstance(binding.var.ty, relax.TensorType) and binding.var.ty.ndim == 2:
+                        results.append(binding.value.op.name)
+        return results
+
+    # The diagonal must be the only full-size (N x N) tensor touched: it is the
+    # function input read directly by a single repeated-subscript einsum. No
+    # call may produce a rank-2 intermediate.
+    assert rank2_call_results(mod) == []
+
+    # Sanity check that the graph really performs the diagonal: exactly one
+    # einsum on the N x N input producing an N-vector.
+    einsum_calls = []
+    for block in mod["main"].body.blocks:
+        for binding in block.bindings:
+            if (
+                isinstance(binding.value, relax.Call)
+                and isinstance(binding.value.op, tvm.ir.Op)
+                and binding.value.op.name == "relax.einsum"
+            ):
+                einsum_calls.append(binding.var)
+    assert len(einsum_calls) == 1
+    assert einsum_calls[0].ty.ndim == 1
+
+    # Legalize and check again on the lowered graph.
+    with tvm.target.Target("llvm"):
+        lowered = relax.transform.LegalizeOps()(mod)
+    assert rank2_call_results(lowered) == []
 
 
 def test_outer():
@@ -3592,9 +3631,6 @@ def test_linear():
 
 def test_maxpool1d():
     class MaxPool1d(Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, input):
             return torch.nn.functional.max_pool1d(input, kernel_size=2)
 
@@ -3681,9 +3717,6 @@ def test_maxpool2d():
             return self.pool(input)
 
     class MaxPool2d_functional(Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, input):
             return torch.nn.functional.max_pool2d(input, kernel_size=[1, 1])
 
@@ -3799,9 +3832,6 @@ def test_maxpool3d():
             return self.pool(input)
 
     class MaxPool3d_functional(Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, input):
             return torch.nn.functional.max_pool3d(input, kernel_size=[1, 1, 1])
 
@@ -4875,16 +4905,10 @@ def test_argmax_argmin():
     example_args = (torch.randn(256, 256, dtype=torch.float32),)
 
     class Argmax1(Module):
-        def __init__(self) -> None:
-            super().__init__()
-
         def forward(self, input):
             return torch.argmax(input, dim=-1)
 
     class Argmax2(Module):
-        def __init__(self) -> None:
-            super().__init__()
-
         def forward(self, input):
             return torch.argmax(input, dim=-1, keepdim=True)
 
@@ -4916,16 +4940,10 @@ def test_argmax_argmin():
     verify_model(Argmax2(), example_args, {}, expected_argmax2)
 
     class Argmin1(Module):
-        def __init__(self) -> None:
-            super().__init__()
-
         def forward(self, input):
             return torch.argmin(input)
 
     class Argmin2(Module):
-        def __init__(self) -> None:
-            super().__init__()
-
         def forward(self, input):
             return torch.argmin(input, keepdim=True)
 
@@ -5233,6 +5251,42 @@ def test_reshape_as():
     verify_model(ReshapeAs(), example_args, {}, expected1)
 
 
+def test_reshape_zero_sized_dim():
+    class Reshape(Module):
+        def forward(self, x):
+            return x.reshape(0, 4)
+
+    class ReshapeTrailing(Module):
+        def forward(self, x):
+            return x.reshape(3, 0)
+
+    verify_model_numerically(Reshape(), (torch.randn(2, 0, 4, dtype=torch.float32),))
+    verify_model_numerically(ReshapeTrailing(), (torch.randn(0, 3, dtype=torch.float32),))
+
+
+def test_reshape_zero_sized_dim_symbolic_target():
+    # Only a literal is read as "copy the input dimension", so a symbolic dimension in the
+    # target is not one: it is carried through, and the literal zero beside it still has to
+    # be rewritten. Skipping the rewrite because the target is not fully static reads that
+    # zero as a copy and gives a non-empty shape torch never produces.
+    class Flatten(Module):
+        def forward(self, x):
+            return x.flatten(1, 2)
+
+    class KeepBatch(Module):
+        def forward(self, x):
+            return x.reshape(x.shape[0], 0, 4)
+
+    class ZeroBeforeBatch(Module):
+        def forward(self, x):
+            return x.reshape(0, x.shape[0])
+
+    batch = torch.export.Dim("batch", min=1, max=64)
+    example_args = (torch.randn(3, 2, 0, 4, dtype=torch.float32),)
+    for model in (Flatten(), KeepBatch(), ZeroBeforeBatch()):
+        verify_model_numerically(model, example_args, dynamic_shapes={"x": {0: batch}})
+
+
 def test_roll():
     class Roll1(Module):
         def forward(self, x):
@@ -5526,7 +5580,7 @@ def test_derived_input_dimension_without_exported_program_decomposition():
 
     x_shape = mod["main"].params[0].ty.shape.values
     y_shape = mod["main"].params[1].ty.shape.values
-    assert tvm.arith.Analyzer().can_prove_equal(y_shape[1], x_shape[1] * 2)
+    assert tvm.sym.Analyzer().can_prove_equal(y_shape[1], x_shape[1] * 2)
 
 
 def test_expand_with_new_leading_dimension():
@@ -5544,9 +5598,9 @@ def test_expand_with_new_leading_dimension():
 
     input_shape = mod["main"].params[0].ty.shape.values
     output_shape = mod["main"].ret_ty.fields[0].shape.values
-    assert tvm.arith.Analyzer().can_prove_equal(output_shape[0], 2)
-    assert tvm.arith.Analyzer().can_prove_equal(output_shape[1], input_shape[0])
-    assert tvm.arith.Analyzer().can_prove_equal(output_shape[2], input_shape[1])
+    assert tvm.sym.Analyzer().can_prove_equal(output_shape[0], 2)
+    assert tvm.sym.Analyzer().can_prove_equal(output_shape[1], input_shape[0])
+    assert tvm.sym.Analyzer().can_prove_equal(output_shape[2], input_shape[1])
 
 
 def test_dynamic_scalar_item_in_shape_operations():
@@ -5589,53 +5643,6 @@ def test_dynamic_scalar_item_in_shape_operations():
     for token_count in (4, 6):
         torch_input = torch.randn(1, token_count, 3)
         expected = DynamicShapeOps()(torch_input)
-        actual = vm["main"](tvm.runtime.tensor(torch_input.numpy()))
-        for actual_value, expected_value in zip(actual, expected):
-            np.testing.assert_array_equal(actual_value.numpy(), expected_value.numpy())
-
-
-@pytest.mark.skipif(not env.has_llvm(), reason="need llvm")
-@pytest.mark.parametrize(
-    ("item_dtype", "item_shape"),
-    [
-        (torch.int8, ()),
-        (torch.uint8, ()),
-        (torch.int16, ()),
-        (torch.int32, ()),
-        (torch.int64, ()),
-        (torch.int64, (1,)),
-        (torch.int64, (1, 1)),
-    ],
-)
-def test_dynamic_scalar_item_single_element_integer_dtypes(item_dtype, item_shape):
-    class DynamicItem(torch.nn.Module):
-        def forward(self, x):
-            lengths = torch.full(
-                (x.shape[0],),
-                x.shape[1],
-                device=x.device,
-                dtype=item_dtype,
-            )
-            value = lengths.max().reshape(item_shape).item()
-            return torch.arange(value, device=x.device), torch.full_like(
-                x, value, dtype=torch.int64
-            )
-
-    rows = torch.export.Dim("rows", min=1, max=8)
-    columns = torch.export.Dim("columns", min=1, max=8)
-    example_args = (torch.randn(3, 4, dtype=torch.float32),)
-    exported_program = export(
-        DynamicItem(),
-        args=example_args,
-        dynamic_shapes={"x": {0: rows, 1: columns}},
-    )
-    mod = from_exported_program(exported_program, run_ep_decomposition=False)
-    executable = relax.build(mod, tvm.target.Target("llvm"))
-    vm = relax.VirtualMachine(executable, tvm.cpu())
-
-    for shape in ((3, 4), (5, 2)):
-        torch_input = torch.randn(shape, dtype=torch.float32)
-        expected = DynamicItem()(torch_input)
         actual = vm["main"](tvm.runtime.tensor(torch_input.numpy()))
         for actual_value, expected_value in zip(actual, expected):
             np.testing.assert_array_equal(actual_value.numpy(), expected_value.numpy())
@@ -5904,10 +5911,6 @@ def test_split_int_split_size():
 
     for shape, split_size, dim in [
         ((10,), 6, 0),
-        ((10,), 7, 0),
-        ((10,), 8, 0),
-        ((10,), 9, 0),
-        ((12,), 7, 0),
         ((12, 8), 5, 1),
         ((3, 10), 6, -1),
     ]:
@@ -6295,27 +6298,6 @@ def test_empty():
     verify_model(Empty(), example_args, {}, Expected)
 
 
-def test_empty_without_dtype():
-    class EmptyWithoutDtype(Module):
-        def forward(self, input):
-            return torch.empty((5, 5))
-
-    @tvm.script.ir_module
-    class Expected:
-        @R.function
-        def main(input: R.Tensor((10, 10), dtype="float32")) -> R.Tuple(
-            R.Tensor((5, 5), dtype="float32")
-        ):
-            with R.dataflow():
-                lv: R.Tensor((5, 5), dtype="float32") = R.zeros(R.shape([5, 5]), dtype="float32")
-                gv: R.Tuple(R.Tensor((5, 5), dtype="float32")) = (lv,)
-                R.output(gv)
-            return gv
-
-    example_args = (torch.randn(10, 10, dtype=torch.float32),)
-    verify_model(EmptyWithoutDtype(), example_args, {}, Expected)
-
-
 def test_fill():
     class Fill(Module):
         def forward(self, input: torch.Tensor):
@@ -6675,9 +6657,6 @@ def test_keep_params():
 
 def test_unwrap_unit_return_tuple():
     class Identity(Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, x):
             return (x,)
 
@@ -6698,9 +6677,6 @@ def test_unwrap_unit_return_tuple():
 
 def test_no_bind_return_tuple():
     class Identity(Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, x, y):
             return (x, y)
 
@@ -6795,6 +6771,7 @@ def test_empty_like():
     verify_model(EmptyLike(), example_args, {}, Expected)
 
 
+@pytest.mark.skipif(not env.has_llvm(), reason="need llvm")
 def test_one_hot():
     class OneHot(Module):
         def forward(self, indices):
@@ -6807,19 +6784,32 @@ def test_one_hot():
             indices: R.Tensor((5,), dtype="int64"),
         ) -> R.Tuple(R.Tensor((5, 10), dtype="int64")):
             with R.dataflow():
-                lv: R.Tensor((10,), dtype="int64") = R.arange(
-                    R.prim_value(0), R.prim_value(10), R.prim_value(1), dtype="int64"
+                lv: R.Tensor((5, 10), dtype="int64") = R.one_hot(
+                    indices, R.prim_value(1), R.prim_value(0), depth=10, axis=-1
                 )
-                lv1: R.Tensor((5, 1), dtype="int64") = R.expand_dims(indices, axis=[-1])
-                lv2: R.Tensor((5, 10), dtype="bool") = R.equal(lv1, lv)
-                lv3: R.Tensor((5, 10), dtype="int64") = R.astype(lv2, dtype="int64")
-                gv: R.Tuple(R.Tensor((5, 10), dtype="int64")) = (lv3,)
+                gv: R.Tuple(R.Tensor((5, 10), dtype="int64")) = (lv,)
                 R.output(gv)
             return gv
 
-    example_args = (torch.randint(0, 10, (5,), dtype=torch.int64),)
+    example_args = (torch.tensor([0, 1, 5, 8, 9], dtype=torch.int64),)
 
-    verify_model(OneHot(), example_args, {}, Expected)
+    verify_model(OneHot(), example_args, {}, Expected, run_ep_decomposition=False)
+    verify_model_numerically(OneHot(), example_args)
+
+
+def test_one_hot_invalid_num_classes():
+    class OneHot(Module):
+        def forward(self, indices):
+            return torch.nn.functional.one_hot(indices, num_classes=0)
+
+    example_args = (torch.randint(0, 5, (5,), dtype=torch.int64),)
+    exported_program = export(OneHot(), args=example_args)
+
+    # With the default decomposition, one_hot is rewritten to arange/equal/astype and never
+    # reaches this converter. Without it, the non-positive num_classes must be rejected by
+    # the frontend instead of failing an internal `depth > 0` check in relax.op.one_hot.
+    with pytest.raises(ValueError, match="num_classes must be a positive integer"):
+        from_exported_program(exported_program, run_ep_decomposition=False)
 
 
 def test_ones_like():
@@ -7023,87 +7013,40 @@ def test_unflatten():
 
 
 def test_gather():
-    class Gather0(Module):
+    class Gather(Module):
+        def __init__(self, axis):
+            super().__init__()
+            self.axis = axis
+
         def forward(self, data, indices):
-            return torch.gather(data, 0, indices)
-
-    class Gather1(Module):
-        def forward(self, data, indices):
-            return torch.gather(data, 1, indices)
-
-    class Gather2(Module):
-        def forward(self, data, indices):
-            return torch.gather(data, -1, indices)
-
-    class Gather3(Module):
-        def forward(self, data, indices):
-            return torch.gather(data, -2, indices)
-
-    @tvm.script.ir_module
-    class Expected0:
-        @R.function
-        def main(
-            inp_0: R.Tensor((2, 3), dtype="float32"),
-            inp_1: R.Tensor((2, 3), dtype="int64"),
-        ) -> R.Tuple(R.Tensor((2, 3), dtype="float32")):
-            with R.dataflow():
-                lv: R.Tensor((2, 3), dtype="float32") = R.gather_elements(inp_0, inp_1, axis=0)
-                gv: R.Tuple(R.Tensor((2, 3), dtype="float32")) = (lv,)
-                R.output(gv)
-            return gv
-
-    @tvm.script.ir_module
-    class Expected1:
-        @R.function
-        def main(
-            inp_0: R.Tensor((2, 3), dtype="float32"),
-            inp_1: R.Tensor((2, 3), dtype="int64"),
-        ) -> R.Tuple(R.Tensor((2, 3), dtype="float32")):
-            with R.dataflow():
-                lv: R.Tensor((2, 3), dtype="float32") = R.gather_elements(inp_0, inp_1, axis=1)
-                gv: R.Tuple(R.Tensor((2, 3), dtype="float32")) = (lv,)
-                R.output(gv)
-            return gv
-
-    @tvm.script.ir_module
-    class Expected2:
-        @R.function
-        def main(
-            inp_0: R.Tensor((2, 3), dtype="float32"),
-            inp_1: R.Tensor((2, 3), dtype="int64"),
-        ) -> R.Tuple(R.Tensor((2, 3), dtype="float32")):
-            with R.dataflow():
-                lv: R.Tensor((2, 3), dtype="float32") = R.gather_elements(inp_0, inp_1, axis=-1)
-                gv: R.Tuple(R.Tensor((2, 3), dtype="float32")) = (lv,)
-                R.output(gv)
-            return gv
-
-    @tvm.script.ir_module
-    class Expected3:
-        @R.function
-        def main(
-            inp_0: R.Tensor((2, 3), dtype="float32"),
-            inp_1: R.Tensor((2, 3), dtype="int64"),
-        ) -> R.Tuple(R.Tensor((2, 3), dtype="float32")):
-            with R.dataflow():
-                lv: R.Tensor((2, 3), dtype="float32") = R.gather_elements(inp_0, inp_1, axis=-2)
-                gv: R.Tuple(R.Tensor((2, 3), dtype="float32")) = (lv,)
-                R.output(gv)
-            return gv
+            return torch.gather(data, self.axis, indices)
 
     example_args = (
         torch.randn(2, 3, dtype=torch.float32),
         torch.randint(0, 3, (2, 3), dtype=torch.int64),
     )
+    for axis in (0, 1, -1, -2):
 
-    verify_model(Gather0(), example_args, {}, Expected0)
-    verify_model(Gather1(), example_args, {}, Expected1)
-    verify_model(Gather2(), example_args, {}, Expected2)
-    verify_model(Gather3(), example_args, {}, Expected3)
+        @tvm.script.ir_module
+        class Expected:
+            @R.function
+            def main(
+                inp_0: R.Tensor((2, 3), dtype="float32"),
+                inp_1: R.Tensor((2, 3), dtype="int64"),
+            ) -> R.Tuple(R.Tensor((2, 3), dtype="float32")):
+                with R.dataflow():
+                    lv: R.Tensor((2, 3), dtype="float32") = R.gather_elements(
+                        inp_0, inp_1, axis=axis
+                    )
+                    gv: R.Tuple(R.Tensor((2, 3), dtype="float32")) = (lv,)
+                    R.output(gv)
+                return gv
+
+        verify_model(Gather(axis), example_args, {}, Expected)
 
 
 def test_index_put():
-    # Test case 1: 1D input
+    # 1D input
     class IndexPut1D(Module):
         def forward(self, data, indices_0, values):
             indices_tuple = (indices_0,)
@@ -7131,7 +7074,7 @@ def test_index_put():
                 R.output(gv)
             return gv
 
-    # Test case 2: 2D input
+    # 2D input
     class IndexPut2D(Module):
         def forward(self, data, indices_0, indices_1, values):
             indices_tuple = (indices_0, indices_1)
@@ -7161,76 +7104,7 @@ def test_index_put():
                 R.output(gv)
             return gv
 
-    # Test case 3: 3D input
-    class IndexPut3D(Module):
-        def forward(self, data, indices_0, indices_1, indices_2, values):
-            indices_tuple = (indices_0, indices_1, indices_2)
-            return data.index_put_(indices_tuple, values, accumulate=False)
-
-    example_args_3d = (
-        torch.randn(16, 32, 64, dtype=torch.float32),
-        torch.randint(0, 16, (128,), dtype=torch.int64),
-        torch.randint(0, 32, (128,), dtype=torch.int64),
-        torch.randint(0, 64, (128,), dtype=torch.int64),
-        torch.randn(128, dtype=torch.float32),
-    )
-
-    @I.ir_module
-    class Expected3D:
-        @R.function
-        def main(
-            data: R.Tensor((16, 32, 64), dtype="float32"),
-            indices_0: R.Tensor((128,), dtype="int64"),
-            indices_1: R.Tensor((128,), dtype="int64"),
-            indices_2: R.Tensor((128,), dtype="int64"),
-            values: R.Tensor((128,), dtype="float32"),
-        ) -> R.Tuple(R.Tensor((16, 32, 64), dtype="float32")):
-            with R.dataflow():
-                lv: R.Tensor((16, 32, 64), dtype="float32") = R.index_put(
-                    data, (indices_0, indices_1, indices_2), values, accumulate=False
-                )
-                gv: R.Tuple(R.Tensor((16, 32, 64), dtype="float32")) = (lv,)
-                R.output(gv)
-            return gv
-
-    # Test case 4: 4D input
-    class IndexPut4D(Module):
-        def forward(self, data, indices_0, indices_1, indices_2, indices_3, values):
-            indices_tuple = (indices_0, indices_1, indices_2, indices_3)
-            return data.index_put_(indices_tuple, values, accumulate=False)
-
-    example_args_4d = (
-        torch.randn(8, 16, 32, 64, dtype=torch.float32),
-        torch.randint(0, 8, (128,), dtype=torch.int64),
-        torch.randint(0, 16, (128,), dtype=torch.int64),
-        torch.randint(0, 32, (128,), dtype=torch.int64),
-        torch.randint(0, 64, (128,), dtype=torch.int64),
-        torch.randn(128, dtype=torch.float32),
-    )
-
-    @I.ir_module
-    class Expected4D:
-        @R.function
-        def main(
-            data: R.Tensor((8, 16, 32, 64), dtype="float32"),
-            indices_0: R.Tensor((128,), dtype="int64"),
-            indices_1: R.Tensor((128,), dtype="int64"),
-            indices_2: R.Tensor((128,), dtype="int64"),
-            indices_3: R.Tensor((128,), dtype="int64"),
-            values: R.Tensor((128,), dtype="float32"),
-        ) -> R.Tuple(R.Tensor((8, 16, 32, 64), dtype="float32")):
-            with R.dataflow():
-                lv: R.Tensor((8, 16, 32, 64), dtype="float32") = R.index_put(
-                    data,
-                    (indices_0, indices_1, indices_2, indices_3),
-                    values,
-                    accumulate=False,
-                )
-                gv: R.Tuple(R.Tensor((8, 16, 32, 64), dtype="float32")) = (lv,)
-                R.output(gv)
-            return gv
-
-    # Test case 5: 5D input
+    # 5D input
     class IndexPut5D(Module):
         def forward(self, data, indices_0, indices_1, indices_2, indices_3, indices_4, values):
             indices_tuple = (indices_0, indices_1, indices_2, indices_3, indices_4)
@@ -7269,7 +7143,7 @@ def test_index_put():
                 R.output(gv)
             return gv
 
-    # Test case 6: 2D input with multi-dimensional index (broadcasting)
+    # 2D input with multi-dimensional index (broadcasting)
     # This tests the multi-dimensional index support with broadcasting
     class IndexPutBroadcast1D(Module):
         def forward(self, data, indices_1):
@@ -7304,7 +7178,7 @@ def test_index_put():
                 R.output(gv)
             return gv
 
-    # Test case 7: 2D input with multi-dimensional index (second position)
+    # 2D input with multi-dimensional index (second position)
     class IndexPutBroadcast2D(Module):
         def forward(self, data, indices_0):
             indices_1 = torch.arange(data.shape[1]).unsqueeze(1)
@@ -7338,7 +7212,7 @@ def test_index_put():
                 R.output(gv)
             return gv
 
-    # Test case 8: 3D input with mixed 1D and 2D indices
+    # 3D input with mixed 1D and 2D indices
     class IndexPutBroadcast3D(Module):
         def forward(self, data, indices_1):
             indices_0 = torch.arange(data.shape[0]).unsqueeze(1)
@@ -7377,7 +7251,7 @@ def test_index_put():
                 R.output(gv)
             return gv
 
-    # Test case 9: batched indexing with slice (e.g., M[:, rows, cols] = x)
+    # batched indexing with slice (e.g., M[:, rows, cols] = x)
     class IndexPutBatchedWithNone(Module):
         def forward(self, x):
             B = x.size(0)
@@ -7417,8 +7291,6 @@ def test_index_put():
     # Run verification for each case
     verify_model(IndexPut1D(), example_args_1d, {}, Expected1D)
     verify_model(IndexPut2D(), example_args_2d, {}, Expected2D)
-    verify_model(IndexPut3D(), example_args_3d, {}, Expected3D)
-    verify_model(IndexPut4D(), example_args_4d, {}, Expected4D)
     verify_model(IndexPut5D(), example_args_5d, {}, Expected5D)
     verify_model(IndexPutBroadcast1D(), example_args_broadcast1, {}, ExpectedBroadcast1D)
     verify_model(IndexPutBroadcast2D(), example_args_broadcast2, {}, ExpectedBroadcast2D)
@@ -7448,40 +7320,6 @@ def test_index_put_with_tuple_output():
     tensor_fields = [f for f in ret_ty.fields if isinstance(f, relax.TensorType)]
     assert len(tensor_fields) >= 2
 
-    assert any(
-        len(f.shape) == 4 and int(f.shape[-2]) == 5 and int(f.shape[-1]) == 5 for f in tensor_fields
-    )
-
-
-def test_m4d_diag_index_put_tuple_output_regression():
-    class M4D(Module):
-        def forward(self, x):
-            b, k, n = 2, 3, 5
-            buf = x.new_zeros(b, k, n, n)
-            idx = torch.arange(n, device=x.device)
-
-            diag = buf[..., idx, idx]
-            diag = torch.nn.functional.elu(diag) + 1.0 + 1e-8
-            buf[..., idx, idx] = diag
-
-            return x[..., :1], buf
-
-    ex_in = torch.zeros(2, 3, 5, dtype=torch.float32)
-    exported_program = export(M4D().eval(), args=(ex_in,))
-
-    exported_targets = [str(getattr(n, "target", "")) for n in exported_program.graph.nodes]
-    assert any("index_put" in target for target in exported_targets)
-
-    # Regression focus: importing this graph should not segfault at Tuple construction.
-    mod = from_exported_program(exported_program)
-    ret_ty = mod["main"].ret_ty
-    assert isinstance(ret_ty, relax.TupleType)
-
-    tensor_fields = [f for f in ret_ty.fields if isinstance(f, relax.TensorType)]
-    assert len(tensor_fields) >= 2
-    # x: (2, 3, 5) → x[..., :1]: (2, 3, 1)
-    assert any(len(f.shape) == 3 and int(f.shape[-1]) == 1 for f in tensor_fields)
-    # buf: (2, 3, 5, 5) → 4-D with spatial dims 5x5
     assert any(
         len(f.shape) == 4 and int(f.shape[-2]) == 5 and int(f.shape[-1]) == 5 for f in tensor_fields
     )
@@ -7864,23 +7702,56 @@ def test_argsort():
     @tvm.script.ir_module
     class Expected:
         @R.function
-        def main(x: R.Tensor((5, 3), dtype="float32")) -> R.Tuple(R.Tensor((5, 3), dtype="int32")):
+        def main(x: R.Tensor((5, 3), dtype="float32")) -> R.Tuple(R.Tensor((5, 3), dtype="int64")):
             with R.dataflow():
-                lv: R.Tensor((5, 3), dtype="int32") = R.argsort(
-                    x, axis=1, descending=True, dtype="int32"
+                lv: R.Tensor((5, 3), dtype="int64") = R.argsort(
+                    x, axis=1, descending=True, dtype="int64"
                 )
                 lv1: R.Tensor((5, 3), dtype="float32") = R.gather_elements(x, lv, axis=1)
-                lv2: R.Tuple(R.Tensor((5, 3), dtype="float32"), R.Tensor((5, 3), dtype="int32")) = (
+                lv2: R.Tuple(R.Tensor((5, 3), dtype="float32"), R.Tensor((5, 3), dtype="int64")) = (
                     lv1,
                     lv,
                 )
-                lv3: R.Tensor((5, 3), dtype="int32") = lv2[1]
-                gv: R.Tuple(R.Tensor((5, 3), dtype="int32")) = (lv3,)
+                lv3: R.Tensor((5, 3), dtype="int64") = lv2[1]
+                gv: R.Tuple(R.Tensor((5, 3), dtype="int64")) = (lv3,)
                 R.output(gv)
             return gv
 
     example_args = (torch.randn(5, 3, dtype=torch.float32),)
     verify_model(Argsort(), example_args, {}, Expected)
+
+
+def test_sort():
+    class Sort(Module):
+        def forward(self, x):
+            return torch.sort(x, dim=1, descending=True)
+
+    @tvm.script.ir_module
+    class Expected:
+        @R.function
+        def main(x: R.Tensor((5, 3), dtype="float32")) -> R.Tuple(
+            R.Tensor((5, 3), dtype="float32"), R.Tensor((5, 3), dtype="int64")
+        ):
+            with R.dataflow():
+                lv: R.Tensor((5, 3), dtype="int64") = R.argsort(
+                    x, axis=1, descending=True, dtype="int64"
+                )
+                lv1: R.Tensor((5, 3), dtype="float32") = R.gather_elements(x, lv, axis=1)
+                lv2: R.Tuple(R.Tensor((5, 3), dtype="float32"), R.Tensor((5, 3), dtype="int64")) = (
+                    lv1,
+                    lv,
+                )
+                lv3: R.Tensor((5, 3), dtype="float32") = lv2[0]
+                lv4: R.Tensor((5, 3), dtype="int64") = lv2[1]
+                gv: R.Tuple(R.Tensor((5, 3), dtype="float32"), R.Tensor((5, 3), dtype="int64")) = (
+                    lv3,
+                    lv4,
+                )
+                R.output(gv)
+            return gv
+
+    example_args = (torch.randn(5, 3, dtype=torch.float32),)
+    verify_model(Sort(), example_args, {}, Expected)
 
 
 def test_topk():
@@ -8578,39 +8449,6 @@ def test_dynamic_shape_with_addition_constraints():
     )
 
 
-def test_dynamic_shape_with_subtraction_constraints():
-    class ConcatModel(torch.nn.Module):
-        def forward(self, x, y):
-            return torch.cat([x, y], dim=0)
-
-    @I.ir_module
-    class Expected:
-        @R.function
-        def main(
-            x: R.Tensor(("1 + s0", 4), dtype="float32"), y: R.Tensor(("s0", 4), dtype="float32")
-        ) -> R.Tuple(R.Tensor(("1 + s0 + s0", 4), dtype="float32")):
-            s0 = T.int64()
-            R.func_attr(
-                {
-                    "tir_var_lower_bound": {"s17": 0},
-                    "tir_var_upper_bound": {"s17": 63},
-                }
-            )
-            with R.dataflow():
-                lv: R.Tensor((1 + s0 + s0, 4), dtype="float32") = R.concat((x, y), axis=0)
-                gv: R.Tuple(R.Tensor((1 + s0 + s0, 4), dtype="float32")) = (lv,)
-                R.output(gv)
-            return gv
-
-    batch = torch.export.Dim("batch", min=1, max=64)
-    example_args = (torch.randn(8, 4), torch.randn(7, 4))
-    dynamic_shapes = {"x": {0: batch}, "y": {0: batch - 1}}
-
-    verify_model(
-        ConcatModel(), example_args, {}, Expected, dynamic_shapes=dynamic_shapes, map_free_vars=True
-    )
-
-
 def test_dynamic_shape_with_multiplication_constraints():
     class ConcatModel(torch.nn.Module):
         def forward(self, x, y):
@@ -8840,6 +8678,33 @@ def test_scatter_value():
     verify_model(ScatterValue(), example_args, {}, Expected)
 
 
+def test_scatter_src():
+    class ScatterSrc(Module):
+        def forward(self, x, index, src):
+            return x.scatter(1, index, src)
+
+    @I.ir_module
+    class Expected:
+        @R.function
+        def main(
+            x: R.Tensor((4, 8), dtype="float32"),
+            index: R.Tensor((4, 2), dtype="int64"),
+            src: R.Tensor((4, 2), dtype="float32"),
+        ) -> R.Tuple(R.Tensor((4, 8), dtype="float32")):
+            with R.dataflow():
+                lv: R.Tensor((4, 8), dtype="float32") = R.scatter_elements(x, index, src, axis=1)
+                gv: R.Tuple(R.Tensor((4, 8), dtype="float32")) = (lv,)
+                R.output(gv)
+            return gv
+
+    example_args = (
+        torch.randn(4, 8, dtype=torch.float32),
+        torch.randint(0, 8, (4, 2), dtype=torch.int64),
+        torch.randn(4, 2, dtype=torch.float32),
+    )
+    verify_model(ScatterSrc(), example_args, {}, Expected)
+
+
 def test_grid_sample():
     class GridSample(Module):
         def forward(self, input, grid):
@@ -8937,57 +8802,6 @@ def test_torchvision_roi_align_aligned():
     verify_model_numerically(ROIAlign(), example_args, rtol=1e-5, atol=1e-5)
 
 
-def test_upsample_nearest2d():
-    class UpsampleNearest2dScale(Module):
-        def forward(self, input):
-            return torch.nn.functional.interpolate(input, scale_factor=2.0, mode="nearest")
-
-    class UpsampleNearest2dSize(Module):
-        def forward(self, input):
-            return torch.nn.functional.interpolate(input, size=(20, 20), mode="nearest")
-
-    example_args = (torch.randn(1, 3, 10, 10, dtype=torch.float32),)
-
-    @tvm.script.ir_module
-    class expected_scale:
-        @R.function
-        def main(input_1: R.Tensor((1, 3, 10, 10), dtype="float32")) -> R.Tuple(
-            R.Tensor((1, 3, 20, 20), dtype="float32")
-        ):
-            with R.dataflow():
-                lv: R.Tensor((1, 3, 20, 20), dtype="float32") = R.image.resize2d(
-                    input_1,
-                    size=(20, 20),
-                    layout="NCHW",
-                    method="nearest_neighbor",
-                    coordinate_transformation_mode="half_pixel",
-                )
-                gv: R.Tuple(R.Tensor((1, 3, 20, 20), dtype="float32")) = (lv,)
-                R.output(gv)
-            return gv
-
-    @tvm.script.ir_module
-    class expected_size:
-        @R.function
-        def main(input_1: R.Tensor((1, 3, 10, 10), dtype="float32")) -> R.Tuple(
-            R.Tensor((1, 3, 20, 20), dtype="float32")
-        ):
-            with R.dataflow():
-                lv: R.Tensor((1, 3, 20, 20), dtype="float32") = R.image.resize2d(
-                    input_1,
-                    size=(20, 20),
-                    layout="NCHW",
-                    method="nearest_neighbor",
-                    coordinate_transformation_mode="half_pixel",
-                )
-                gv: R.Tuple(R.Tensor((1, 3, 20, 20), dtype="float32")) = (lv,)
-                R.output(gv)
-            return gv
-
-    verify_model(UpsampleNearest2dScale(), example_args, {}, expected_scale)
-    verify_model(UpsampleNearest2dSize(), example_args, {}, expected_size)
-
-
 def test_from_exported_program_sparse_csr_buffer():
     class SparseCsrBufferModule(nn.Module):
         def __init__(self):
@@ -9011,6 +8825,48 @@ def test_from_exported_program_sparse_csr_buffer():
     exported_program = export(model, (x,))
     mod = from_exported_program(exported_program)
     assert isinstance(mod, tvm.IRModule)
+
+
+@pytest.mark.skipif(not env.has_llvm(), reason="need llvm")
+@pytest.mark.parametrize("with_message,in_cond", [(False, False), (True, False), (True, True)])
+def test_assert_async(with_message, in_cond):
+    class AssertAsync(Module):
+        def forward(self, x):
+            def checked(value):
+                if with_message:
+                    torch.ops.aten._assert_async.msg(
+                        value.clamp(min=0), assert_msg="Positive required: {value}"
+                    )
+                else:
+                    torch.ops.aten._assert_async.default(value)
+                return value.clone()
+
+            if in_cond:
+                return torch.cond(x >= 0, checked, lambda value: value.clone(), (x,))
+            return checked(x)
+
+    # Also cover non-boolean conditions and one-element, non-scalar tensors.
+    example_args = (torch.tensor(0.5) if with_message else torch.tensor([True]),)
+    model = AssertAsync()
+    # PyTorch's decomposition removes the message-less overload.
+    mod = from_exported_program(export(model, args=example_args), run_ep_decomposition=with_message)
+    assert not mod["main"].is_pure
+    vm = relax.VirtualMachine(relax.build(mod, target="llvm"), tvm.cpu())
+    actual = vm["main"](tvm.runtime.tensor(example_args[0].numpy()))
+    np.testing.assert_array_equal(actual[0].numpy(), model(*example_args).numpy())
+
+    invalid = torch.zeros_like(example_args[0])
+    with pytest.raises(RuntimeError):
+        model(invalid)
+    message = "Positive required: [{]value[}]" if with_message else "Assertion Failed"
+    with pytest.raises(AssertionError, match=message):
+        vm["main"](tvm.runtime.tensor(invalid.numpy()))
+
+    if in_cond:
+        # The unchecked branch must not execute the other branch's assertion.
+        negative = -example_args[0]
+        actual = vm["main"](tvm.runtime.tensor(negative.numpy()))
+        np.testing.assert_array_equal(actual[0].numpy(), model(negative).numpy())
 
 
 def test_cond_basic():

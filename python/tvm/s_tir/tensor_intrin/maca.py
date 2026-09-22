@@ -19,8 +19,9 @@
 
 from typing import Literal
 
+from tvm.s_tir import TensorIntrin
 from tvm.script import tirx as T
-from tvm.tirx import Cast, IntImm, TensorIntrin
+from tvm.tirx import Cast, IntImm
 from tvm.tirx.function import PrimFunc
 
 ######## WMMA intrinsics ########

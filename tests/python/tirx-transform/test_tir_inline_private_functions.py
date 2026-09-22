@@ -26,7 +26,7 @@ from tvm.script import tirx as T
 class BaseTestCase:
     def test_well_formed(self):
         After = tvm.tirx.transform.InlinePrivateFunctions()(self.Before)
-        tvm.tirx.analysis.verify_well_formed(After)
+        tvm.s_tir.analysis.verify_well_formed(After)
 
     def test_produces_expected(self):
         After = tvm.tirx.transform.InlinePrivateFunctions()(self.Before)

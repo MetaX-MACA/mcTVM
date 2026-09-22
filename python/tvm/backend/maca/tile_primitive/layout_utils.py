@@ -20,7 +20,7 @@ import functools
 import math
 import operator
 
-from tvm.arith import Analyzer
+from tvm.sym import Analyzer
 from tvm.tirx.layout import ComposeLayout, S, TileLayout
 
 

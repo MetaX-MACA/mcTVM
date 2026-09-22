@@ -23,8 +23,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from tvm.ir import TensorRegion as BufferRegion
 from tvm.ir.expr import Expr
-from tvm.tirx import BufferRegion, TilePrimitiveCall
+from tvm.tirx import TilePrimitiveCall
 
 
 @dataclass
@@ -41,7 +42,7 @@ class SrcSpec:
 
     @property
     def buffer(self):
-        return self.buf_region.buffer if self.buf_region is not None else None
+        return self.buf_region.source if self.buf_region is not None else None
 
 
 @dataclass

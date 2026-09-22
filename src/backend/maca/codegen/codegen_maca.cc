@@ -23,9 +23,9 @@
 
 #include "codegen_maca.h"
 
-#include <tvm/arith/analyzer.h>
 #include <tvm/ffi/function.h>
 #include <tvm/runtime/logging.h>
+#include <tvm/sym/analyzer.h>
 #include <tvm/tirx/index_map.h>
 #include <tvm/tirx/stmt_functor.h>
 
@@ -192,7 +192,7 @@ void CodeGenMACA::Init(bool output_ssa) {
 
 void CodeGenMACA::PreFunctionBody(const PrimFunc& f) {
   VisitPipelineCommitQueueScope visitor;
-  visitor(f->body);
+  visitor.Visit(f->body);
   this->cp_async_remain_nums = visitor.total_cp_async_nums;
   for (auto& pair : this->mcDummyRetNum) {
     pair.second = 0;
@@ -233,22 +233,22 @@ void CodeGenMACA::PrintFunctionSignature(const ffi::String& function_name, const
   CodeGenC::PrintFunctionSignature(function_name, func, os);
 }
 
-class ThreadIdxExtractor : public tirx::StmtVisitor {
+class ThreadIdxExtractor : public tirx::StmtExprVisitor {
  private:
-  void VisitStmt_(const AttrStmtNode* op) final {
+  ffi::Optional<VisitInterrupt> Visit_(const AttrStmtNode* op) final {
     if (op->attr_key == tirx::attr::thread_extent) {
       IterVar iv = op->node.as_or_throw<IterVar>();
       if (iv->var->name == "threadIdx.x" || iv->thread_tag == "threadIdx.x") {
-        threadIdx_x_ext = op->value;
+        threadIdx_x_ext = op->value.as_or_throw<PrimExpr>();
       }
       if (iv->var->name == "threadIdx.y" || iv->thread_tag == "threadIdx.y") {
-        threadIdx_y_ext = op->value;
+        threadIdx_y_ext = op->value.as_or_throw<PrimExpr>();
       }
       if (iv->var->name == "threadIdx.z" || iv->thread_tag == "threadIdx.z") {
-        threadIdx_z_ext = op->value;
+        threadIdx_z_ext = op->value.as_or_throw<PrimExpr>();
       }
     }
-    StmtVisitor::VisitStmt_(op);
+    return tirx::StmtExprVisitor::Visit_(op);
   }
 
  public:
@@ -259,8 +259,8 @@ class ThreadIdxExtractor : public tirx::StmtVisitor {
 
 void CodeGenMACA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
   ThreadIdxExtractor extractor;
-  extractor(f->body);
-  arith::Analyzer analyzer;
+  extractor.Visit(f->body);
+  sym::Analyzer analyzer;
   PrimExpr threadIdx_ext = analyzer->Simplify(
       extractor.threadIdx_x_ext * extractor.threadIdx_y_ext * extractor.threadIdx_z_ext);
   if (const IntImmNode* const threadIdx_ext_int = threadIdx_ext.as<IntImmNode>()) {
@@ -564,11 +564,12 @@ struct __align__(16) fp8_e8x16_t {
   return CodeGenC::Finish();
 }
 
-void CodeGenMACA::VisitStmt_(const tirx::ForNode* op) {
+void CodeGenMACA::Dispatch_(const tirx::ForNode* op) {
   // Materialize loop bounds before the pragma, because PrintExpr may emit
   // temporaries and MACA requires the pragma to immediately precede its loop.
   std::string begin_str = PrintExpr(op->min);
-  PrimExpr end = is_zero(op->min) ? op->extent : arith::Analyzer()->Simplify(op->min + op->extent);
+  PrimExpr end =
+      prim::is_zero(op->min) ? op->extent : sym::Analyzer()->Simplify(op->min + op->extent);
   std::string end_str = PrintExpr(end);
   std::string step_str = op->step.has_value() ? PrintExpr(*op->step) : "";
   if (op->annotations.count("disable_unroll")) {
@@ -605,9 +606,9 @@ void CodeGenMACA::VisitStmt_(const tirx::ForNode* op) {
   stream << "}\n";
 }
 
-void CodeGenMACA::VisitStmt_(const ReturnNode* op) {
+void CodeGenMACA::Dispatch_(const ReturnNode* op) {
   if (!in_kernel_launch_) {
-    CodeGenC::VisitStmt_(op);
+    CodeGenC::Dispatch_(op);
     return;
   }
   const auto* value = op->value.as<IntImmNode>();
@@ -617,7 +618,7 @@ void CodeGenMACA::VisitStmt_(const ReturnNode* op) {
   stream << "return;\n";
 }
 
-void CodeGenMACA::VisitStmt_(const DeclBufferNode* op) {
+void CodeGenMACA::Dispatch_(const DeclBufferNode* op) {
   auto data = op->buffer.get();
   ffi::String data_scope = op->buffer.scope();
   if (data_scope == "shared.dyn") {
@@ -630,7 +631,7 @@ void CodeGenMACA::VisitStmt_(const DeclBufferNode* op) {
       shd_aligns[data_name] = buffer_alignment;
     }
   }
-  CodeGenC::VisitStmt_(op);
+  CodeGenC::Dispatch_(op);
 }
 
 void CodeGenMACA::BindThreadIndex(const IterVar& iv) {
@@ -1029,7 +1030,7 @@ void CodeGenMACA::PrintVecElemStore(const std::string& vec, const PrimType& t, i
 }
 
 void CodeGenMACA::PrintStorageSync(const CallNode* op) {
-  const std::string& sync = op->args[0].as<prim::StringImmNode>()->value;
+  const std::string& sync = op->args[0].as<StringImmNode>()->value;
   if (sync == "warp") {
     // DO nothing.
   } else if (sync == "shared" || sync == "shared.dyn") {
@@ -1107,7 +1108,7 @@ void CodeGenMACA::AddUtilFunction(const std::string& func_name, const std::strin
   this->util_funcs_.insert({func_name, code});
 }
 
-void CodeGenMACA::VisitExpr_(const prim::CastNode* op, std::ostream& os) {
+void CodeGenMACA::Dispatch_(const prim::CastNode* op, std::ostream& os) {
   PrimType from_ty = op->value.ty();
   PrimType target_ty = op->ty.as_or_throw<PrimType>();
   TVM_FFI_ICHECK_EQ(target_ty.lanes(), from_ty.lanes());
@@ -1135,7 +1136,7 @@ void CodeGenMACA::VisitExpr_(const prim::CastNode* op, std::ostream& os) {
   }
 
   // Emit simple C-style type conversion.
-  if (from_ty.IsScalar()) return CodeGenC::VisitExpr_(op, os);
+  if (from_ty.IsScalar()) return CodeGenC::Dispatch_(op, os);
 
   if (IsFloat8(target_ty) || IsFloat8(from_ty)) {
     std::ostringstream val;
@@ -1233,7 +1234,7 @@ void CodeGenMACA::PrintCallExtern(Type ret_type, ffi::String global_symbol,
     CodeGenC::PrintCallExtern(ret_type, global_symbol, args, skip_first_arg, os);
   }
 }
-void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
+void CodeGenMACA::Dispatch_(const CallNode* op, std::ostream& os) {
   auto print_maca_func_call = [&](const CallNode* op, std::ostream& os) {
     TVM_FFI_ICHECK_GE(op->args.size(), 2U);
     size_t num_args = op->args.size() - 2;
@@ -1241,8 +1242,8 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
     for (size_t i = 1; i < num_args + 1; i++) {
       args.push_back(this->PrintExpr(op->args[i]));
     }
-    std::string source_code = op->args[num_args + 1].as<prim::StringImmNode>()->value;
-    std::string func_name = op->args[0].as<prim::StringImmNode>()->value;
+    std::string source_code = op->args[num_args + 1].as<StringImmNode>()->value;
+    std::string func_name = op->args[0].as<StringImmNode>()->value;
     os << func_name << "(";
     for (size_t i = 0; i < num_args; i++) {
       const auto& arg = args[i];
@@ -1322,7 +1323,7 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->PrintExpr(op->args[4], os);
     os << "], ";
     this->PrintExpr(op->args[6], os);
-    if (const prim::StringImmNode* str = op->args[7].as<prim::StringImmNode>()) {
+    if (const StringImmNode* str = op->args[7].as<StringImmNode>()) {
       os << ", mxmaca::wmma::mem_" << str->value;
     } else {
       LOG(FATAL) << "Invalid parameters";
@@ -1360,9 +1361,9 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
           << "print_buffer expects buffer_data to project a BufferVar";
     }
     PrimType dtype_ty = op->ty.as_or_throw<PrimType>();
-    bool is_string = op->args[2].as<IntImmNode>()->value;
-    bool is_scalar = op->args[3].as<IntImmNode>()->value;
-    int num_dims = op->args[4].as<IntImmNode>()->value;
+    bool is_string = op->args[2].as<IntImmNode>()->value.as<bool>().value();
+    bool is_scalar = op->args[3].as<IntImmNode>()->value.as<bool>().value();
+    int num_dims = op->args[4].as<IntImmNode>()->value.as<int>().value();
 
     TVM_FFI_ICHECK(!(is_string && is_scalar)) << "Cannot have both is_string and is_scalar true";
     if (is_string) {
@@ -1501,24 +1502,24 @@ void CodeGenMACA::VisitExpr_(const CallNode* op, std::ostream& os) {
   } else if (op->op.same_as(builtin::thread_return())) {
     os << "return";
   } else {
-    CodeGenC::VisitExpr_(op, os);
+    CodeGenC::Dispatch_(op, os);
   }
 }
 
-void CodeGenMACA::VisitStmt_(const AttrStmtNode* op) {
+void CodeGenMACA::Dispatch_(const AttrStmtNode* op) {
   if (op->attr_key == s_tir::attr::fragment_shape) {
     const VarNode* buffer = op->node.as<VarNode>();
-    const prim::StringImmNode* shape_str = op->value.as<prim::StringImmNode>();
+    const StringImmNode* shape_str = op->value.as<StringImmNode>();
     fragment_shapes[buffer] = shape_str->value;
   } else if (op->attr_key == s_tir::attr::fragment_layout) {
     const VarNode* buffer = op->node.as<VarNode>();
-    const prim::StringImmNode* layout_str = op->value.as<prim::StringImmNode>();
+    const StringImmNode* layout_str = op->value.as<StringImmNode>();
     fragment_layouts[buffer] = layout_str->value;
   } else if (op->attr_key == s_tir::attr::async_commit_queue_scope) {
     const IntImmNode* queue_id = op->value.as<IntImmNode>();
     TVM_FFI_ICHECK(queue_id && queue_id->value == 0)
         << "For MACA, the index of an async queue must be 0.";
-    this->VisitStmt(op->body);
+    this->PrintStmt(op->body);
     return;
   } else if (op->attr_key == s_tir::attr::async_wait_queue_scope) {
     auto wait_attrs = GetAsyncWaitAttributes(op);
@@ -1547,12 +1548,12 @@ void CodeGenMACA::VisitStmt_(const AttrStmtNode* op) {
     }
     auto inner = op->body.as<AttrStmtNode>();
     TVM_FFI_ICHECK(inner);
-    this->VisitStmt(inner->body);
+    this->PrintStmt(inner->body);
     return;
   } else if (op->attr_key == "disable_unroll") {
     PrintIndent();
     stream << "#pragma unroll 1\n";
-    this->VisitStmt(op->body);
+    this->PrintStmt(op->body);
     return;
   } else if (op->attr_key == "pragma_unroll") {
     PrintIndent();
@@ -1561,13 +1562,13 @@ void CodeGenMACA::VisitStmt_(const AttrStmtNode* op) {
       stream << " " << count->value;
     }
     stream << "\n";
-    this->VisitStmt(op->body);
+    this->PrintStmt(op->body);
     return;
   }
-  CodeGenC::VisitStmt_(op);
+  CodeGenC::Dispatch_(op);
 }
 
-void CodeGenMACA::VisitStmt_(const AllocBufferNode* op) {
+void CodeGenMACA::Dispatch_(const AllocBufferNode* op) {
   TVM_FFI_ICHECK(op->buffer.defined());
   std::string vid = AllocVarID(op->buffer.get());
 
@@ -1600,7 +1601,7 @@ void CodeGenMACA::VisitStmt_(const AllocBufferNode* op) {
     auto anno_it = op->annotations.find(tirx::attr::buffer_data_alignment);
     if (anno_it != op->annotations.end()) {
       if (const auto* n = (*anno_it).second.as<IntImmNode>()) {
-        align = n->value;
+        align = n->value.as<int>().value();
       }
     }
     auto shd_it = shd_aligns.find(vid);
@@ -1628,7 +1629,7 @@ void CodeGenMACA::VisitStmt_(const AllocBufferNode* op) {
     for (const auto& dim : op->buffer->shape) {
       const IntImmNode* dim_imm = dim.as<IntImmNode>();
       TVM_FFI_ICHECK(dim_imm) << "Can only handle constant size stack allocation for now";
-      constant_size *= dim_imm->value;
+      constant_size *= dim_imm->value.as<size_t>().value();
     }
     TVM_FFI_ICHECK_GT(constant_size, 0) << "Can only handle constant size stack allocation for now";
 
@@ -1650,8 +1651,8 @@ void CodeGenMACA::VisitStmt_(const AllocBufferNode* op) {
   }
 }
 
-void CodeGenMACA::VisitStmt_(const EvaluateNode* op) {
-  if (auto value = op->value.as<PrimExpr>(); value && is_const_int(value.value())) return;
+void CodeGenMACA::Dispatch_(const EvaluateNode* op) {
+  if (auto value = op->value.as<PrimExpr>(); value && prim::is_const_int(value.value())) return;
   const CallNode* call = op->value.as<CallNode>();
   if (call && call->op.same_as(builtin::tvm_global_barrier_kinit())) {
     PrintIndent();
@@ -1663,11 +1664,11 @@ void CodeGenMACA::VisitStmt_(const EvaluateNode* op) {
     PrintIndent();
     stream << "}\n";
   } else {
-    CodeGenC::VisitStmt_(op);
+    CodeGenC::Dispatch_(op);
   }
 }
 
-void CodeGenMACA::VisitExpr_(const prim::RampNode* op, std::ostream& os) {
+void CodeGenMACA::Dispatch_(const prim::RampNode* op, std::ostream& os) {
   PrimType op_ty = op->ty.as_or_throw<PrimType>();
   int lanes = op_ty.lanes();
   TVM_FFI_ICHECK_LE(lanes, 4) << "ValueError: Ramp of more than 4 lanes is not allowed.";
@@ -1681,14 +1682,14 @@ void CodeGenMACA::VisitExpr_(const prim::RampNode* op, std::ostream& os) {
   os << ")";
 }
 
-void CodeGenMACA::VisitExpr_(const prim::BroadcastNode* op, std::ostream& os) {  // NOLINT(*)
+void CodeGenMACA::Dispatch_(const prim::BroadcastNode* op, std::ostream& os) {  // NOLINT(*)
   PrimType op_ty = op->ty.as_or_throw<PrimType>();
   int lanes = op_ty.lanes();
   if (IsIntOrUInt(op_ty) && op_ty.bits() == 8) {
     bool fail = false;
-    const int64_t* p = as_const_int(op->value);
-    TVM_FFI_ICHECK(p);
-    int64_t v = *p & 0xFF;
+    const auto* imm = op->value.as<IntImmNode>();
+    TVM_FFI_ICHECK(imm);
+    int64_t v = imm->value.as<int64_t>().value() & 0xFF;
     v = (v << 24) | (v << 16) | (v << 8) | v;
     if (lanes == 4) {
       // make_int8x4
@@ -1807,9 +1808,9 @@ void CodeGenMACA::VisitExpr_(const prim::BroadcastNode* op, std::ostream& os) { 
 
   if (IsIntOrUInt(op_ty) && op_ty.bits() == 4) {
     bool fail = false;
-    const int64_t* p = as_const_int(op->value);
-    TVM_FFI_ICHECK(p);
-    int64_t v = *p & 0xF;
+    const auto* imm = op->value.as<IntImmNode>();
+    TVM_FFI_ICHECK(imm);
+    int64_t v = imm->value.as<int64_t>().value() & 0xF;
 
     if (lanes == 4) {
       v = (v << 12) | (v << 8) | (v << 4) | v;
@@ -1858,11 +1859,11 @@ void CodeGenMACA::VisitExpr_(const prim::BroadcastNode* op, std::ostream& os) { 
   os << ')';
 }
 
-void CodeGenMACA::VisitExpr_(const prim::SelectNode* op, std::ostream& os) {
+void CodeGenMACA::Dispatch_(const prim::SelectNode* op, std::ostream& os) {
   PrimType op_ty = op->ty.as_or_throw<PrimType>();
   // Non-vector cases.
   if (!op_ty.IsFixedLengthVector()) {
-    CodeGenC::VisitExpr_(op, os);
+    CodeGenC::Dispatch_(op, os);
     return;
   }
 
@@ -1971,7 +1972,7 @@ inline void PrintConst(const FloatImmNode* op, std::ostream& os, CodeGenMACA* p)
   }
 }
 
-void CodeGenMACA::VisitExpr_(const FloatImmNode* op, std::ostream& os) {  // NOLINT(*)
+void CodeGenMACA::Dispatch_(const FloatImmNode* op, std::ostream& os) {  // NOLINT(*)
   PrintConst(op, os, this);
 }
 

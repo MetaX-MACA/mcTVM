@@ -25,7 +25,7 @@ same algorithm to pick a vec-isolating + thread-distributing layout for
 to call, allowed vec widths). All the layout/partition logic lives here.
 """
 
-from tvm import arith
+from tvm import sym
 from tvm.tirx.layout import ComposeLayout, Iter, TileLayout
 from tvm.tirx.operator.tile_primitive.registry import DispatchContext
 
@@ -34,7 +34,7 @@ from ..layout_utils import strip_swizzle_to_tile
 
 def _alignment_ok(vec_len: int, terms) -> bool:
     """Every term must be a multiple of ``vec_len``. Constants checked
-    directly; PrimExpr / symbolic terms checked via ``arith.Analyzer``.
+    directly; PrimExpr / symbolic terms checked via ``sym.Analyzer``.
 
     ``vec_len=1`` always passes (the scalar fallback). When a symbolic
     term can't be proved divisible, returns ``False`` conservatively —
@@ -42,7 +42,7 @@ def _alignment_ok(vec_len: int, terms) -> bool:
     """
     if vec_len <= 1:
         return True
-    analyzer = arith.Analyzer()
+    analyzer = sym.Analyzer()
     for t in terms:
         if isinstance(t, int):
             if t % vec_len != 0:
@@ -319,7 +319,7 @@ def _vec_len_candidates(elem_bits: int, allowed_bits: tuple | None = None) -> li
 
 def _extract_tile(layout, region):
     """Strip swizzle so we can perm/group as a TileLayout."""
-    analyzer = arith.Analyzer()
+    analyzer = sym.Analyzer()
     return strip_swizzle_to_tile(
         layout, lambda: [int(analyzer.simplify(end - start)) for (start, end) in region]
     )

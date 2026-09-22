@@ -27,8 +27,8 @@ import functools
 import operator
 from typing import Any
 
-from tvm.arith.analyzer import Analyzer
 from tvm.script import tirx as T
+from tvm.sym.analyzer import Analyzer
 from tvm.tirx import BufferRegion, PrimFunc, TilePrimitiveCall
 from tvm.tirx.layout import TileLayout, laneid
 from tvm.tirx.operator.tile_primitive import DispatchContext
@@ -118,7 +118,7 @@ def _full_wave_active(sctx: DispatchContext) -> tuple[bool, str | None]:
 
 def _is_full_buffer_region(buffer_region: BufferRegion) -> bool:
     """Check whether a region covers every logical element of its buffer."""
-    buffer = buffer_region.buffer
+    buffer = buffer_region.source
     if len(buffer_region.region) != len(buffer.shape):
         return False
     analyzer = Analyzer()
@@ -174,7 +174,7 @@ def validate_reduction_local(
         return False, "expected MACA target"
     op = TilePrimitiveCall.downcast(op)
     dst_br, src_br = op.output, op.input
-    dst, src = dst_br.buffer, src_br.buffer
+    dst, src = dst_br.source, src_br.source
     if not (src.scope() == "local" and dst.scope() == "local"):
         return False, "expected local scope for both src and dst"
     if src.dtype != dst.dtype:
@@ -241,7 +241,7 @@ def _emit_reduction_local_thread(
     reduce_dims: list[int],
     spatial_dims: list[int],
 ) -> PrimFunc:
-    dst, src = dst_br.buffer, src_br.buffer
+    dst, src = dst_br.source, src_br.source
     src_st, src_extent = get_st_extent(src_br)
     dst_st, dst_extent = get_st_extent(dst_br)
     spatial_extents = [src_extent[dim] for dim in spatial_dims]
@@ -297,7 +297,7 @@ def _emit_reduction_local_view(
     dst_local_info,
     shuffle_masks: list[int],
 ) -> PrimFunc:
-    dst, src = dst_br.buffer, src_br.buffer
+    dst, src = dst_br.source, src_br.source
     src_local_shape, src_local_st, src_local_extent = src_local_info
     dst_local_shape, dst_local_st, dst_local_extent = dst_local_info
     src_dim_map = _build_local_dim_map(src.layout, list(src.shape))
@@ -398,7 +398,7 @@ def reduction_local_impl(
             dst_br, src_br, accum, op_type, reduce_dims, spatial_dims
         )
 
-    src, dst = src_br.buffer, dst_br.buffer
+    src, dst = src_br.source, dst_br.source
     shuffle_info = (
         _analyze_shuffle_reduce(src.layout, dst.layout)
         if _can_use_shuffle_fast_path(src_br, dst_br)

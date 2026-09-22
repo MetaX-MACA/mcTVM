@@ -134,11 +134,15 @@ def test_return_stmt_functor_traversal_and_mutation():
     stmt = tirx.Return(x + 1, span)
     visited = []
 
-    tirx.stmt_functor.post_order_visit(stmt, visited.append)
+    tvm_ffi.structural_walk(stmt, visited.append)
     assert any(node.same_as(x) for node in visited)
     assert any(isinstance(node, tirx.Return) for node in visited)
 
-    rewritten = tirx.stmt_functor.substitute(stmt, {x: tirx.IntImm("int32", 4)})
+    rewritten = tvm_ffi.structural_map(
+        stmt,
+        (tirx.Var, lambda var: tirx.IntImm("int32", 4) if var.same_as(x) else var),
+        order="post",
+    )
     expected = tirx.Return(tirx.Add(tirx.IntImm("int32", 4), tirx.IntImm("int32", 1)), span)
     tvm.ir.assert_structural_equal(rewritten, expected)
     assert rewritten.span.same_as(span)
@@ -226,7 +230,7 @@ def test_eq_ops():
         assert a != None
     with pytest.raises(ValueError):
         assert not a == None
-    b = tirx.StringImm("abc")
+    b = tvm.ir.StringImm("abc")
     assert b != None
     assert not b == None
 

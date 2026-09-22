@@ -67,9 +67,9 @@ def is_smem_ewise(spec):
         if msg is not None or plan is None:
             return False, msg
         for br in buffer_regions(plan):
-            if not br.buffer.scope().startswith("shared"):
-                return False, f"operand scope {br.buffer.scope()} != shared*"
-            if br.buffer.layout is None:
+            if not br.source.scope().startswith("shared"):
+                return False, f"operand scope {br.source.scope()} != shared*"
+            if br.source.layout is None:
                 return False, "shared operand has no layout"
         if spec.check_extras is not None:
             ok, reason = spec.check_extras(plan.extras, compute_dtype_of(plan))
@@ -107,7 +107,7 @@ def emit_smem(op_call: TilePrimitiveCall, spec, sctx: DispatchContext) -> PrimFu
         fail("shared elementwise currently requires 1D threadIdx")
 
     total = n_elements(plan.dst)
-    dst_buf = plan.dst.buffer
+    dst_buf = plan.dst.source
     dst_start, dst_extent = get_st_extent(plan.dst)
     dst_dtype = dst_buf.dtype
     n_outer = (total + thread_cnt - 1) // thread_cnt

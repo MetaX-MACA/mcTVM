@@ -24,6 +24,7 @@ import pytest
 import tvm
 import tvm.testing
 from tvm import te
+from tvm.s_tir import TensorIntrin
 from tvm.s_tir.tensor_intrin.maca import (
     get_wmma_intrin_group,
     shared_16x16_to_local_64x4_layout_A,
@@ -32,7 +33,6 @@ from tvm.s_tir.tensor_intrin.maca import (
 )
 from tvm.testing import env
 from tvm.testing.tir import mfma_schedule
-from tvm.tirx import TensorIntrin
 
 
 @pytest.mark.parametrize(

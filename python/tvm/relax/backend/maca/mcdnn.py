@@ -87,6 +87,13 @@ def _check_stacked_attention(context: PatternCheckContext, layout: str) -> bool:
                 return False
     else:
         raise NotImplementedError(f"Unsupported layout: {layout}")
+    if context.annotated_expr["stacked_qkv"].ty.dtype != "float16":
+        return False
+    attention = context.annotated_expr["attention"]
+    if attention.attrs.causal_mask is not None:
+        return False
+    if attention.attrs.window_size is not None:
+        return False
     return True
 
 
@@ -211,8 +218,10 @@ class WorkspaceAnnotator(PyExprMutator):
             out_dtype = f.ret_ty.dtype
             out_size_1d = _shape_1d(f.ret_ty.shape)
             # This needs to be in sync with the actual value that the kernel expects.
-            workspace_size_bytes = out_size_1d * {"float16": 2, "float32": 4}[out_dtype]
-            if not isinstance(workspace_size_bytes, int | tvm.tirx.expr.IntImm):
+            workspace_size_bytes = out_size_1d * tvm.DataType(out_dtype).itemsize
+            try:
+                workspace_size_bytes = int(workspace_size_bytes)
+            except (TypeError, ValueError):
                 # Tempororay workaround for dynamic shape workload. Will be removed when
                 # workspace for dynamic shape workload is implemented.
                 workspace_size_bytes = 8
