@@ -40,6 +40,11 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import R, S, TileLayout, laneid
 
+pytestmark = pytest.mark.skipif(
+    not env.has_maca_arch("xcore1000"),
+    reason="requires MACA xcore1000",
+)
+
 MMA_M = 16
 MMA_N = 16
 MMA_K = 16
