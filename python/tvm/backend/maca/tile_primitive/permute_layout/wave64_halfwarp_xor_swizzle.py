@@ -332,13 +332,18 @@ def _impl(op_call, sctx):
             buf_idx[iter_buf_dims[bi]] = st_list[iter_buf_dims[bi]] + flat
         return tuple(buf_idx)
 
-    tid_x = sctx.launch_params["threadIdx.x"]
     dtype = src_buf.dtype
 
     # fmt: off
-    @T.prim_func
+    # The dispatcher returns a private helper whose buffer and loop variables
+    # are captured from the call site; TilePrimitiveDispatch inlines it before
+    # final well-formedness verification.
+    @T.prim_func(check_well_formed=False)
     def impl():
-        lane_id = T.meta_var(tid_x % WAVE_SIZE)
+        # Re-declare the deferred lane scope in the private helper.  The
+        # dispatch pass inlines this function into the caller and resolves
+        # the deferred extent to the caller's Wave64 lane binding.
+        lane_id = T.lane_id()
         regs = T.alloc_buffer((P,), dtype, scope="local")
         # Only the first consecutive 32-lane cohort issues memory operations.
         # XOR changes register-slot order per lane without changing the set of
