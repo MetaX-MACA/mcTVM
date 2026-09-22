@@ -76,7 +76,8 @@ import math
 
 from tvm.runtime import DataType
 from tvm.script import tirx as T
-from tvm.tirx import BufferRegion, IntImm, PrimFunc, is_buffer_var
+from tvm.ir import TensorRegion
+from tvm.tirx import IntImm, PrimFunc, is_buffer_var
 from tvm.tirx.layout import TileLayout, _flatten_coord
 from tvm.tirx.operator.tile_primitive import DispatchContext, fail, register_dispatch
 from tvm.tirx.tile_primitive import TilePrimitiveCall
@@ -92,13 +93,13 @@ SMEM_BANK_BYTES = 4
 
 
 def _as_buffer_and_region(arg):
-    """Normalize a Buffer or BufferRegion to (buffer, start_list, extent_list)."""
+    """Normalize a Buffer or TensorRegion to (buffer, start_list, extent_list)."""
     if is_buffer_var(arg):
         buf = arg
         extent = list(buf.ty.shape)
         st = [0] * len(extent)
-    elif isinstance(arg, BufferRegion):
-        buf = arg.buffer
+    elif isinstance(arg, TensorRegion):
+        buf = arg.source
         st, extent = get_st_extent(arg)
     else:
         raise TypeError(f"unexpected permute_layout arg type: {type(arg)}")
