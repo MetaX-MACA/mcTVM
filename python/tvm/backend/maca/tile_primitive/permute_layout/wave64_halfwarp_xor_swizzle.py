@@ -74,9 +74,9 @@ from __future__ import annotations
 
 import math
 
+from tvm.ir import TensorRegion
 from tvm.runtime import DataType
 from tvm.script import tirx as T
-from tvm.ir import TensorRegion
 from tvm.tirx import IntImm, PrimFunc, is_buffer_var
 from tvm.tirx.layout import TileLayout, _flatten_coord
 from tvm.tirx.operator.tile_primitive import DispatchContext, fail, register_dispatch
@@ -177,9 +177,10 @@ def _check_bijection(extent, strides):
 
 
 def _bank_free(extent, strides, dtype_bytes, P, k, active_lanes=ACTIVE_LANES):
-    """Check C500 shared-memory bank uniqueness for one XOR schedule.
+    """Check shared-memory bank uniqueness for one XOR schedule.
 
-    C500 has 32 four-byte banks and services a Wave64 in two 32-lane batches.
+    Shared memory has 32 four-byte banks and services a Wave64 in two
+    32-lane batches.
     ``k`` changes the register-slot order; for multi-byte values every bank
     covered by the element is checked, rather than only its starting bank.
     Partial final slots are ignored because they do not issue a memory access.
@@ -200,8 +201,10 @@ def _bank_free(extent, strides, dtype_bytes, P, k, active_lanes=ACTIVE_LANES):
                     continue
                 idx = _decompose_row_major(flat, extent)
                 off_bytes = _eval_offset(idx, strides) * dtype_bytes
-                banks = range(off_bytes // SMEM_BANK_BYTES,
-                              (off_bytes + dtype_bytes - 1) // SMEM_BANK_BYTES + 1)
+                banks = range(
+                    off_bytes // SMEM_BANK_BYTES,
+                    (off_bytes + dtype_bytes - 1) // SMEM_BANK_BYTES + 1,
+                )
                 for bank in banks:
                     bank %= SMEM_BANKS
                     if bank in seen:
@@ -323,11 +326,23 @@ def analyze_common(op_call, sctx):
 
     active_lanes = min(WAVE_SIZE, 1 << (V - 1).bit_length())
     slots = (V + active_lanes - 1) // active_lanes
-    plan = dict(src_buf=src_buf, dst_buf=dst_buf, src_st=src_st, dst_st=dst_st,
-                src_ext=src_ext_i, dst_ext=dst_ext_i, extent=extent, volume=V,
-                dtype=src_buf.dtype, dtype_bytes=dtype_bytes, active_lanes=active_lanes,
-                slots=slots, src_strides=src_str_, dst_strides=dst_str_,
-                dst_seps=list(dst_seps))
+    plan = dict(
+        src_buf=src_buf,
+        dst_buf=dst_buf,
+        src_st=src_st,
+        dst_st=dst_st,
+        src_ext=src_ext_i,
+        dst_ext=dst_ext_i,
+        extent=extent,
+        volume=V,
+        dtype=src_buf.dtype,
+        dtype_bytes=dtype_bytes,
+        active_lanes=active_lanes,
+        slots=slots,
+        src_strides=src_str_,
+        dst_strides=dst_str_,
+        dst_seps=list(dst_seps),
+    )
     return plan, None
 
 
@@ -336,10 +351,10 @@ def _emit(plan, xor_k=None):
     src_st, dst_st = plan["src_st"], plan["dst_st"]
     src_ext_i, extent = plan["src_ext"], plan["extent"]
     active_lanes, slots = plan["active_lanes"], plan["slots"]
-    src_str_, dst_str_ = plan["src_strides"], plan["dst_strides"]
 
-    # Slice away dimensions outside the call region.  Canonicalization leaves
-    # only the affine shard that describes the logical permutation.
+    # The common analysis has already sliced/canonicalized both layouts and
+    # stored the resulting affine shard in the plan.  Only the optional XOR
+    # parameters are derived here.
     shift = 5 - xor_k if xor_k is not None else 0
     mask = (1 << xor_k) - 1 if xor_k is not None else 0
 
@@ -370,11 +385,14 @@ def _emit(plan, xor_k=None):
         # the deferred extent to the caller's Wave64 lane binding.
         lane_id = T.lane_id()
         regs = T.alloc_buffer((slots,), dtype, scope="local")
-        # Only the first consecutive 32-lane cohort issues memory operations.
-        # XOR changes register-slot order per lane without changing the set of
-        # logical elements covered by the cohort.
+        # Lanes below the plan's active-lane limit issue memory operations.  A
+        # 32-lane plan uses the first service batch; a 64-lane plan uses both
+        # batches.  XOR changes slot order within each batch without changing
+        # the set of logical elements covered by the wave.
         if lane_id < active_lanes:
             for r in T.unroll(0, slots):
+                # Masking lane_id to 5 bits applies the same certified XOR
+                # schedule independently to each 32-lane service batch.
                 j = T.meta_var(r ^ (((lane_id & 31) >> shift) & mask)) if xor_k is not None else r
                 flat = T.meta_var(lane_id + j * active_lanes)
                 if flat < plan["volume"]:
@@ -412,8 +430,14 @@ def permute_layout_xor(op: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc
         fail("XOR variant requires 32-bit elements and 32/64 active lanes")
     if plan["slots"] & (plan["slots"] - 1):
         fail("XOR variant requires a power-of-two slot count")
-    k = _choose_xor_k(plan["extent"], plan["src_strides"], plan["dst_strides"],
-                      4, plan["slots"], plan["active_lanes"])
+    k = _choose_xor_k(
+        plan["extent"],
+        plan["src_strides"],
+        plan["dst_strides"],
+        4,
+        plan["slots"],
+        plan["active_lanes"],
+    )
     if k is None:
         fail("no certified conflict-free XOR schedule")
     return _emit(plan, k)
@@ -430,7 +454,9 @@ def permute_layout_direct(op: TilePrimitiveCall, sctx: DispatchContext) -> PrimF
 @register_dispatch("permute_layout", "maca", variant="wave64_shared_two_batch", priority=25)
 def permute_layout_shared(op: TilePrimitiveCall, sctx: DispatchContext) -> PrimFunc:
     plan = _dispatch_plan(op, sctx)
-    if not (plan["src_buf"].scope().startswith("shared") or plan["dst_buf"].scope().startswith("shared")):
+    if not (
+        plan["src_buf"].scope().startswith("shared") or plan["dst_buf"].scope().startswith("shared")
+    ):
         fail("shared-two-batch variant requires shared storage")
     return _emit(plan)
 
@@ -450,9 +476,9 @@ __all__ = [
     "_decompose_row_major",
     "_eval_offset",
     "analyze_common",
-    "permute_layout_dispatch",
-    "permute_layout_xor",
     "permute_layout_direct",
-    "permute_layout_shared",
+    "permute_layout_dispatch",
     "permute_layout_generic",
+    "permute_layout_shared",
+    "permute_layout_xor",
 ]

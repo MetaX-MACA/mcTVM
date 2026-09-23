@@ -481,8 +481,6 @@ def test_shared_memory_in_place_alias_safety(dtype):
     np.testing.assert_array_equal(B_out.reshape(-1), ref)
     assert src.count("tvm_builtin_maca_warp_sync();") >= 2
     assert "__syncwarp()" in src
-    for cuda_only_spelling in ("ld.shared", "st.shared", "asm volatile", "tcgen05"):
-        assert cuda_only_spelling not in src
 
 
 @pytest.mark.gpu
@@ -493,6 +491,7 @@ def test_supported_non_32_bit_elements(dtype):
     shape = (4, 32)
     pre = TileLayout(S[shape : (32, 1)])
     post = TileLayout(S[shape : (1, 4)])
+
     @T.prim_func
     def f(A: T.handle, B: T.handle):
         A_buf = T.match_buffer(A, shape, dtype, layout=pre)

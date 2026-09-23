@@ -31,9 +31,9 @@ memory path. Source:
 MACA variants
 -------------
 
-MACA C500 registers ``wave64_xor`` (priority 40), ``wave64_direct`` (30),
+MACA registers ``wave64_xor`` (priority 40), ``wave64_direct`` (30),
 ``wave64_shared_two_batch`` (25), and ``wave64_generic`` (10). All require
-``mcpu=xcore1000``, warp scope, a one-dimensional full Wave64 lane range
+warp scope, a one-dimensional full Wave64 lane range
 ``[0, 64)``, equal static slice extents, plain ``TileLayout`` objects, and
 bijective sliced layouts. Element widths of 1, 2, 4, and 8 bytes are supported.
 
@@ -77,7 +77,7 @@ The implementation first builds a common permutation plan:
    * - Property
      - Requirement
    * - target / scope / priority
-     - ``maca``; **warp** scope only; ``xcore1000``; priorities ``40/30/25/10``
+     - ``maca``; **warp** scope only; priorities ``40/30/25/10``
    * - operands
      - equal dtype, equal (compile-time) extents; both plain ``TileLayout`` (no
        swizzle wrapper); dtype byte width ∈ {1, 2, 4, 8}; ordinary typed
@@ -123,7 +123,7 @@ the destination's shape. From the destination shard come the iteration ``extent`
 and the per-side strides ``src_str`` / ``dst_str``. The plan computes
 ``active_lanes`` and ``slots = ceil(volume / active_lanes)``.
 
-**2. Choose a variant.** ``wave64_xor`` simulates both 32-lane C500 service
+**2. Choose a variant.** ``wave64_xor`` simulates both 32-lane service
 batches and chooses the smallest conflict-free XOR schedule. If none exists,
 the direct/shared/generic variants remain eligible.
 
@@ -171,8 +171,8 @@ CUDA reference source
 
 Each lane owns column ``threadIdx.x`` and stages its 4 rows through ``regs``; the
 ``(threadIdx.x >> 3)`` XOR rotates the register order per lane-group of 8 so the
-write phase hits distinct banks. Verified on ``sm_100a`` — the ``4×32`` block is
-transposed for every pipeline stage.
+write phase hits distinct banks and transposes the ``4×32`` block for every
+pipeline stage.
 
 How inputs change the algorithm
 -------------------------------
