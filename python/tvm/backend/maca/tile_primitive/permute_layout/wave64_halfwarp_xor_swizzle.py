@@ -93,7 +93,13 @@ SMEM_BANK_BYTES = 4
 
 
 def _as_buffer_and_region(arg):
-    """Normalize a Buffer or TensorRegion to (buffer, start_list, extent_list)."""
+    """Normalize an operand to ``(buffer, starts, extents)``.
+
+    A bare buffer denotes its complete shape.  A ``TensorRegion`` carries the
+    selected slice explicitly; keeping both forms in the same representation
+    lets the layout analysis use one indexing path for full-buffer and sliced
+    calls.
+    """
     if is_buffer_var(arg):
         buf = arg
         extent = list(buf.ty.shape)
@@ -107,7 +113,11 @@ def _as_buffer_and_region(arg):
 
 
 def _as_int(x):
-    """Return int(x) if x is int-like, else None."""
+    """Extract a Python integer from a static TIR expression.
+
+    Dynamic expressions deliberately return ``None`` so dispatch can reject
+    them before attempting compile-time layout or volume analysis.
+    """
     if isinstance(x, int):
         return x
     if isinstance(x, IntImm):
@@ -121,7 +131,12 @@ def _as_int(x):
 
 
 def _layout_shard_int(layout):
-    """Return (extents, strides) as int lists from a TileLayout's shard, or (None, None)."""
+    """Read a plain ``TileLayout`` shard as integer extents and strides.
+
+    The affine shard is the iteration-space representation used by the bank
+    model and bijection check.  Non-``TileLayout`` wrappers and dynamic fields
+    are reported as ``(None, None)`` for a reasoned dispatcher rejection.
+    """
     if not isinstance(layout, TileLayout):
         return None, None
     extents, strides = [], []
@@ -136,6 +151,7 @@ def _layout_shard_int(layout):
 
 
 def _decompose_row_major(i, extent):
+    """Convert a flattened row-major index into coordinates for ``extent``."""
     out, rem = [], i
     for e in reversed(extent):
         out.append(rem % e)
@@ -144,11 +160,12 @@ def _decompose_row_major(i, extent):
 
 
 def _eval_offset(idx, strides):
+    """Evaluate an affine layout offset in element units."""
     return sum(i * s for i, s in zip(idx, strides))
 
 
 def _check_bijection(extent, strides):
-    """Iteration extents + strides define a bijection on [0, V)?"""
+    """Return whether ``strides`` map every logical point to a unique offset."""
     V = math.prod(extent)
     seen = set()
     for i in range(V):
@@ -160,7 +177,13 @@ def _check_bijection(extent, strides):
 
 
 def _bank_free(extent, strides, dtype_bytes, P, k, active_lanes=ACTIVE_LANES):
-    """Check each 32-lane C500 service batch for bank conflicts."""
+    """Check C500 shared-memory bank uniqueness for one XOR schedule.
+
+    C500 has 32 four-byte banks and services a Wave64 in two 32-lane batches.
+    ``k`` changes the register-slot order; for multi-byte values every bank
+    covered by the element is checked, rather than only its starting bank.
+    Partial final slots are ignored because they do not issue a memory access.
+    """
     if active_lanes not in (32, 64):
         return False
     shift = 5 - k
@@ -188,6 +211,7 @@ def _bank_free(extent, strides, dtype_bytes, P, k, active_lanes=ACTIVE_LANES):
 
 
 def _choose_xor_k(extent, src_strides, dst_strides, dtype_bytes, P, active_lanes=ACTIVE_LANES):
+    """Pick the smallest XOR bit count valid for both load and store layouts."""
     max_k = int(math.log2(P)) if P > 0 else 0
     for k in range(max_k + 1):
         if _bank_free(extent, src_strides, dtype_bytes, P, k, active_lanes) and _bank_free(
@@ -201,6 +225,7 @@ def _choose_xor_k(extent, src_strides, dst_strides, dtype_bytes, P, active_lanes
 
 
 def _gather(op_call):
+    """Extract normalized source and destination operands from a tile call."""
     op_call = TilePrimitiveCall.downcast(op_call)
     dst_arg, src_arg = op_call.args[0], op_call.args[1]
     src_buf, src_st, src_ext = _as_buffer_and_region(src_arg)
@@ -209,6 +234,13 @@ def _gather(op_call):
 
 
 def analyze_common(op_call, sctx):
+    """Build the variant-independent permutation plan.
+
+    This validates target/scope, static matching regions, supported element
+    widths, plain layouts, and layout bijections.  Optimization-specific
+    decisions such as XOR availability are intentionally left to dispatch
+    variants so a valid operation can fall back to the generic path.
+    """
     ok, reason = maca_mcpu_is(op_call, sctx, ("xcore1000",))
     if not ok:
         return None, reason
