@@ -83,26 +83,6 @@ struct MACAFastMath : public MACAMath {
   }
 };
 
-struct MACAFastMathTan : public MACAMath {
-  std::string operator()(const PrimType& t, std::string name) const {
-    if (t.MatchesCode(DLDataTypeCode::kDLFloat)) {
-      switch (t.bits()) {
-        case 64:
-          return name;
-        // `__tanf` seems to produce some values too deviant from numpy tan version.
-        // So, let's use just `tanf` instead.
-        case 32:
-          return name + 'f';
-        case 16:
-          return 'h' + name;
-        default:
-          return "";
-      }
-    }
-    return "";
-  }
-};
-
 struct MACAPopcount {
   std::string operator()(const PrimType& t, std::string name) const {
     if (t.MatchesCode(DLDataTypeCode::kDLUInt)) {
@@ -206,9 +186,10 @@ TVM_REGISTER_OP("tirx.log10")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
 TVM_REGISTER_OP("tirx.tan")
-    // Now the fast math version of tan and the default version of tan are same.
-    .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic",
-                               DispatchPureExtern<MACAFastMathTan>)
+    // `__tanf` drifts too far from the reference tan, so the fast-math slot only ever
+    // reused the precise `tanf`/`tan`/`htan` symbols MACAMath already emits, and it
+    // returned an empty symbol for bfloat16. Route both paths through MACAMath.
+    .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAMath>)
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
 TVM_REGISTER_OP("tirx.cos")
