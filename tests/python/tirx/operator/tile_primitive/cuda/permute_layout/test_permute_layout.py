@@ -54,6 +54,11 @@ from tvm.testing import env
 from tvm.tirx.layout import S, TileLayout
 from tvm.tirx.operator.tile_primitive import list_registered_schedules
 
+pytestmark = pytest.mark.skipif(
+    not env.has_maca_arch("xcore1000"),
+    reason="requires MACA xcore1000",
+)
+
 # ---------------------------------------------------------------------------
 # Algorithm-only tests (no CUDA needed).
 # ---------------------------------------------------------------------------
