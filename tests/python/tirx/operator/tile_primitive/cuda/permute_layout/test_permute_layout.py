@@ -41,24 +41,22 @@ import pytest
 
 import tvm
 import tvm.testing
-from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
-from tvm.testing import env
 
 # Helpers exposed by the dispatcher module for direct algorithm tests.
-from tvm.tirx.cuda.tile_primitive.permute_layout.warp_xor_swizzle import (
+from tvm.backend.maca.tile_primitive.permute_layout.wave64_halfwarp_xor_swizzle import (
     _bank_free,
     _check_bijection,
     _choose_xor_k,
 )
+from tvm.script import tirx as T
+from tvm.script.tirx import tile as Tx
+from tvm.testing import env
 from tvm.tirx.layout import S, TileLayout
+from tvm.tirx.operator.tile_primitive import list_registered_schedules
 
-MACA_XFAIL = pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [tile-primitive-permute-layout] support permute-layout "
-        "copy dispatch and validation"
-    ),
-    strict=False,
+pytestmark = pytest.mark.skipif(
+    not env.has_maca_arch("xcore1000"),
+    reason="requires MACA xcore1000",
 )
 
 # ---------------------------------------------------------------------------
@@ -166,7 +164,7 @@ needs_maca = pytest.mark.skipif(not _has_maca(), reason="needs MACA")
 
 
 def _compile_and_run(prim_func, np_inputs):
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target({"kind": "maca", "mcpu": "xcore1000"})
     with target:
         mod = tvm.IRModule({"main": prim_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -184,7 +182,6 @@ def _compile_and_run(prim_func, np_inputs):
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @needs_maca
-@MACA_XFAIL
 @pytest.mark.parametrize(
     "name, pipe, blk, dtype",
     [
@@ -215,7 +212,8 @@ def test_sf_blockwise_transpose(name, pipe, blk, dtype):
         B_buf = T.match_buffer(B, shape, dtype, layout=post)
         T.device_entry()
         T.cta_id([1])
-        T.thread_id([32])
+        T.warp_id([1])
+        T.lane_id([64])
         for s in T.serial(0, pipe):
             Tx.warp.permute_layout(
                 B_buf[s, 0:high, 0:4, 0:32], A_buf[s, 0:high, 0:4, 0:32]
@@ -228,12 +226,10 @@ def test_sf_blockwise_transpose(name, pipe, blk, dtype):
 
     [_, B_out], src = _compile_and_run(f, [A_np, B_np])
 
-    # The dispatcher must have picked the XOR-swizzled variant; check that
-    # the generated CUDA contains the per-lane XOR pattern.  This is the
-    # "no perf regression" smoke test: any future variant that omits the
-    # XOR would re-introduce 4-way bank conflicts.
-    assert ">> 3" in src, f"expected XOR-swizzle (lane>>3) in CUDA for {name}"
-    assert "warp_sync" in src or "syncwarp" in src
+    # The optimized Wave64 path retains lane-dependent slot arithmetic and
+    # unconditional MACA barriers in the generated source.
+    assert "threadIdx.x" in src and ">>" in src
+    assert "syncwarp" in src
 
     # Byte-for-byte equality via numpy reference.
     for s in range(pipe):
@@ -251,7 +247,6 @@ def test_sf_blockwise_transpose(name, pipe, blk, dtype):
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @needs_maca
-@MACA_XFAIL
 def test_identity_passes_through_as_copy():
     """L_src == L_dst should still compile and produce a correct (identity) copy."""
     shape = (4, 32)
@@ -264,7 +259,8 @@ def test_identity_passes_through_as_copy():
         B_buf = T.match_buffer(B, shape, "uint32", layout=layout)
         T.device_entry()
         T.cta_id([1])
-        T.thread_id([32])
+        T.warp_id([1])
+        T.lane_id([64])
         Tx.warp.permute_layout(B_buf, A_buf)
         # fmt: on
 
@@ -279,7 +275,6 @@ def test_identity_passes_through_as_copy():
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @needs_maca
-@MACA_XFAIL
 @pytest.mark.parametrize("dtype", ["uint32", "int32", "float32"])
 @pytest.mark.parametrize(
     "shape, src_strides, dst_strides",
@@ -302,7 +297,8 @@ def test_generic_transpose(shape, src_strides, dst_strides, dtype):
         B_buf = T.match_buffer(B, shape, dtype, layout=post)
         T.device_entry()
         T.cta_id([1])
-        T.thread_id([32])
+        T.warp_id([1])
+        T.lane_id([64])
         Tx.warp.permute_layout(B_buf, A_buf)
         # fmt: on
 
@@ -329,11 +325,12 @@ def _build_and_assert_rejected(shape, src_layout, dst_layout, dtype, msg_substr)
         B_buf = T.match_buffer(B, shape, dtype, layout=dst_layout)
         T.device_entry()
         T.cta_id([1])
-        T.thread_id([32])
+        T.warp_id([1])
+        T.lane_id([64])
         Tx.warp.permute_layout(B_buf, A_buf)
         # fmt: on
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target({"kind": "maca", "mcpu": "xcore1000"})
     with target, pytest.raises(RuntimeError) as exc_info:
         mod = tvm.IRModule({"main": f})
         tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -342,7 +339,6 @@ def _build_and_assert_rejected(shape, src_layout, dst_layout, dtype, msg_substr)
     )
 
 
-@MACA_XFAIL
 def test_reject_dtype_mismatch():
     shape = (4, 32)
     layout = TileLayout(S[shape : (32, 1)])
@@ -354,17 +350,17 @@ def test_reject_dtype_mismatch():
         B_buf = T.match_buffer(B, shape, "uint16", layout=layout)
         T.device_entry()
         T.cta_id([1])
-        T.thread_id([32])
+        T.warp_id([1])
+        T.lane_id([64])
         Tx.warp.permute_layout(B_buf, A_buf)
         # fmt: on
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target({"kind": "maca", "mcpu": "xcore1000"})
     with target, pytest.raises(RuntimeError) as exc_info:
         tvm.compile(tvm.IRModule({"main": f}), target=target, tir_pipeline="tirx")
     assert "dtype mismatch" in str(exc_info.value)
 
 
-@MACA_XFAIL
 def test_reject_shape_mismatch():
     src_layout = TileLayout(S[(4, 32) : (32, 1)])
     dst_layout = TileLayout(S[(8, 16) : (16, 1)])
@@ -376,17 +372,17 @@ def test_reject_shape_mismatch():
         B_buf = T.match_buffer(B, (8, 16), "uint32", layout=dst_layout)
         T.device_entry()
         T.cta_id([1])
-        T.thread_id([32])
+        T.warp_id([1])
+        T.lane_id([64])
         Tx.warp.permute_layout(B_buf, A_buf)
         # fmt: on
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target({"kind": "maca", "mcpu": "xcore1000"})
     with target, pytest.raises(RuntimeError) as exc_info:
         tvm.compile(tvm.IRModule({"main": f}), target=target, tir_pipeline="tirx")
     assert "shape mismatch" in str(exc_info.value)
 
 
-@MACA_XFAIL
 def test_reject_swizzle_layout():
     """A swizzled ComposeLayout tile is not supported by the warp variant."""
     from tvm.tirx.layout import ComposeLayout
@@ -409,17 +405,17 @@ def test_reject_swizzle_layout():
         B_buf = T.match_buffer(B, (4, 32), "uint32", layout=plain)
         T.device_entry()
         T.cta_id([1])
-        T.thread_id([32])
+        T.warp_id([1])
+        T.lane_id([64])
         Tx.warp.permute_layout(B_buf, A_buf)
         # fmt: on
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target({"kind": "maca", "mcpu": "xcore1000"})
     with target, pytest.raises(RuntimeError) as exc_info:
         tvm.compile(tvm.IRModule({"main": f}), target=target, tir_pipeline="tirx")
     assert "TileLayout" in str(exc_info.value)
 
 
-@MACA_XFAIL
 def test_reject_non_warp_scope():
     layout_pre = TileLayout(S[(4, 32) : (32, 1)])
     layout_post = TileLayout(S[(4, 32) : (1, 4)])
@@ -431,11 +427,12 @@ def test_reject_non_warp_scope():
         B_buf = T.match_buffer(B, (4, 32), "uint32", layout=layout_post)
         T.device_entry()
         T.cta_id([1])
-        T.thread_id([32])
+        T.warp_id([1])
+        T.lane_id([64])
         Tx.cta.permute_layout(B_buf, A_buf)  # cta scope, not warp
         # fmt: on
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target({"kind": "maca", "mcpu": "xcore1000"})
     with target, pytest.raises(RuntimeError) as exc_info:
         tvm.compile(tvm.IRModule({"main": f}), target=target, tir_pipeline="tirx")
     assert "warp" in str(exc_info.value)
@@ -443,8 +440,9 @@ def test_reject_non_warp_scope():
 
 @pytest.mark.parametrize("dtype", ["uint32", "float32"])
 @pytest.mark.gpu
-@MACA_XFAIL
-def test_shared_to_shared_uses_direct_ldst(dtype):
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@needs_maca
+def test_shared_memory_in_place_alias_safety(dtype):
     """Compile-only: a shared->shared 32b transpose must take the direct
     base-ptr + byte-offset ``ld.shared`` / ``st.shared`` path.
 
@@ -467,22 +465,112 @@ def test_shared_to_shared_uses_direct_ldst(dtype):
         B_buf = T.match_buffer(B, shape, dtype, layout=post)
         T.device_entry()
         T.cta_id([1])
-        tid = T.thread_id([32])
-        sA = T.alloc_buffer(shape, dtype, scope="shared", layout=pre)
-        sB = T.alloc_buffer(shape, dtype, scope="shared", layout=post)
-        Tx.cta.copy(sA[:, :], A_buf[:, :])
-        T.cuda.cta_sync()
-        Tx.warp.permute_layout(sB[:, :], sA[:, :])
-        T.cuda.cta_sync()
-        Tx.cta.copy(B_buf[:, :], sB[:, :])
+        T.warp_id([1])
+        T.lane_id([64])
+        storage = T.alloc_buffer((128,), dtype, scope="shared")
+        src_view = T.decl_buffer(shape, dtype, data=storage.data, scope="shared", layout=pre)
+        dst_view = T.decl_buffer(shape, dtype, data=storage.data, scope="shared", layout=post)
+        Tx.cta.copy(src_view[:, :], A_buf[:, :])
+        T.maca.cta_sync()
+        Tx.warp.permute_layout(dst_view[:, :], src_view[:, :])
+        T.maca.cta_sync()
+        Tx.cta.copy(B_buf[:, :], dst_view[:, :])
         # fmt: on
 
-    target = tvm.target.Target("maca")
-    with target:
-        mod = tvm.compile(tvm.IRModule({"main": f}), target=target, tir_pipeline="tirx")
-    src = mod.mod.imports[0].inspect_source()
-    assert "ld.shared" in src, f"expected direct ld.shared in permute; src=\n{src}"
-    assert "st.shared" in src, f"expected direct st.shared in permute; src=\n{src}"
+    np.random.seed(0)
+    A_np = tvm.testing.generate_random_array(dtype, shape)
+    B_np = np.zeros_like(A_np)
+    [_, B_out], src = _compile_and_run(f, [A_np, B_np])
+
+    ref = _expected_permute(A_np.reshape(-1), [32, 1], [1, 4], list(shape))
+    np.testing.assert_array_equal(B_out.reshape(-1), ref)
+    assert src.count("tvm_builtin_maca_warp_sync();") >= 2
+    assert "__syncwarp()" in src
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@needs_maca
+@pytest.mark.parametrize("dtype", ["uint8", "uint16", "uint64"])
+def test_supported_non_32_bit_elements(dtype):
+    shape = (4, 32)
+    pre = TileLayout(S[shape : (32, 1)])
+    post = TileLayout(S[shape : (1, 4)])
+
+    @T.prim_func
+    def f(A: T.handle, B: T.handle):
+        A_buf = T.match_buffer(A, shape, dtype, layout=pre)
+        B_buf = T.match_buffer(B, shape, dtype, layout=post)
+        T.device_entry()
+        T.cta_id([1])
+        T.warp_id([1])
+        T.lane_id([64])
+        Tx.warp.permute_layout(B_buf, A_buf)
+
+    np.random.seed(0)
+    A_np = tvm.testing.generate_random_array(dtype, shape)
+    B_np = np.zeros_like(A_np)
+    [_, B_out], _ = _compile_and_run(f, [A_np, B_np])
+    ref = _expected_permute(A_np.reshape(-1), [32, 1], [1, 4], list(shape))
+    np.testing.assert_array_equal(B_out.reshape(-1), ref)
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@needs_maca
+@pytest.mark.parametrize("volume", [3, 17, 33, 96, 127])
+def test_arbitrary_volume_uses_generic_wave64_path(volume):
+    """Non-power-of-two volumes must use guarded generic staging correctly."""
+    shape = (volume,)
+    layout = TileLayout(S[shape : (1,)])
+
+    @T.prim_func
+    def f(A: T.handle, B: T.handle):
+        A_buf = T.match_buffer(A, shape, "uint16", layout=layout)
+        B_buf = T.match_buffer(B, shape, "uint16", layout=layout)
+        T.device_entry()
+        T.cta_id([1])
+        T.warp_id([1])
+        T.lane_id([64])
+        Tx.warp.permute_layout(B_buf, A_buf)
+
+    np.random.seed(volume)
+    A_np = tvm.testing.generate_random_array("uint16", shape)
+    B_np = np.zeros_like(A_np)
+    [_, B_out], src = _compile_and_run(f, [A_np, B_np])
+    np.testing.assert_array_equal(B_out, A_np)
+    assert "tvm_builtin_maca_warp_sync();" in src
+
+
+def test_permute_layout_schedule_is_registered_for_maca():
+    schedules = list_registered_schedules()
+    assert schedules["tirx.tile.permute_layout"]["maca"] == [
+        "wave64_xor",
+        "wave64_direct",
+        "wave64_shared_two_batch",
+        "wave64_generic",
+    ]
+
+
+def test_reject_unsupported_maca_architecture():
+    shape = (4, 32)
+    pre = TileLayout(S[shape : (32, 1)])
+    post = TileLayout(S[shape : (1, 4)])
+
+    @T.prim_func
+    def f(A: T.handle, B: T.handle):
+        A_buf = T.match_buffer(A, shape, "uint32", layout=pre)
+        B_buf = T.match_buffer(B, shape, "uint32", layout=post)
+        T.device_entry()
+        T.cta_id([1])
+        T.warp_id([1])
+        T.lane_id([64])
+        Tx.warp.permute_layout(B_buf, A_buf)
+
+    target = tvm.target.Target({"kind": "maca", "mcpu": "xcore9999"})
+    with target, pytest.raises(RuntimeError) as exc_info:
+        tvm.compile(tvm.IRModule({"main": f}), target=target, tir_pipeline="tirx")
+    assert "MACA mcpu 'xcore9999' is not one of ('xcore1000',)" in str(exc_info.value)
 
 
 if __name__ == "__main__":
