@@ -110,7 +110,25 @@ TASKS = [
     "scope,n_threads,shape",
     [pytest.param(*t, id=f"{t[0]}-{t[1]}-{'x'.join(map(str, t[2]))}") for t in TASKS],
 )
-@pytest.mark.parametrize("dtype", ["float16", "float32", "uint8"])
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        "float16",
+        "float32",
+        "uint8",
+        "float16x2",
+        "float16x4",
+        "bfloat16x2",
+        "bfloat16x4",
+        "float32x2",
+        "int8x4",
+        "uint8x4",
+        "int16x2",
+        "uint16x2",
+        "int32x2",
+        "uint32x2",
+    ],
+)
 def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
     kernel = _build_kernel(scope, n_threads, shape, dtype)
 
@@ -119,14 +137,15 @@ def test_gmem_smem_roundtrip(scope, n_threads, shape, dtype):
         mod = tvm.IRModule({"main": kernel})
         compiled = tvm.compile(mod, target=target, tir_pipeline="tirx")
 
-    np_dtype = tvm.testing.np_dtype_from_str(dtype)
-    A_np = tvm.testing.generate_random_array(dtype, shape)
-    B_np = np.zeros(shape, dtype=np_dtype)
+    np_dtype = tvm.testing.np_dtype_from_str(dtype.split("x")[0])
+    host_shape = (*shape, tvm.DataType(dtype).lanes) if "x" in dtype else shape
+    A_np = tvm.testing.generate_random_array(np_dtype.name, host_shape)
+    B_np = np.zeros(host_shape, dtype=np_dtype)
 
     def run_and_check():
         dev = tvm.maca(0)
-        A = tvm.runtime.tensor(A_np, dev)
-        B = tvm.runtime.tensor(B_np, dev)
+        A = tvm.runtime.empty(shape, dtype, dev).copyfrom(A_np)
+        B = tvm.runtime.empty(shape, dtype, dev).copyfrom(B_np)
         compiled(A, B)
         np.testing.assert_array_equal(B.numpy(), A_np)
 

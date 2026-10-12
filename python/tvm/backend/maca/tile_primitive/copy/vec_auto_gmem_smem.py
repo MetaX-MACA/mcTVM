@@ -106,7 +106,8 @@ def _emit_gmem_smem(op_call: TilePrimitiveCall, sctx: DispatchContext) -> PrimFu
     g_region = [(r.min, r.min + r.extent) for r in g_br.region]
     s_region = [(r.min, r.min + r.extent) for r in s_br.region]
 
-    elem_bits = DataType(src.dtype).bits
+    dtype = DataType(src.dtype)
+    elem_bits = dtype.bits * dtype.lanes
     thread_cnt = _thread_cnt(sctx)
 
     with sctx.target:
