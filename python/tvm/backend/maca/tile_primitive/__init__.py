@@ -19,4 +19,5 @@ from .copy import *
 from .copy_async import *
 from .elementwise import *
 from .gemm import *
+from .permute_layout import *
 from .reduction import *
