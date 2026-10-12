@@ -27,11 +27,6 @@ from tvm.script import ir as I
 from tvm.script import tirx as T
 from tvm.testing import env
 
-MACA_PTX_ASYNC_COPY_XFAIL_REASON = (
-    "TODO(maca): [ptx-cp-async] support PTX cp.async lowering and MACA capability detection "
-    "for async copy"
-)
-
 
 def test_cp_async_raw_dtype_round_trips():
     # The raw cp.async form emitted by InjectPTXAsyncCopy carries the element
@@ -147,8 +142,7 @@ def ptx_global_to_shared_dyn_copy_fp16x8(
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(reason=MACA_PTX_ASYNC_COPY_XFAIL_REASON, strict=False)
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_inject_async_copy():
     for dtype, vec_size in [("float16", 8), ("float16", 4), ("float32", 4), ("float32", 1)]:
         if vec_size == 1:
@@ -169,13 +163,13 @@ def test_inject_async_copy():
             continue
 
         with tvm.transform.PassContext(config={"tirx.use_async_copy": 1}):
-            mod = tvm.compile(tvm.IRModule.from_expr(f), target="maca")
+            mod = tvm.compile(tvm.IRModule.from_expr(f), target="cuda")
 
         A_np = np.random.rand(32, 128).astype(dtype)
         B_np = np.zeros((32, 128)).astype(dtype)
 
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A_nd = tvm.runtime.tensor(A_np, device=dev)
             B_nd = tvm.runtime.tensor(B_np, device=dev)
             mod(A_nd, B_nd)
@@ -185,8 +179,7 @@ def test_inject_async_copy():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(reason=MACA_PTX_ASYNC_COPY_XFAIL_REASON, strict=False)
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_inject_async_copy_shared_dyn():
     f = ptx_global_to_shared_dyn_copy_fp16x8
 
@@ -203,14 +196,14 @@ def test_inject_async_copy_shared_dyn():
         return
 
     with tvm.transform.PassContext(config={"tirx.use_async_copy": 1}):
-        mod = tvm.compile(tvm.IRModule.from_expr(f), target="maca")
+        mod = tvm.compile(tvm.IRModule.from_expr(f), target="cuda")
 
     A_np = np.random.rand(32, 128).astype("float16")
     B_np = np.random.rand(32, 128).astype("float16")
     C_np = np.zeros((32, 128)).astype("float16")
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A_nd = tvm.runtime.tensor(A_np, device=dev)
         B_nd = tvm.runtime.tensor(B_np, device=dev)
         C_nd = tvm.runtime.tensor(C_np, device=dev)
@@ -379,8 +372,7 @@ def postproc_if_missing_async_support():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(reason=MACA_PTX_ASYNC_COPY_XFAIL_REASON, strict=False)
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_cp_async_in_if_then_else(postproc_if_missing_async_support):
     @T.prim_func(s_tir=True)
     def simple_compute(
@@ -422,7 +414,7 @@ def test_cp_async_in_if_then_else(postproc_if_missing_async_support):
 
     mod = tvm.IRModule.from_expr(simple_compute)
     with tvm.transform.PassContext(config={"tirx.use_async_copy": 1}):
-        tvm.compile(mod, target="maca")
+        tvm.compile(mod, target="cuda")
     generated_code = postproc_if_missing_async_support()
     print(generated_code)
     # Fork emits an NVRTC-aware preamble (`#ifdef __CUDACC_RTC__ ... #else ...`
@@ -435,16 +427,14 @@ def test_cp_async_in_if_then_else(postproc_if_missing_async_support):
     assert actual_body == expected_body
 
 
-@pytest.mark.xfail(
-    run=False,
-    strict=False,
-    reason=(
-        f"{MACA_PTX_ASYNC_COPY_XFAIL_REASON}; also blocked by a "
-        "MergeSharedMemoryAllocations ordering issue in device_driver_api.cc"
-    ),
+@pytest.mark.skip(
+    reason="This test fails due to an ordering issue with MergeSharedMemoryAllocations "
+    "in device_driver_api.cc. However, fixing this causes failures in MLC. "
+    "This bug should be addressed. See discussion in https://github.com/apache/tvm/pull/16769 "
+    "and https://github.com/apache/tvm/pull/16569#issuecomment-1992720448"
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_vectorize_cp_async_in_if_then_else(postproc_if_missing_async_support):
     @T.prim_func(s_tir=True)
     def complex_compute(
@@ -896,7 +886,7 @@ def test_vectorize_cp_async_in_if_then_else(postproc_if_missing_async_support):
 
     mod = tvm.IRModule.from_expr(complex_compute)
     with tvm.transform.PassContext(config={"tirx.use_async_copy": 1}):
-        tvm.compile(mod, target="maca")
+        tvm.compile(mod, target="cuda")
     generated_code = postproc_if_missing_async_support()
     # generated_code must contain "  setp.ne.b32 p, %0, 0;"
     assert "setp.ne.b32" in generated_code

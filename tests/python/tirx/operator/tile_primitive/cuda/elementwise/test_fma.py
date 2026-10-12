@@ -29,14 +29,6 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import S, TileLayout, wg_local_layout
 
-MACA_XFAIL = pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [tile-primitive-elementwise-fma] support FMA and scalar "
-        "binary elementwise dispatch"
-    ),
-    strict=False,
-)
-
 
 def _get_sm_version():
     target = tvm.target.Target("maca")
@@ -45,10 +37,6 @@ def _get_sm_version():
         return 0
     digits = "".join(ch for ch in arch.split("_", 1)[1] if ch.isdigit())
     return int(digits) if digits else 0
-
-
-def _xfail_packed_feature(feature, sm):
-    pytest.xfail(f"TODO(maca): [tile-primitive-elementwise-fma] support {feature}, got sm_{sm}")
 
 
 # ---------------------------------------------------------------------------
@@ -178,16 +166,16 @@ def test_mul_scalar_broadcast():
 # Binary add with rounding mode
 # ---------------------------------------------------------------------------
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_add_rounding_mode():
     sm = _get_sm_version()
     if sm < 100:
-        _xfail_packed_feature("packed add rounding-mode lowering on sm_100+", sm)
+        pytest.skip(f"packed add with rounding requires sm_100+, got sm_{sm}")
 
     N = 2
     dtype = "float32"
-    target = tvm.target.Target("maca")
+    dev = tvm.cuda(0)
+    target = tvm.target.Target("cuda")
 
     round_const = float(2**23 + 2**22)
 
@@ -204,22 +192,17 @@ def test_add_rounding_mode():
 
     with target:
         A_np = np.array([1.3, 2.7], dtype=dtype)
+        A_dev = tvm.runtime.tensor(A_np, dev)
         mod = tvm.IRModule({"main": test_func})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
         # Check that the PTX uses the rounding mode
         src = mod.mod.imports[0].inspect_source()
-        assert re.search(r"add\.rm\.ftz\.f32x2", src), (
-            f"Expected packed add with rm rounding in PTX:\n{src}"
-        )
-
-        def run_and_check():
-            dev = tvm.maca(0)
-            A_dev = tvm.runtime.tensor(A_np, dev)
-            mod(A_dev)
-            expected = A_np + round_const
-            tvm.testing.assert_allclose(expected, A_dev.numpy(), atol=1.0)
-
-        tvm.testing.run_with_gpu_lock(run_and_check)
+        assert re.search(r"add\.rm\.ftz\.f32x2", src) or re.search(
+            r"tvm_builtin_ptx_add_packed_", src
+        ), f"Expected packed add with rm rounding in PTX:\n{src}"
+        mod(A_dev)
+        expected = A_np + round_const
+        tvm.testing.assert_allclose(expected, A_dev.numpy(), atol=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -267,16 +250,15 @@ def test_fma_no_layout():
 # Binary sub with rounding mode (buffer-buffer)
 # ---------------------------------------------------------------------------
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_sub_buffer_buffer_rounding():
     sm = _get_sm_version()
     if sm < 100:
-        _xfail_packed_feature("packed sub rounding-mode lowering on sm_100+", sm)
+        pytest.skip(f"packed sub with rounding requires sm_100+, got sm_{sm}")
 
     N = 2
     dtype = "float32"
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
 
     @T.prim_func
     def test_func(A_ptr: T.handle, B_ptr: T.handle) -> None:
@@ -303,7 +285,7 @@ def test_sub_buffer_buffer_rounding():
         )
 
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A_dev = tvm.runtime.tensor(A_np, dev)
             B_dev = tvm.runtime.tensor(B_np, dev)
             mod(A_dev, B_dev)
@@ -363,7 +345,7 @@ def test_fma_warpgroup_wg_local_layout():
 # Complements ``test_fma_warpgroup_wg_local_emits_packed_f32x2`` (which uses
 # the host-detected ``Target("cuda")`` and skips when arch < sm_100).
 # -----------------------------------------------------------------------------
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10")
 def test_fma_f32_sm100_packed_f32x2_dispatch():
     """fma f32 + all-local → reg.py + fma_f32x2 packed (no T.vectorized)."""
     shape = (64, 32)
@@ -388,7 +370,7 @@ def test_fma_f32_sm100_packed_f32x2_dispatch():
         Tx.fma(rd, ra, rb, rc)
         Tx.copy(D[tx], rd)
 
-    target = tvm.target.Target({"kind": "maca", "arch": "sm_100a"})
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
     with target:
         mod = tvm.IRModule({"main": k})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")

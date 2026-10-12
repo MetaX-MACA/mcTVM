@@ -16,8 +16,6 @@
 # under the License.
 # pylint: disable=missing-module-docstring,missing-function-docstring,missing-class-docstring
 # ruff: noqa: E501, F401, F841
-import pytest
-
 from tvm import te
 from tvm.ir import assert_structural_equal
 from tvm.s_tir import meta_schedule as ms
@@ -282,7 +280,7 @@ def _check_dp4a_dense(m, n, k, in_dtype, out_dtype, expected_mods, expected_deci
     actual = generate_design_space(
         kind="cuda",
         mod=mod,
-        target=Target({"kind": "maca", "arch": "sm_70"}),
+        target=Target({"kind": "cuda", "arch": "sm_70"}),
         types=None,
         sch_rules=[
             ms.schedule_rule.MultiLevelTilingWithIntrin(
@@ -304,10 +302,6 @@ def _check_dp4a_dense(m, n, k, in_dtype, out_dtype, expected_mods, expected_deci
         check_sketches(mod, actual, expected_mods, expected_decisions)
 
 
-@pytest.mark.xfail(
-    reason="TODO(maca): [dp4a] add a MACA tensor intrinsic and lowering for CUDA DP4A semantics",
-    strict=False,
-)
 def test_dp4a_dense():
     @T.prim_func(s_tir=True)
     def dp4a_dense_0(
@@ -401,10 +395,6 @@ def test_dp4a_dense():
     )
 
 
-@pytest.mark.xfail(
-    reason="TODO(maca): [dp4a] add a MACA tensor intrinsic and lowering for CUDA DP4A semantics",
-    strict=False,
-)
 def test_dp4a_dense_no_tensorize_1():
     _check_dp4a_dense(
         m=128,
@@ -417,10 +407,6 @@ def test_dp4a_dense_no_tensorize_1():
     )
 
 
-@pytest.mark.xfail(
-    reason="TODO(maca): [dp4a] add a MACA tensor intrinsic and lowering for CUDA DP4A semantics",
-    strict=False,
-)
 def test_dp4a_dense_no_tensorize_2():
     _check_dp4a_dense(
         m=127,
