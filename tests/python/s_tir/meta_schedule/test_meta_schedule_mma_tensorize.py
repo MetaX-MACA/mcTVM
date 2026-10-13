@@ -97,12 +97,7 @@ def test_run_target(mod=None, tgt_str=None, in_dtype="float16", out_dtype="float
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason="TODO(maca): [mma-m16n8k8] add a MACA tensor intrinsic and lowering compatible with CUDA ldmatrix MMA",
-    run=False,
-    strict=False,
-)
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_f16f16f16_mma_gemm():
     # fmt: off
     mod = Gemm_F16F16F16
@@ -221,12 +216,7 @@ def test_f16f16f16_mma_gemm():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.xfail(
-    reason="TODO(maca): [mma-m16n8k8] add a MACA tensor intrinsic and lowering compatible with CUDA ldmatrix MMA",
-    run=False,
-    strict=False,
-)
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_f16f16f32_mma_gemm():
     mod = Gemm_F16F16F32
     sch = Schedule(mod)

@@ -52,18 +52,6 @@ from tvm.tirx.layout import (
 )
 from tvm.tirx.layout import tid_in_wg as axis_tid_in_wg
 
-MACA_XFAIL = pytest.mark.xfail(
-    reason=(
-        "TODO(maca): [tile-primitive-gemm-tcgen05] support tcgen05 async GEMM "
-        "and block-scaled formats"
-    ),
-    strict=False,
-)
-
-CUDA_TCGEN05 = pytest.mark.skipif(
-    not env.has_cuda_compute(10), reason="need CUDA compute capability >= 10.0"
-)
-
 # ---------------------------------------------------------------------------
 # Shared test helpers
 # ---------------------------------------------------------------------------
@@ -204,8 +192,7 @@ def pack_sf_fp8_uint32(sf_uint8, n_total=128):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.parametrize(
     "task",
     [
@@ -311,7 +298,7 @@ def test_gemm_tcgen05_cta_group_1(task):
 
     np.random.seed(0)
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": gemm_async})
         # mod.show()
@@ -326,7 +313,7 @@ def test_gemm_tcgen05_cta_group_1(task):
         B_ref = np.squeeze(B_np[tuple(r_smem_B)] if transB else B_np[tuple(r_smem_B)].T)
         C_ref[tuple(r_tmem_C)] = A_ref @ B_ref
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A_tvm = tvm.runtime.tensor(A_np, dev)
             B_tvm = tvm.runtime.tensor(B_np, dev)
             C_tvm = tvm.runtime.tensor(C_np, dev)
@@ -337,8 +324,7 @@ def test_gemm_tcgen05_cta_group_1(task):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_gemm_tcgen05_cta_group_1_layout_f_m64():
     """M=64 MMA with C operand allocated as Layout F.
 
@@ -438,7 +424,7 @@ def test_gemm_tcgen05_cta_group_1_layout_f_m64():
     # fmt: on
 
     np.random.seed(0)
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.compile(tvm.IRModule({"main": gemm_layout_f}), target=target, tir_pipeline="tirx")
 
@@ -448,7 +434,7 @@ def test_gemm_tcgen05_cta_group_1_layout_f_m64():
     C_ref = A_np.astype(np.float32) @ B_np.astype(np.float32).T
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A_tvm = tvm.runtime.tensor(A_np, dev)
         B_tvm = tvm.runtime.tensor(B_np, dev)
         C_tvm = tvm.runtime.tensor(C_np, dev)
@@ -459,8 +445,7 @@ def test_gemm_tcgen05_cta_group_1_layout_f_m64():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.parametrize(
     "task",
     [
@@ -583,7 +568,7 @@ def test_gemm_tcgen05_cta_group_2(task):
 
     np.random.seed(0)
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": gemm_async})
         mod.show()
@@ -600,7 +585,7 @@ def test_gemm_tcgen05_cta_group_2(task):
         B_ref = np.squeeze(B_np[tuple(r_smem_B[:-2])] if transB else B_np[tuple(r_smem_B[:-2])].T)
         C_ref[:, C_region[1][0] : C_region[1][0] + width] = A_ref @ B_ref
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A_tvm = tvm.runtime.tensor(A_np, dev)
             B_tvm = tvm.runtime.tensor(B_np, dev)
             C_tvm = tvm.runtime.tensor(C_np, dev)
@@ -611,8 +596,7 @@ def test_gemm_tcgen05_cta_group_2(task):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_gemm_tcgen05_cta_group_2_layout_b():
     """Test cta_group=2 with Layout B (2x2 datapath, M=128 total, 64 per CTA).
 
@@ -730,7 +714,7 @@ def test_gemm_tcgen05_cta_group_2_layout_b():
 
     np.random.seed(0)
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": gemm_async})
         mod.show()
@@ -743,7 +727,7 @@ def test_gemm_tcgen05_cta_group_2_layout_b():
         C_ref = A_np.astype(np.float32) @ B_np.astype(np.float32).T
 
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A_tvm = tvm.runtime.tensor(A_np, dev)
             B_tvm = tvm.runtime.tensor(B_np, dev)
             C_tvm = tvm.runtime.tensor(C_np, dev)
@@ -1048,7 +1032,7 @@ def test_gemm_block_scaled_fp8_cta_group_1(task):
 
     np.random.seed(0)
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": gemm_async_fn})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1069,7 +1053,7 @@ def test_gemm_block_scaled_fp8_cta_group_1(task):
         C_ref = np.zeros(C_shape, dtype=C_dtype)
         C_ref[tuple(r_tmem_C)] = A_dq @ B_dq.T
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A_tvm = tvm.runtime.tensor(A_fp8, dev)
             B_tvm = tvm.runtime.tensor(B_fp8, dev)
             C_tvm = tvm.runtime.tensor(C_np, dev)
@@ -1082,8 +1066,7 @@ def test_gemm_block_scaled_fp8_cta_group_1(task):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.skipif(ml_dtypes is None, reason="Requires ml_dtypes")
 @pytest.mark.parametrize(
     "task",
@@ -1268,7 +1251,7 @@ def test_gemm_block_scaled_fp8_cta_group_2(task):
 
     np.random.seed(0)
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": gemm_async_fn})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1306,7 +1289,7 @@ def test_gemm_block_scaled_fp8_cta_group_2(task):
         C_ref = np.zeros(C_shape, dtype=C_dtype)
         C_ref[:, C_region[1][0] : C_region[1][0] + width] = A_dq @ B_dq.T
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A_tvm = tvm.runtime.tensor(A_fp8, dev)
             B_tvm = tvm.runtime.tensor(B_fp8, dev)
             C_tvm = tvm.runtime.tensor(C_np, dev)
@@ -1319,8 +1302,7 @@ def test_gemm_block_scaled_fp8_cta_group_2(task):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.skipif(ml_dtypes is None, reason="Requires ml_dtypes")
 def test_gemm_block_scaled_nvfp4_cta_group_1():
     """Test block-scaled nvfp4 GEMM with cta_group=1.
@@ -1457,7 +1439,7 @@ def test_gemm_block_scaled_nvfp4_cta_group_1():
 
     np.random.seed(0)
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": gemm_async_fn})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1482,7 +1464,7 @@ def test_gemm_block_scaled_nvfp4_cta_group_1():
         C_ref = np.zeros(C_shape, dtype=C_dtype)
         C_ref[0:128, 0:N] = A_dq @ B_dq.T
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A_tvm = tvm.runtime.tensor(A_packed, dev)
             B_tvm = tvm.runtime.tensor(B_packed, dev)
             C_tvm = tvm.runtime.tensor(C_np, dev)
@@ -1495,8 +1477,7 @@ def test_gemm_block_scaled_nvfp4_cta_group_1():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.skipif(ml_dtypes is None, reason="Requires ml_dtypes")
 def test_gemm_block_scaled_nvfp4_cta_group_2():
     """Test block-scaled nvfp4 GEMM with cta_group=2.
@@ -1661,7 +1642,7 @@ def test_gemm_block_scaled_nvfp4_cta_group_2():
 
     np.random.seed(0)
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": gemm_async_fn})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1698,7 +1679,7 @@ def test_gemm_block_scaled_nvfp4_cta_group_2():
         C_ref = np.zeros(C_shape, dtype=C_dtype)
         C_ref[0:M_total, 0:N_total] = A_dq @ B_dq.T
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A_tvm = tvm.runtime.tensor(A_packed, dev)
             B_tvm = tvm.runtime.tensor(B_packed, dev)
             C_tvm = tvm.runtime.tensor(C_np, dev)
@@ -1711,8 +1692,7 @@ def test_gemm_block_scaled_nvfp4_cta_group_2():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.skipif(ml_dtypes is None, reason="Requires ml_dtypes")
 def test_gemm_block_scaled_fp8_sf_id():
     """Test sf_id auto-derivation from layout for fp8 block-scaled MMA.
@@ -1874,7 +1854,7 @@ def test_gemm_block_scaled_fp8_sf_id():
 
     np.random.seed(42)
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": gemm_async_fn})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -1918,7 +1898,7 @@ def test_gemm_block_scaled_fp8_sf_id():
             )
             C_ref[:M, :N] += A_block @ B_block.T
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A_tvm = tvm.runtime.tensor(A_fp8, dev)
             B_tvm = tvm.runtime.tensor(B_fp8, dev)
             C_tvm = tvm.runtime.tensor(C_np, dev)
@@ -1937,8 +1917,7 @@ def test_gemm_block_scaled_fp8_sf_id():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.parametrize(
     "task",
     [
@@ -2182,7 +2161,7 @@ def test_gemm_tcgen05_arbitrary_tiles(task):
 
     np.random.seed(0)
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": gemm_async})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
@@ -2212,7 +2191,7 @@ def test_gemm_tcgen05_arbitrary_tiles(task):
         )
         C_ref[tuple(r_tmem_C)] = A_ref @ B_ref
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A_tvm = tvm.runtime.tensor(A_np, dev)
             B_tvm = tvm.runtime.tensor(B_np, dev)
             C_tvm = tvm.runtime.tensor(C_np, dev)
@@ -2518,8 +2497,7 @@ def test_gemm_tcgen05_no_swizzle_col_major_a_ws_local_idesc():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.parametrize("k_lo,k_hi", [(0, 16), (0, 32), (16, 32), (16, 48), (32, 64)])
 def test_gemm_tcgen05_contiguous_kslice_partial_k(k_lo, k_hi):
     """A slice on the *contiguous* (K) axis of a swizzled gemm_async operand must
@@ -2593,8 +2571,8 @@ def test_gemm_tcgen05_contiguous_kslice_partial_k(k_lo, k_hi):
     # fmt: on
 
     np.random.seed(0)
-    with tvm.target.Target("maca"):
-        mod = tvm.compile(tvm.IRModule({"main": gemm_async}), target="maca", tir_pipeline="tirx")
+    with tvm.target.Target("cuda"):
+        mod = tvm.compile(tvm.IRModule({"main": gemm_async}), target="cuda", tir_pipeline="tirx")
     A_np = np.random.randn(*A_shape).astype(dtype)
     B_np = np.random.randn(*B_shape).astype(dtype)
     C_np = np.zeros(C_shape, "float32")
@@ -2602,7 +2580,7 @@ def test_gemm_tcgen05_contiguous_kslice_partial_k(k_lo, k_hi):
     C_ref = A_np[:, k_lo:k_hi].astype("float32") @ B_np[:, k_lo:k_hi].astype("float32").T
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A_t, B_t, C_t = (tvm.runtime.tensor(x, dev) for x in (A_np, B_np, C_np))
         mod["main"](A_t, B_t, C_t)
         np.testing.assert_allclose(C_t.numpy(), C_ref, atol=1e-2, rtol=1e-2)
@@ -2690,7 +2668,7 @@ def _run_dense_gemm(
             T.ptx.tcgen05.dealloc.cta_group__1.sync.aligned.b32(tmem_addr[0], T.uint32(cols_alloc))
 
     np.random.seed(0)
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.compile(tvm.IRModule({"main": gemm_async}), target=target, tir_pipeline="tirx")
 
@@ -2704,7 +2682,7 @@ def _run_dense_gemm(
     C_ref = A_np.astype("float32") @ B_np.astype("float32").T
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A_t, B_t, C_t = (tvm.runtime.tensor(x, dev) for x in (A_np, B_np, C_np))
         mod["main"](A_t, B_t, C_t)
         np.testing.assert_allclose(C_t.numpy().astype("float32"), C_ref, atol=atol, rtol=rtol)
@@ -2713,16 +2691,14 @@ def _run_dense_gemm(
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 @pytest.mark.skipif(ml_dtypes is None, reason="Requires ml_dtypes for fp8")
 def test_gemm_dense_fp8():
     _run_dense_gemm("float8_e4m3fn", "float8_e4m3fn", "float32", 128, atol=2.0, rtol=0.15)
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_gemm_tf32_with_tfloat32_tma():
     _run_dense_gemm(
         "float32",
@@ -3007,7 +2983,7 @@ def _mma_descriptor_values(lines):
     ]
 
 
-@CUDA_TCGEN05
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_gemm_tcgen05_explicit_mma_tile_changes_physical_instructions():
     default_src = _compile_cuda_source(_build_smem_desc_kernel("hoist"))
     explicit_src = _compile_cuda_source(
@@ -3060,7 +3036,7 @@ def test_gemm_tcgen05_block_scaled_explicit_mma_tile_splits_n():
         ({"mma_m": 128, "mma_n": 8}, "Invalid matrix shape"),
     ],
 )
-@CUDA_TCGEN05
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_gemm_tcgen05_explicit_mma_tile_rejects_invalid_config(mma_config, message):
     target = tvm.target.Target("cuda")
     with target:
@@ -3080,7 +3056,7 @@ def test_gemm_tcgen05_explicit_mma_tile_rejects_invalid_config(mma_config, messa
 
 
 @pytest.mark.parametrize("smem_desc", ["hoist", "local_hoist", "encode", "recompute"])
-@CUDA_TCGEN05
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_gemm_smem_desc_modes_codegen(smem_desc):
     """Compile-only: the SMEM matrix descriptor is built per-MMA from the buffer
     base address, selected by the ``smem_desc`` config.
@@ -3100,7 +3076,7 @@ def test_gemm_smem_desc_modes_codegen(smem_desc):
 
     Both must emit the MMA; the descriptor-construction fingerprints differ.
     """
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.compile(
             tvm.IRModule({"main": _build_smem_desc_kernel(smem_desc)}),
@@ -3121,7 +3097,7 @@ def test_gemm_smem_desc_modes_codegen(smem_desc):
         assert "encode_matrix_descriptor" not in src, "recompute mode must not encode a descriptor"
 
 
-@CUDA_TCGEN05
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_gemm_tcgen05_weight_stationary_codegen():
     """FlashMLA head64 requires the tcgen05.mma.ws PTX form."""
 
@@ -3140,7 +3116,7 @@ def test_gemm_tcgen05_weight_stationary_codegen():
     assert not re.search(r"[^ ]tvm_builtin_cuda_get_tmem_addr\(", src)
 
 
-@CUDA_TCGEN05
+@pytest.mark.skipif(not env.has_cuda_compute(10), reason="need cuda compute >= 10.0")
 def test_gemm_tcgen05_dense_descI_rejected():
     """Dense ``descI=`` was removed: the dispatcher self-encodes.
 

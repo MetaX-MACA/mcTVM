@@ -39,11 +39,6 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import S, TileLayout, laneid, tid_in_wg, tx
 
-_TCGEN05_XFAIL = pytest.mark.xfail(
-    reason=("TODO(maca): [tile-primitive-copy-reg] support TCGEN05 layouts"),
-    strict=False,
-)
-
 
 def _r_layout(scope, shape):
     if scope == "warpgroup":
@@ -1055,8 +1050,7 @@ def test_reg_copy_tcgen05_d_epilogue_deposit_layout_pairing():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@_TCGEN05_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 def test_reg_copy_tcgen05_d_epilogue_deposit_codegen():
     """``reg`` dispatch lowers the D epilogue deposit; pre-fix loop only covered half.
 
@@ -1135,8 +1129,7 @@ def _build_tcgen05_d_epilogue_deposit_roundtrip():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@_TCGEN05_XFAIL
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 def test_reg_copy_tcgen05_d_epilogue_deposit_gpu():
     """GPU: R→S deposit + S→R reload must preserve the Layout-F register tile.
 
@@ -1148,7 +1141,7 @@ def test_reg_copy_tcgen05_d_epilogue_deposit_gpu():
     ``max|B-A|`` was hundreds, not 0.
     """
     m, n = _TCGEN05_D_SHAPE
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.compile(
             tvm.IRModule({"main": _build_tcgen05_d_epilogue_deposit_roundtrip()}),

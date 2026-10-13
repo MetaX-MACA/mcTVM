@@ -24,11 +24,6 @@ from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import R, S, TileLayout, laneid, wg_local_layout
 
-MACA_XFAIL = pytest.mark.xfail(
-    reason="TODO(maca): [tile-primitive-reduction] unsupported reduction scope or layout",
-    strict=False,
-)
-
 
 @pytest.mark.parametrize(
     "src_shape, dst_shape, axes, st_src, st_dst, extent_src, extent_dst",
@@ -144,7 +139,7 @@ def test_reduction_shared(
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 @pytest.mark.parametrize(
     "exec_scope",
-    ["warp", pytest.param("warpgroup", marks=MACA_XFAIL), "thread"],
+    ["warp", pytest.param("warpgroup", marks=pytest.mark.skip(reason="not support")), "thread"],
 )
 @pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 @pytest.mark.parametrize("accum", [False, True])
@@ -1065,13 +1060,12 @@ def test_reduction_warp_shuffle_multi_warp_loop():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@MACA_XFAIL
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 @pytest.mark.parametrize("op_name", ["sum", "max"])
 def test_reduction_warpgroup_wg_local_layout(op_name):
     rows, cols = 128, 16
     dtype = "float32"
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
 
     @T.prim_func
     def test_func(A_ptr: T.handle, B_ptr: T.handle) -> None:
@@ -1109,7 +1103,7 @@ def test_reduction_warpgroup_wg_local_layout(op_name):
             B_ref = A_np.max(axis=1, keepdims=True)
 
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A_dev = tvm.runtime.tensor(A_np, dev)
             B_dev = tvm.runtime.tensor(B_np, dev)
             mod(A_dev, B_dev)
