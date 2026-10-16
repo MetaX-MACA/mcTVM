@@ -21,8 +21,9 @@
 
 #include <tvm/ffi/cast.h>
 #include <tvm/ffi/reflection/registry.h>
+#include <tvm/ir/function.h>
 #include <tvm/relax/analysis.h>
-#include <tvm/relax/attrs/nn.h>
+#include <tvm/relax/op/nn.h>
 #include <tvm/relax/transform.h>
 #include <tvm/relax/type.h>
 #include <tvm/tirx/function.h>
@@ -144,13 +145,13 @@ Expr DecomposeLayerNorm(const Call& call) {
 }
 
 Expr TensorToShape(const Call& call_node, const BlockBuilder& builder) {
-  TVM_FFI_ICHECK(!call_node->ty.IsMissing());
+  TVM_FFI_ICHECK(!call_node->ty.as<MissingType>().has_value());
   Expr expr = call_node->args[0];
   const ShapeTypeNode* ty = GetTypeAs<ShapeTypeNode>(call_node);
   TVM_FFI_ICHECK(ty);
   // call builtin function that converts tensor to shape tuple
   // TODO(@sunggg): Register operator for "vm.builtin.tensor_to_shape"
-  static const Op& call_pure_packed_op = Op::Get("relax.call_pure_packed");
+  static const Op call_pure_packed_op = Op::Get("relax.call_pure_packed");
   Var call = builder->Emit(Call(Type::Missing(), call_pure_packed_op,
                                 {ExternFunc("vm.builtin.tensor_to_shape"), expr}, {},
                                 {ffi::GetRef<ShapeType>(ty)}));
@@ -160,7 +161,7 @@ Expr TensorToShape(const Call& call_node, const BlockBuilder& builder) {
   // ffi::Array<PrimExpr>), we define symbolic variables and returns them as a ShapeExpr.
   ffi::Array<PrimExpr> shape_var;
   for (int i = 0; i < ty->ndim; i++) {
-    shape_var.push_back(tirx::Var("x", PrimType::Int(64)).as_or_throw<PrimExpr>());
+    shape_var.push_back(tvm::Var("x", PrimType::Int(64)).as_or_throw<PrimExpr>());
   }
   // bind symbolic variables to the shape tuple
   tvm::Var var("y", ShapeType(shape_var));
@@ -191,8 +192,8 @@ class TrainingOperatorMutator : public ExprMutator {
   }
 
   /* composite opeartor list */
-  const Op& batch_norm_op_ = Op::Get("relax.nn.batch_norm");
-  const Op& layer_norm_op_ = Op::Get("relax.nn.layer_norm");
+  const Op batch_norm_op_ = Op::Get("relax.nn.batch_norm");
+  const Op layer_norm_op_ = Op::Get("relax.nn.layer_norm");
 };
 
 class OpDecomposer : public ExprMutator {
@@ -210,8 +211,8 @@ class OpDecomposer : public ExprMutator {
   }
 
   /* composite opeartor list */
-  const Op& batch_norm_op_ = Op::Get("relax.nn.batch_norm");
-  const Op& tensor_to_shape_op_ = Op::Get("relax.tensor_to_shape");
+  const Op batch_norm_op_ = Op::Get("relax.nn.batch_norm");
+  const Op tensor_to_shape_op_ = Op::Get("relax.tensor_to_shape");
 };
 
 namespace transform {
@@ -271,7 +272,7 @@ Pass ApplyDecomposeToFunction(Pass pass, ffi::String func_name) {
   };
 
   std::string pass_name = "ApplyDecomposeTo" + std::string(func_name);
-  return CreateModulePass(pass_func, 0, pass_name, {});
+  return CreateModulePass(pass_func, 0, pass_name);
 }
 
 }  // namespace
@@ -283,8 +284,7 @@ Pass MutateOpsForTraining() {
   };
   return CreateFunctionPass(/*pass_function=*/pass_func,
                             /*opt_level=*/0,
-                            /*pass_name=*/"MutateOpsForTraining",
-                            /*required=*/{});
+                            /*pass_name=*/"MutateOpsForTraining");
 }
 
 Pass DecomposeOps() {
@@ -294,8 +294,7 @@ Pass DecomposeOps() {
   };
   return CreateFunctionPass(/*pass_function=*/pass_func,
                             /*opt_level=*/0,
-                            /*pass_name=*/"DecomposeOps",
-                            /*required=*/{});
+                            /*pass_name=*/"DecomposeOps");
 }
 
 Pass DecomposeOpsForInference(ffi::Optional<ffi::String> func_name) {

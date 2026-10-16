@@ -96,7 +96,7 @@ def run_test(
     shared_scope="shared",
 ):
     sch = mfma_schedule(
-        te.create_prim_func(matmul(M, N, K, in_dtype, out_dtype, b_transposed)),
+        te.create_function(matmul(M, N, K, in_dtype, out_dtype, b_transposed)),
         k_inner,
         in_dtype,
         b_transposed,

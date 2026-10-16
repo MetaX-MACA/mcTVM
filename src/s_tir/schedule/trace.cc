@@ -551,10 +551,10 @@ void Trace::ApplyJSONToSchedule(ffi::ObjectRef json, Schedule sch) {
   std::unordered_map<std::string, ffi::ObjectRef> named_rvs{{"None", ffi::ObjectRef{nullptr}}};
   int i = 0;
   for (const Any& inst_entry : json_insts) {
-    InstructionKind kind{nullptr};
+    InstructionKind kind{ffi::UnsafeInit{}};
     ffi::Array<Any> inputs{nullptr};
     ffi::Array<Any> attrs{nullptr};
-    ffi::Array<ffi::String> outputs{ffi::ObjectPtr<ffi::Object>{nullptr}};
+    ffi::Array<ffi::String> outputs;
     // Parse the entry
     try {
       const auto* arr = inst_entry.as<ffi::ArrayObj>();
@@ -677,7 +677,7 @@ struct EnterPostprocTraits : public UnpackedInstTraits<EnterPostprocTraits> {
   friend struct ::tvm::s_tir::UnpackedInstTraits;
 };
 
-TVM_REGISTER_INST_KIND_TRAITS(EnterPostprocTraits);
+TVM_FFI_STATIC_INIT_BLOCK() { RegisterInstructionKind<EnterPostprocTraits>(); }
 
 /**************** FFI ****************/
 

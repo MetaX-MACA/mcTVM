@@ -22,7 +22,6 @@
 #include <tvm/ffi/extra/structural_visit.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
-#include <tvm/ir/prim/builtin.h>
 #include <tvm/ir/prim/expr.h>
 #include <tvm/ir/prim/op.h>
 
@@ -38,7 +37,7 @@ namespace {
 std::optional<int> ExtractVscaleFactor(const PrimExpr& lanes) {
   auto is_vscale = [](const PrimExpr& e) -> bool {
     if (const auto* call = e.as<CallNode>()) {
-      return call->op.same_as(prim::builtin::vscale());
+      return call->op.same_as(prim::vscale_op());
     }
     return false;
   };
@@ -53,17 +52,19 @@ std::optional<int> ExtractVscaleFactor(const PrimExpr& lanes) {
   return std::nullopt;
 }
 
-TVMFFIAny RampVisit(ffi::StructuralVisitorObj* visitor, ffi::AnyView value) noexcept {
+TVM_FFI_INLINE ffi::Expected<ffi::Optional<ffi::VisitInterrupt>> RampVisit(
+    ffi::StructuralVisitorObj* visitor, ffi::AnyView value) noexcept {
   // skips: PrimExpr types are always PrimType and remain unchanged in normal mutation.
   const RampNode* self =
       ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const RampNode>(value);
   TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(self->base));
   TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(self->stride));
   TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(self->lanes));
-  return ffi::AnyView(nullptr).CopyToTVMFFIAny();
+  return std::nullopt;
 }
 
-TVMFFIAny RampMutate(ffi::StructuralMutatorObj* mutator, ffi::AnyView value) noexcept {
+TVM_FFI_INLINE ffi::Expected<ffi::UnchangedOr<ffi::Any>> RampMutate(
+    ffi::StructuralMutatorObj* mutator, ffi::AnyView value) noexcept {
   // skips: PrimExpr types are always PrimType and remain unchanged in normal mutation.
   const RampNode* self =
       ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const RampNode>(value);
@@ -76,16 +77,17 @@ TVMFFIAny RampMutate(ffi::StructuralMutatorObj* mutator, ffi::AnyView value) noe
   if (mapped_base_u.UnchangedOrSameAs(self->base) &&
       mapped_stride_u.UnchangedOrSameAs(self->stride) &&
       mapped_lanes_u.UnchangedOrSameAs(self->lanes)) {
-    return ffi::Unchanged().CopyToTVMFFIAny();
+    return ffi::Unchanged();
   }
   ffi::ObjectPtr<RampNode> copy = ffi::make_object<RampNode>(*self);
   if (!mapped_base_u.IsUnchanged()) copy->base = std::move(mapped_base_u).ValueUnchecked();
   if (!mapped_stride_u.IsUnchanged()) copy->stride = std::move(mapped_stride_u).ValueUnchecked();
   if (!mapped_lanes_u.IsUnchanged()) copy->lanes = std::move(mapped_lanes_u).ValueUnchecked();
-  return ffi::details::AnyUnsafe::MoveAnyToTVMFFIAny(ffi::Any(std::move(copy)));
+  return ffi::Any(std::move(copy));
 }
 
-TVMFFIAny RampMaybeInplaceMutate(ffi::StructuralMutatorObj* mutator, ffi::AnyView value) noexcept {
+TVM_FFI_INLINE ffi::Expected<ffi::UnchangedOr<ffi::Any>> RampMaybeInplaceMutate(
+    ffi::StructuralMutatorObj* mutator, ffi::AnyView value) noexcept {
   // skips: PrimExpr types are always PrimType and remain unchanged in normal mutation.
   RampNode* self = const_cast<RampNode*>(
       ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const RampNode>(value));
@@ -99,24 +101,26 @@ TVMFFIAny RampMaybeInplaceMutate(ffi::StructuralMutatorObj* mutator, ffi::AnyVie
   if (mapped_base_u.UnchangedOrSameAs(self->base) &&
       mapped_stride_u.UnchangedOrSameAs(self->stride) &&
       mapped_lanes_u.UnchangedOrSameAs(self->lanes)) {
-    return ffi::Unchanged().CopyToTVMFFIAny();
+    return ffi::Unchanged();
   }
   if (!mapped_base_u.IsUnchanged()) self->base = std::move(mapped_base_u).ValueUnchecked();
   if (!mapped_stride_u.IsUnchanged()) self->stride = std::move(mapped_stride_u).ValueUnchecked();
   if (!mapped_lanes_u.IsUnchanged()) self->lanes = std::move(mapped_lanes_u).ValueUnchecked();
-  return ffi::Unchanged().CopyToTVMFFIAny();
+  return ffi::Unchanged();
 }
 
-TVMFFIAny BroadcastVisit(ffi::StructuralVisitorObj* visitor, ffi::AnyView value) noexcept {
+TVM_FFI_INLINE ffi::Expected<ffi::Optional<ffi::VisitInterrupt>> BroadcastVisit(
+    ffi::StructuralVisitorObj* visitor, ffi::AnyView value) noexcept {
   // skips: PrimExpr types are always PrimType and remain unchanged in normal mutation.
   const BroadcastNode* self =
       ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const BroadcastNode>(value);
   TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(self->value));
   TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(self->lanes));
-  return ffi::AnyView(nullptr).CopyToTVMFFIAny();
+  return std::nullopt;
 }
 
-TVMFFIAny BroadcastMutate(ffi::StructuralMutatorObj* mutator, ffi::AnyView value) noexcept {
+TVM_FFI_INLINE ffi::Expected<ffi::UnchangedOr<ffi::Any>> BroadcastMutate(
+    ffi::StructuralMutatorObj* mutator, ffi::AnyView value) noexcept {
   // skips: PrimExpr types are always PrimType and remain unchanged in normal mutation.
   const BroadcastNode* self =
       ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const BroadcastNode>(value);
@@ -126,16 +130,16 @@ TVMFFIAny BroadcastMutate(ffi::StructuralMutatorObj* mutator, ffi::AnyView value
                                     mutator->MutateExpected(self->lanes));
   if (mapped_value_u.UnchangedOrSameAs(self->value) &&
       mapped_lanes_u.UnchangedOrSameAs(self->lanes)) {
-    return ffi::Unchanged().CopyToTVMFFIAny();
+    return ffi::Unchanged();
   }
   ffi::ObjectPtr<BroadcastNode> copy = ffi::make_object<BroadcastNode>(*self);
   if (!mapped_value_u.IsUnchanged()) copy->value = std::move(mapped_value_u).ValueUnchecked();
   if (!mapped_lanes_u.IsUnchanged()) copy->lanes = std::move(mapped_lanes_u).ValueUnchecked();
-  return ffi::details::AnyUnsafe::MoveAnyToTVMFFIAny(ffi::Any(std::move(copy)));
+  return ffi::Any(std::move(copy));
 }
 
-TVMFFIAny BroadcastMaybeInplaceMutate(ffi::StructuralMutatorObj* mutator,
-                                      ffi::AnyView value) noexcept {
+TVM_FFI_INLINE ffi::Expected<ffi::UnchangedOr<ffi::Any>> BroadcastMaybeInplaceMutate(
+    ffi::StructuralMutatorObj* mutator, ffi::AnyView value) noexcept {
   // skips: PrimExpr types are always PrimType and remain unchanged in normal mutation.
   BroadcastNode* self = const_cast<BroadcastNode*>(
       ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const BroadcastNode>(value));
@@ -145,23 +149,25 @@ TVMFFIAny BroadcastMaybeInplaceMutate(ffi::StructuralMutatorObj* mutator,
                                     mutator->MutateExpected(self->lanes, ffi::InplaceMode::kAllow));
   if (mapped_value_u.UnchangedOrSameAs(self->value) &&
       mapped_lanes_u.UnchangedOrSameAs(self->lanes)) {
-    return ffi::Unchanged().CopyToTVMFFIAny();
+    return ffi::Unchanged();
   }
   if (!mapped_value_u.IsUnchanged()) self->value = std::move(mapped_value_u).ValueUnchecked();
   if (!mapped_lanes_u.IsUnchanged()) self->lanes = std::move(mapped_lanes_u).ValueUnchecked();
-  return ffi::Unchanged().CopyToTVMFFIAny();
+  return ffi::Unchanged();
 }
 
-TVMFFIAny ShuffleVisit(ffi::StructuralVisitorObj* visitor, ffi::AnyView value) noexcept {
+TVM_FFI_INLINE ffi::Expected<ffi::Optional<ffi::VisitInterrupt>> ShuffleVisit(
+    ffi::StructuralVisitorObj* visitor, ffi::AnyView value) noexcept {
   // skips: PrimExpr types are always PrimType and remain unchanged in normal mutation.
   const ShuffleNode* self =
       ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const ShuffleNode>(value);
   TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(self->vectors));
   TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(self->indices));
-  return ffi::AnyView(nullptr).CopyToTVMFFIAny();
+  return std::nullopt;
 }
 
-TVMFFIAny ShuffleMutate(ffi::StructuralMutatorObj* mutator, ffi::AnyView value) noexcept {
+TVM_FFI_INLINE ffi::Expected<ffi::UnchangedOr<ffi::Any>> ShuffleMutate(
+    ffi::StructuralMutatorObj* mutator, ffi::AnyView value) noexcept {
   // skips: PrimExpr types are always PrimType and remain unchanged in normal mutation.
   const ShuffleNode* self =
       ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const ShuffleNode>(value);
@@ -171,16 +177,16 @@ TVMFFIAny ShuffleMutate(ffi::StructuralMutatorObj* mutator, ffi::AnyView value) 
                                     mutator->MutateExpected(self->indices));
   if (mapped_vectors_u.UnchangedOrSameAs(self->vectors) &&
       mapped_indices_u.UnchangedOrSameAs(self->indices)) {
-    return ffi::Unchanged().CopyToTVMFFIAny();
+    return ffi::Unchanged();
   }
   ffi::ObjectPtr<ShuffleNode> copy = ffi::make_object<ShuffleNode>(*self);
   if (!mapped_vectors_u.IsUnchanged()) copy->vectors = std::move(mapped_vectors_u).ValueUnchecked();
   if (!mapped_indices_u.IsUnchanged()) copy->indices = std::move(mapped_indices_u).ValueUnchecked();
-  return ffi::details::AnyUnsafe::MoveAnyToTVMFFIAny(ffi::Any(std::move(copy)));
+  return ffi::Any(std::move(copy));
 }
 
-TVMFFIAny ShuffleMaybeInplaceMutate(ffi::StructuralMutatorObj* mutator,
-                                    ffi::AnyView value) noexcept {
+TVM_FFI_INLINE ffi::Expected<ffi::UnchangedOr<ffi::Any>> ShuffleMaybeInplaceMutate(
+    ffi::StructuralMutatorObj* mutator, ffi::AnyView value) noexcept {
   // skips: PrimExpr types are always PrimType and remain unchanged in normal mutation.
   ShuffleNode* self = const_cast<ShuffleNode*>(
       ffi::details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const ShuffleNode>(value));
@@ -192,16 +198,17 @@ TVMFFIAny ShuffleMaybeInplaceMutate(ffi::StructuralMutatorObj* mutator,
       mutator->MutateExpected(self->indices, ffi::InplaceMode::kAllow));
   if (mapped_vectors_u.UnchangedOrSameAs(self->vectors) &&
       mapped_indices_u.UnchangedOrSameAs(self->indices)) {
-    return ffi::Unchanged().CopyToTVMFFIAny();
+    return ffi::Unchanged();
   }
   if (!mapped_vectors_u.IsUnchanged()) self->vectors = std::move(mapped_vectors_u).ValueUnchecked();
   if (!mapped_indices_u.IsUnchanged()) self->indices = std::move(mapped_indices_u).ValueUnchecked();
-  return ffi::Unchanged().CopyToTVMFFIAny();
+  return ffi::Unchanged();
 }
 
 }  // namespace
 // Ramp
-Ramp::Ramp(PrimExpr base, PrimExpr stride, PrimExpr lanes, Span span) {
+Ramp::Ramp(PrimExpr base, PrimExpr stride, PrimExpr lanes, Location loc)
+    : PrimExpr(ffi::UnsafeInit{}) {
   TVM_FFI_ICHECK(base.defined());
   TVM_FFI_ICHECK(stride.defined());
   PrimType base_ty = base.ty();
@@ -212,7 +219,7 @@ Ramp::Ramp(PrimExpr base, PrimExpr stride, PrimExpr lanes, Span span) {
     stride = prim::cast(base_ty, stride);
   }
 
-  ffi::ObjectPtr<RampNode> node = ffi::make_object<RampNode>();
+  ffi::ObjectPtr<RampNode> node = ffi::make_object<RampNode>(base, stride, lanes);
   auto* lanes_as_int = lanes.as<IntImmNode>();
   if (lanes_as_int) {
     int lanes = lanes_as_int->value.as<int>().value();
@@ -226,13 +233,11 @@ Ramp::Ramp(PrimExpr base, PrimExpr stride, PrimExpr lanes, Span span) {
 
     node->ExprNode::ty =
         PrimType::ScalableVector(base_ty.code(), base_ty.bits(), vscale_factor.value());
-    lanes = Mul(Call(PrimType::Int(32), prim::builtin::vscale(), {}).as_or_throw<PrimExpr>(),
+    lanes = Mul(Call(PrimType::Int(32), prim::vscale_op(), {}).as_or_throw<PrimExpr>(),
                 vscale_factor.value());
     node->lanes = lanes;
   }
-  node->base = base;
-  node->stride = stride;
-  node->span = std::move(span);
+  node->loc = loc;
   data_ = std::move(node);
 }
 
@@ -240,23 +245,22 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   RampNode::RegisterReflection();
   refl::TypeAttrDef<RampNode>()
-      .attr(refl::type_attr::kStructuralVisit, reinterpret_cast<void*>(&RampVisit))
-      .attr(refl::type_attr::kStructuralMutate, reinterpret_cast<void*>(&RampMutate))
+      .attr(refl::type_attr::kStructuralVisit, ffi::FStructuralVisit::FromNative<&RampVisit>())
+      .attr(refl::type_attr::kStructuralMutate, ffi::FStructuralMutate::FromNative<&RampMutate>())
       .attr(refl::type_attr::kStructuralMaybeInplaceMutate,
-            reinterpret_cast<void*>(&RampMaybeInplaceMutate));
+            ffi::FStructuralMutate::FromNative<&RampMaybeInplaceMutate>());
 
-  refl::GlobalDef().def("prim.Ramp", [](PrimExpr base, PrimExpr stride, PrimExpr lanes, Span span) {
-    return Ramp(base, stride, lanes, span);
-  });
+  refl::GlobalDef().def("prim.Ramp", [](PrimExpr base, PrimExpr stride, PrimExpr lanes,
+                                        Location loc) { return Ramp(base, stride, lanes, loc); });
 }
 
 // Broadcast
-Broadcast::Broadcast(PrimExpr value, PrimExpr lanes, Span span) {
+Broadcast::Broadcast(PrimExpr value, PrimExpr lanes, Location loc) : PrimExpr(ffi::UnsafeInit{}) {
   TVM_FFI_ICHECK(value.defined());
   PrimType value_ty = value.ty();
   TVM_FFI_ICHECK(value_ty.IsScalar());
 
-  ffi::ObjectPtr<BroadcastNode> node = ffi::make_object<BroadcastNode>();
+  ffi::ObjectPtr<BroadcastNode> node = ffi::make_object<BroadcastNode>(value, lanes);
   auto* lanes_int = lanes.as<IntImmNode>();
   if (lanes_int) {
     int lanes = lanes_int->value.as<int>().value();
@@ -270,12 +274,11 @@ Broadcast::Broadcast(PrimExpr value, PrimExpr lanes, Span span) {
 
     node->ExprNode::ty =
         PrimType::ScalableVector(value_ty.code(), value_ty.bits(), vscale_factor.value());
-    lanes = Mul(Call(PrimType::Int(32), prim::builtin::vscale(), {}).as_or_throw<PrimExpr>(),
+    lanes = Mul(Call(PrimType::Int(32), prim::vscale_op(), {}).as_or_throw<PrimExpr>(),
                 vscale_factor.value());
     node->lanes = lanes;
   }
-  node->value = std::move(value);
-  node->span = std::move(span);
+  node->loc = loc;
   data_ = node;
 }
 
@@ -283,18 +286,20 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   BroadcastNode::RegisterReflection();
   refl::TypeAttrDef<BroadcastNode>()
-      .attr(refl::type_attr::kStructuralVisit, reinterpret_cast<void*>(&BroadcastVisit))
-      .attr(refl::type_attr::kStructuralMutate, reinterpret_cast<void*>(&BroadcastMutate))
+      .attr(refl::type_attr::kStructuralVisit, ffi::FStructuralVisit::FromNative<&BroadcastVisit>())
+      .attr(refl::type_attr::kStructuralMutate,
+            ffi::FStructuralMutate::FromNative<&BroadcastMutate>())
       .attr(refl::type_attr::kStructuralMaybeInplaceMutate,
-            reinterpret_cast<void*>(&BroadcastMaybeInplaceMutate));
+            ffi::FStructuralMutate::FromNative<&BroadcastMaybeInplaceMutate>());
 
-  refl::GlobalDef().def("prim.Broadcast", [](PrimExpr value, PrimExpr lanes, Span span) {
-    return Broadcast(value, lanes, span);
+  refl::GlobalDef().def("prim.Broadcast", [](PrimExpr value, PrimExpr lanes, Location loc) {
+    return Broadcast(value, lanes, loc);
   });
 }
 
 // Shuffle
-Shuffle::Shuffle(ffi::Array<PrimExpr> vectors, ffi::Array<PrimExpr> indices, Span span) {
+Shuffle::Shuffle(ffi::Array<PrimExpr> vectors, ffi::Array<PrimExpr> indices, Location loc)
+    : PrimExpr(ffi::UnsafeInit{}) {
   TVM_FFI_ICHECK_NE(vectors.size(), 0U);
   TVM_FFI_ICHECK_NE(indices.size(), 0U);
 
@@ -312,7 +317,7 @@ Shuffle::Shuffle(ffi::Array<PrimExpr> vectors, ffi::Array<PrimExpr> indices, Spa
   node->ExprNode::ty = base_type.WithLanes(static_cast<int>(indices.size()));
   node->vectors = std::move(vectors);
   node->indices = std::move(indices);
-  node->span = std::move(span);
+  node->loc = loc;
   data_ = node;
 }
 
@@ -320,18 +325,19 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   ShuffleNode::RegisterReflection();
   refl::TypeAttrDef<ShuffleNode>()
-      .attr(refl::type_attr::kStructuralVisit, reinterpret_cast<void*>(&ShuffleVisit))
-      .attr(refl::type_attr::kStructuralMutate, reinterpret_cast<void*>(&ShuffleMutate))
+      .attr(refl::type_attr::kStructuralVisit, ffi::FStructuralVisit::FromNative<&ShuffleVisit>())
+      .attr(refl::type_attr::kStructuralMutate,
+            ffi::FStructuralMutate::FromNative<&ShuffleMutate>())
       .attr(refl::type_attr::kStructuralMaybeInplaceMutate,
-            reinterpret_cast<void*>(&ShuffleMaybeInplaceMutate));
+            ffi::FStructuralMutate::FromNative<&ShuffleMaybeInplaceMutate>());
 
-  refl::GlobalDef().def("prim.Shuffle",
-                        [](ffi::Array<PrimExpr> vectors, ffi::Array<PrimExpr> indices, Span span) {
-                          return Shuffle(vectors, indices, span);
-                        });
+  refl::GlobalDef().def(
+      "prim.Shuffle", [](ffi::Array<PrimExpr> vectors, ffi::Array<PrimExpr> indices, Location loc) {
+        return Shuffle(vectors, indices, loc);
+      });
 }
 
-PrimExpr Shuffle::Concat(ffi::Array<PrimExpr> vectors, Span span) {
+PrimExpr Shuffle::Concat(ffi::Array<PrimExpr> vectors, Location loc) {
   TVM_FFI_ICHECK_NE(vectors.size(), 0);
   if (vectors.size() == 1) {
     return vectors[0];
@@ -343,11 +349,11 @@ PrimExpr Shuffle::Concat(ffi::Array<PrimExpr> vectors, Span span) {
       indices.push_back(IntImm::Int32(index++));
     }
   }
-  return Shuffle(vectors, indices, span);
+  return Shuffle(vectors, indices, loc);
 }
 
-PrimExpr Shuffle::ExtractElement(PrimExpr vector, int index, Span span) {
-  return Shuffle({vector}, {IntImm::Int32(index)}, span);
+PrimExpr Shuffle::ExtractElement(PrimExpr vector, int index, Location loc) {
+  return Shuffle({vector}, {IntImm::Int32(index)}, loc);
 }
 
 }  // namespace prim

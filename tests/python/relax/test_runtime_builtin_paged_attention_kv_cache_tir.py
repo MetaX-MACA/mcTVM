@@ -117,7 +117,7 @@ def test_paged_prefill_layer_sliding_window_mask(device_type):
         page_size=page_size,
         sliding_window_size=3,
     )
-    built = tvm.tirx.build(tir_func, target=target)
+    built = tvm.tirx.compile(tir_func, target=target).mod
 
     q = np.zeros((2, num_qo_heads, head_dim), dtype="float16")
     q_indptr = np.array([0, 2], dtype="int32")
@@ -152,6 +152,41 @@ def test_paged_prefill_layer_sliding_window_mask(device_type):
         built.main(*args, 1, 0, 1.0, 10000.0, 1 / math.sqrt(head_dim))
         expected = np.array([4, 5], dtype="float16")
         tvm.testing.assert_allclose(args[8].numpy()[:, 0, 0], expected, rtol=1e-3, atol=1e-3)
+
+    tvm.testing.run_with_gpu_lock(run_and_check)
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_gpu(), reason="need gpu")
+@pytest.mark.parametrize("device_type", ["cuda", "metal"])
+def test_paged_attention_kv_cache_sliding_window_two_sequences(device_type):
+    if not tvm.testing.device_enabled(device_type):
+        pytest.skip(f"{device_type} not enabled")
+
+    head_dim = 64
+    dtype = "float16"
+
+    def run_and_check():
+        global device
+        device = tvm.device(device_type)
+        set_global_func(head_dim, dtype, tvm.target.Target.from_device(device))
+        try:
+            cache = create_kv_cache(head_dim, dtype, RopeMode.NONE, True)
+            fadd_sequence(cache, 0)
+            fadd_sequence(cache, 1)
+            fbegin_forward(cache, Shape([0, 1]), Shape([1, 1]))
+            qkv = np.random.rand(2, num_qo_heads + 2 * num_kv_heads, head_dim).astype(dtype)
+            output = tvm.runtime.empty((2, num_qo_heads, head_dim), dtype, device=device)
+            fattention_with_fuse_qkv(
+                cache, 0, head_dim**-0.5, tvm.runtime.tensor(qkv, device=device), output
+            )
+            fend_forward(cache)
+        finally:
+            device = None
+        # Each sequence holds one token, so every query head returns the value of its KV head.
+        values = qkv[:, num_qo_heads + num_kv_heads :, :]
+        expected = np.repeat(values, num_qo_heads // num_kv_heads, axis=1)
+        tvm.testing.assert_allclose(output.numpy(), expected, rtol=1e-3, atol=1e-3)
 
     tvm.testing.run_with_gpu_lock(run_and_check)
 
@@ -234,7 +269,7 @@ def set_global_func(head_dim, dtype, target):
             mod = tvm.IRModule({"main": tir_func})
             with target:
                 mod = dl.ApplyDefaultSchedule(dl.gpu.Fallback())(mod)
-            f = tvm.tirx.build(mod["main"], target=target)
+            f = tvm.tirx.compile(mod["main"], target=target).mod
             builts.append(f.main)
         builts = tuple(builts)
         _COMPILED_KERNEL_CACHE[cache_key] = builts

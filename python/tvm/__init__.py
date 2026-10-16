@@ -19,8 +19,8 @@
 """TVM: Open Deep Learning Compiler Stack."""
 
 import multiprocessing
-import sys
 import os
+import sys
 
 # ffi module must load first
 from tvm_ffi import register_object, register_global_func, get_global_func
@@ -31,7 +31,7 @@ from .base import _RUNTIME_ONLY
 
 # tvm.runtime
 from .runtime import Object
-from .runtime._tensor import device, device_from_target, cpu, cuda, opencl, vulkan, metal
+from .runtime._tensor import device, cpu, cuda, opencl, vulkan, metal
 from .runtime._tensor import vpi, rocm, ext_dev, hexagon
 from .runtime._tensor import maca
 from .runtime import DataType, DataTypeCode
@@ -41,8 +41,7 @@ from . import error
 
 # tvm.ir
 from .ir import IRModule
-from .ir import transform
-from .ir import instrument
+from . import transform
 from . import ir
 
 # tvm.script — must be imported before any dialect package so that
@@ -58,12 +57,13 @@ from . import backend
 
 # tvm.target
 from . import target
+from .target import device_from_target
 
 # tvm.te
 from . import te
 
 # tvm.driver
-from .driver import build, compile
+from .driver import compile
 
 # others
 from . import sym
@@ -126,3 +126,11 @@ sys.excepthook = tvm_wrap_excepthook(sys.excepthook)
 from .backend._autoload_backends import _autoload_backends
 
 _autoload_backends()
+
+# Load the optional ORC JIT extension for its global FFI registrations.  LLVM
+# function lookup reports a targeted installation error if this import fails;
+# importing TVM itself remains silent for AOT-only workflows.
+try:
+    import tvm_ffi_orcjit as _tvm_ffi_orcjit
+except Exception:  # pylint: disable=broad-exception-caught
+    pass

@@ -26,17 +26,26 @@ from tvm.script import ir as I
 from tvm.script import tirx as T
 
 
+def _is_tensor_binding(node, *op_names):
+    return (
+        isinstance(node, tvm.ir.Bind)
+        and isinstance(node.value, tvm.ir.Call)
+        and isinstance(node.value.op, tvm.ir.Op)
+        and node.value.op.name in op_names
+    )
+
+
 def test_alloc_seq():
     scope_tb = "local.L0A"
 
-    @T.prim_func(s_tir=True)
+    @T.function
     def func(n: T.int32):
         for i in T.serial(n):
             for j in range(10):
-                A = T.alloc_buffer((200,), scope=scope_tb)
+                A = T.alloc_tensor(ty_args=[T.Tensor((200,), scope=scope_tb)])
                 A[j] = T.float32(1.2)
             for j in range(10):
-                B = T.alloc_buffer((200,), scope=scope_tb)
+                B = T.alloc_tensor(ty_args=[T.Tensor((200,), scope=scope_tb)])
                 B[j] = T.float32(1.3)
 
     mod = tvm.IRModule.from_expr(func)
@@ -45,27 +54,27 @@ def test_alloc_seq():
     num_alloc = [0]
 
     def verify(n):
-        if isinstance(n, tvm.tirx.AllocBuffer):
+        if _is_tensor_binding(n, "tirx.alloc_tensor"):
             num_alloc[0] += 1
-            assert n.buffer.ty.shape[0].value == 200
+            assert n.var.ty.shape[0].value == 200
 
     tvm_ffi.structural_walk(body, verify)
     assert num_alloc[0] == 1
 
 
 def test_alloc_different_dtypes():
-    # Test cross-loop buffer access with buffers allocated in parent scope
+    # Test cross-loop tensor access with tensors allocated in parent scope
     def make_mod(dtype_list, length):
         assert len(dtype_list) == 4
 
-        @T.prim_func(s_tir=True)
+        @T.function
         def func():
-            # Allocate all buffers in parent scope (before any loops)
-            A = T.alloc_buffer((length,), dtype_list[0], scope="local.L0A")
-            B = T.alloc_buffer((length,), dtype_list[1], scope="local.L0A")
-            C = T.alloc_buffer((length,), dtype_list[2], scope="local.L0A")
-            D = T.alloc_buffer((length,), dtype_list[3], scope="local.L0A")
-            E = T.alloc_buffer((length,), "int8", scope="local.L0A")
+            # Allocate all tensors in parent scope (before any loops)
+            A = T.alloc_tensor(ty_args=[T.Tensor((length,), dtype_list[0], scope="local.L0A")])
+            B = T.alloc_tensor(ty_args=[T.Tensor((length,), dtype_list[1], scope="local.L0A")])
+            C = T.alloc_tensor(ty_args=[T.Tensor((length,), dtype_list[2], scope="local.L0A")])
+            D = T.alloc_tensor(ty_args=[T.Tensor((length,), dtype_list[3], scope="local.L0A")])
+            E = T.alloc_tensor(ty_args=[T.Tensor((length,), "int8", scope="local.L0A")])
 
             for j in range(length):
                 A[j] = T.Cast(dtype_list[0], 1)
@@ -100,8 +109,8 @@ def test_alloc_different_dtypes():
 
     def dtype_test(dtype_list, length):
         def verify(n):
-            if isinstance(n, tvm.tirx.AllocBuffer):
-                assert n.buffer.ty.shape[0].value == offset
+            if _is_tensor_binding(n, "tirx.alloc_tensor"):
+                assert n.var.ty.shape[0].value == offset
 
         mod = make_mod(dtype_list, length)
         offset = offset_generater(dtype_list, length)
@@ -125,40 +134,40 @@ def test_alloc_different_dtypes():
 
 def test_address_of():
     # In this test, the storage rewrite pass is allowed to
-    # combine buffers B and D, but not C
-    @T.prim_func(s_tir=True)
-    def before(A: T.Buffer(8, "float32"), E: T.Buffer(8, "float32")):
-        B = T.alloc_buffer((8,))
+    # combine tensors B and D, but not C
+    @T.function
+    def before(A: T.Tensor(8, "float32"), E: T.Tensor(8, "float32")):
+        B = T.alloc_tensor(ty_args=[T.Tensor((8,))])
         for i in range(8):
             B[i] = (
-                T.call_extern("deref", T.address_of(A[i]), dtype="float32")
-                + T.call_extern("deref", T.address_of(A[0]), dtype="float32")
+                T.call_extern("deref", T.address_of(A[i]), ty="float32")
+                + T.call_extern("deref", T.address_of(A[0]), ty="float32")
                 + T.float32(1)
             )
-        C = T.alloc_buffer((8,))
+        C = T.alloc_tensor(ty_args=[T.Tensor((8,))])
         for i in range(8):
             C[i] = (
-                T.call_extern("deref", T.address_of(B[i]), dtype="float32")
-                + T.call_extern("deref", T.address_of(B[0]), dtype="float32")
+                T.call_extern("deref", T.address_of(B[i]), ty="float32")
+                + T.call_extern("deref", T.address_of(B[0]), ty="float32")
                 + T.float32(2)
             )
-        D = T.alloc_buffer((8,))
+        D = T.alloc_tensor(ty_args=[T.Tensor((8,))])
         for i in range(8):
             D[i] = (
-                T.call_extern("deref", T.address_of(C[i]), dtype="float32")
-                + T.call_extern("deref", T.address_of(C[0]), dtype="float32")
+                T.call_extern("deref", T.address_of(C[i]), ty="float32")
+                + T.call_extern("deref", T.address_of(C[0]), ty="float32")
                 + T.float32(2)
             )
         for i in range(8):
             E[i] = (
-                T.call_extern("deref", T.address_of(D[i]), dtype="float32")
-                + T.call_extern("deref", T.address_of(D[0]), dtype="float32")
+                T.call_extern("deref", T.address_of(D[i]), ty="float32")
+                + T.call_extern("deref", T.address_of(D[0]), ty="float32")
                 + T.float32(3)
             )
 
     def verify(n):
-        if isinstance(n, tvm.tirx.AllocBuffer):
-            total_alloc[0] += n.buffer.ty.shape[0].value
+        if _is_tensor_binding(n, "tirx.alloc_tensor"):
+            total_alloc[0] += n.var.ty.shape[0].value
 
     total_alloc = [0]
     mod = tvm.IRModule.from_expr(before.with_attr("global_symbol", "main"))
@@ -172,52 +181,53 @@ def test_address_of():
 
 
 def test_parallel_alloc():
-    @T.prim_func(s_tir=True)
+    @T.function
     def func1(n: T.int32):
         for i in T.parallel(n):
             for j in range(10):
-                A = T.alloc_buffer((n,))
+                A = T.alloc_tensor(ty_args=[T.Tensor((n,))])
                 A[j] = A[j] + T.float32(2)
 
     mod = tvm.IRModule.from_expr(func1)
     body = tvm.tirx.transform.StorageRewrite()(mod)["func1"]
 
-    # With flat AllocBuffer, the for body is a SeqStmt; first element is AllocBuffer
-    assert isinstance(body.body.body[0], tvm.tirx.AllocBuffer)
+    # With flat AllocTensor, the for body is a SeqStmt; first element is AllocTensor
+    assert _is_tensor_binding(body.body[0].body[0], "tirx.alloc_tensor")
 
-    @T.prim_func(s_tir=True)
+    @T.function
     def func2(n: T.int32):
         for t in T.serial(n):
-            with T.attr(T.int32(1), "pragma_scope", "parallel_launch_point"):
+            with T.parallel_launch():
                 for i in T.parallel(n):
                     for j in range(10):
-                        A = T.alloc_buffer((n,))
+                        A = T.alloc_tensor(ty_args=[T.Tensor((n,))])
                         A[j] = A[j] + T.float32(2)
 
     mod = tvm.IRModule.from_expr(func2)
     body = tvm.tirx.transform.StorageRewrite()(mod)["func2"]
 
-    assert isinstance(body.body.body.body.body[0], tvm.tirx.AllocBuffer)
+    # The launch body owns the allocation executed by each worker.
+    assert _is_tensor_binding(body.body[0].body[0].body[0], "tirx.alloc_tensor")
 
 
 def test_while_alloc():
-    @T.prim_func(s_tir=True)
+    @T.function
     def func_parallel(n: T.int32):
         for i in T.parallel(n):
-            j = T.alloc_buffer((1,), "int32")
+            j = T.alloc_tensor(ty_args=[T.Tensor((1,), "int32")])
             j[0] = 0
             while j[0] < 10:
-                A = T.alloc_buffer((n,))
+                A = T.alloc_tensor(ty_args=[T.Tensor((n,))])
                 A[j[0]] = A[j[0]] + T.float32(2)
                 j[0] = j[0] + j[0] + 1
 
-    @T.prim_func(s_tir=True)
+    @T.function
     def func_serial(n: T.int32):
         for i in T.serial(n):
-            j = T.alloc_buffer((1,), "int32")
+            j = T.alloc_tensor(ty_args=[T.Tensor((1,), "int32")])
             j[0] = 0
             while j[0] < 10:
-                A = T.alloc_buffer((n,))
+                A = T.alloc_tensor(ty_args=[T.Tensor((n,))])
                 A[j[0]] = A[j[0]] + T.float32(2)
                 j[0] = j[0] + j[0] + 1
 
@@ -234,15 +244,15 @@ def test_while_alloc():
     # }
     body = tvm.tirx.transform.StorageRewrite()(mod)["func_parallel"]
     # Navigate to inside the for loop, then check that allocations exist
-    # The structure with DeclBuffer is:
-    #   parallel (i, 0, n) { DeclBuffer(j, DeclBuffer(A, ...)) }
-    # or with Allocate+DeclBuffer pairs
-    inner = body.body.body  # inside For
-    # Skip DeclBuffer nodes to find Allocate
+    # The structure with DeclTensor is:
+    #   parallel (i, 0, n) { DeclTensor(j, DeclTensor(A, ...)) }
+    # or with Allocate+DeclTensor pairs
+    inner = body.body[0].body  # inside For
+    # Skip DeclTensor nodes to find Allocate
     num_alloc = [0]
 
     def count_alloc(n):
-        if isinstance(n, tvm.tirx.AllocBuffer):
+        if _is_tensor_binding(n, "tirx.alloc_tensor"):
             num_alloc[0] += 1
 
     tvm_ffi.structural_walk(inner, count_alloc)
@@ -256,21 +266,21 @@ def test_while_alloc():
 
 
 def test_alloc_seq_type():
-    @T.prim_func(s_tir=True)
+    @T.function
     def func(n: T.int32):
         for i in T.serial(n):
             for j in range(10):
-                A = T.alloc_buffer((200,), scope="local.L0A")
-                A1 = T.alloc_buffer((200,), scope="local.L0A")
+                A = T.alloc_tensor(ty_args=[T.Tensor((200,), scope="local.L0A")])
+                A1 = T.alloc_tensor(ty_args=[T.Tensor((200,), scope="local.L0A")])
                 A[j] = T.float32(1.2)
                 A1[j] = T.float32(1.3)
-                B = T.alloc_buffer((200,), "int16", scope="local.L0A")
+                B = T.alloc_tensor(ty_args=[T.Tensor((200,), "int16", scope="local.L0A")])
                 B[j] = T.int16(1)
-                C = T.alloc_buffer((200,), "int16", scope="local.L0A")
+                C = T.alloc_tensor(ty_args=[T.Tensor((200,), "int16", scope="local.L0A")])
                 C[j] = T.int16(1)
-                D = T.alloc_buffer((200,), "int16", scope="local.L0A")
+                D = T.alloc_tensor(ty_args=[T.Tensor((200,), "int16", scope="local.L0A")])
                 D[j] = B[j] + C[j]
-                A2 = T.alloc_buffer((200,), scope="local.L0A")
+                A2 = T.alloc_tensor(ty_args=[T.Tensor((200,), scope="local.L0A")])
                 A2[j] = A[j]
 
     mod = tvm.IRModule.from_expr(func)
@@ -279,9 +289,9 @@ def test_alloc_seq_type():
     num_alloc = [0]
 
     def verify(n):
-        if isinstance(n, tvm.tirx.AllocBuffer):
+        if _is_tensor_binding(n, "tirx.alloc_tensor"):
             num_alloc[0] += 1
-            assert n.buffer.ty.shape[0].value == 500
+            assert n.var.ty.shape[0].value == 500
 
     tvm_ffi.structural_walk(body, verify)
     assert num_alloc[0] == 1
@@ -290,17 +300,17 @@ def test_alloc_seq_type():
 def test_alloc_seq_type2():
     scope_tb = "local.L0A2"
 
-    @T.prim_func(s_tir=True)
+    @T.function
     def func(n: T.int32):
         for i in T.serial(n):
             for j in range(10):
-                A = T.alloc_buffer((200,), scope=scope_tb)
+                A = T.alloc_tensor(ty_args=[T.Tensor((200,), scope=scope_tb)])
                 A[j] = T.float32(1.2)
             for j in range(20):
-                B = T.alloc_buffer((400,), "int16", scope=scope_tb)
+                B = T.alloc_tensor(ty_args=[T.Tensor((400,), "int16", scope=scope_tb)])
                 B[j] = T.int16(1)
             for j in range(10):
-                C = T.alloc_buffer((200,), scope=scope_tb)
+                C = T.alloc_tensor(ty_args=[T.Tensor((200,), scope=scope_tb)])
                 C[j] = T.float32(1.2)
 
     mod = tvm.IRModule.from_expr(func)
@@ -309,30 +319,30 @@ def test_alloc_seq_type2():
     num_alloc = [0]
 
     def verify(n):
-        if isinstance(n, tvm.tirx.AllocBuffer):
+        if _is_tensor_binding(n, "tirx.alloc_tensor"):
             num_alloc[0] += 1
-            assert n.buffer.ty.shape[0].value == 200
+            assert n.var.ty.shape[0].value == 200
 
     tvm_ffi.structural_walk(body, verify)
     assert num_alloc[0] == 1
 
 
-def test_reuse_small_buffer():
-    @T.prim_func(s_tir=True)
+def test_reuse_small_tensor():
+    @T.function
     def func(n: T.int32):
         for i in T.serial(n):
             for j in range(10):
-                A = T.alloc_buffer((200,), "int16", scope="local.L0A")
+                A = T.alloc_tensor(ty_args=[T.Tensor((200,), "int16", scope="local.L0A")])
                 A[j] = T.int16(1)
-                B = T.alloc_buffer((200,), "int16", scope="local.L0A")
+                B = T.alloc_tensor(ty_args=[T.Tensor((200,), "int16", scope="local.L0A")])
                 B[j] = T.int16(1)
-                B1 = T.alloc_buffer((200,), "int16", scope="local.L0A")
+                B1 = T.alloc_tensor(ty_args=[T.Tensor((200,), "int16", scope="local.L0A")])
                 B1[j] = A[j] + B[j]
-                C = T.alloc_buffer((400,), "int16", scope="local.L0A")
+                C = T.alloc_tensor(ty_args=[T.Tensor((400,), "int16", scope="local.L0A")])
                 C[j] = T.int16(1)
-                D = T.alloc_buffer((400,), "int16", scope="local.L0A")
+                D = T.alloc_tensor(ty_args=[T.Tensor((400,), "int16", scope="local.L0A")])
                 D[j] = T.int16(1)
-                E = T.alloc_buffer((400,), "int16", scope="local.L0A")
+                E = T.alloc_tensor(ty_args=[T.Tensor((400,), "int16", scope="local.L0A")])
                 E[j] = C[j]
 
     mod = tvm.IRModule.from_expr(func)
@@ -341,29 +351,29 @@ def test_reuse_small_buffer():
     num_alloc = [0]
 
     def verify(n):
-        if isinstance(n, tvm.tirx.AllocBuffer):
+        if _is_tensor_binding(n, "tirx.alloc_tensor"):
             num_alloc[0] += 1
-            assert n.buffer.ty.shape[0].value == 800
+            assert n.var.ty.shape[0].value == 800
 
     tvm_ffi.structural_walk(body, verify)
     assert num_alloc[0] == 1
 
 
 def test_access_in_let_value():
-    @T.prim_func(s_tir=True)
-    def func(A: T.Buffer((8,), "float32")):
+    @T.function
+    def func(A: T.Tensor((8,), "float32")):
         for i in range(8):
-            B = T.alloc_buffer((1,))
+            B = T.alloc_tensor(ty_args=[T.Tensor((1,))])
             B[0] = 3.14
-            x: T.let[T.float32] = T.exp(B[0], dtype="float32")
+            x: T.let[T.float32] = T.exp(B[0])
             A[i] = (x + 1.0) / (x - 1.0)
 
-    @T.prim_func(s_tir=True)
-    def func_rewritten(A: T.Buffer((8,), "float32")) -> None:
-        B = T.alloc_buffer((1,))
+    @T.function
+    def func_rewritten(A: T.Tensor((8,), "float32")) -> None:
+        B = T.alloc_tensor(ty_args=[T.Tensor((1,))])
         for i in range(8):
             B[0] = 3.14
-            x: T.let[T.float32] = T.exp(B[0], dtype="float32")
+            x: T.let[T.float32] = T.exp(B[0])
             A[i] = (x + 1.0) / (x - 1.0)
 
     mod = tvm.tirx.transform.StorageRewrite()(
@@ -372,36 +382,34 @@ def test_access_in_let_value():
     tvm.ir.assert_structural_equal(mod["main"], func_rewritten.with_attr("global_symbol", "main"))
 
 
-def test_decl_buffer_is_not_vectorized():
-    """StorageRewrite leaves explicit DeclBuffer views unchanged.
+def test_decl_tensor_is_not_vectorized():
+    """StorageRewrite leaves explicit DeclTensor views unchanged.
 
-    Vectorization of DeclBuffer views was dropped because the rewritten result
-    violates the immutable BufferVar binding invariants.
+    Vectorization of DeclTensor views was dropped because the rewritten result
+    violates the immutable TensorVar binding invariants.
     """
 
     @I.ir_module
     class Before:
-        @T.prim_func(s_tir=True)
+        @T.function
         def main() -> None:
-            A_data: T.let[T.handle("int32")] = T.call_extern(
-                "dummy_func", dtype=T.handle("int32").ty
-            )
-            A = T.decl_buffer([8], "int32", data=A_data)
+            A_data: T.let[T.handle("int32")] = T.call_extern("dummy_func", ty=T.handle("int32").ty)
+            A = T.decl_tensor(A_data, ty_args=[T.Tensor([8], "int32", data=A_data)])
             A[T.ramp(0, 1, 8)] = T.broadcast(42, 8)
 
     After = tvm.tirx.transform.StorageRewrite()(Before)
     tvm.ir.assert_structural_equal(After, Before)
 
 
-def test_rewrite_decl_buffer():
-    """A DeclBuffer node may appear in StorageRewrite's input"""
+def test_rewrite_decl_tensor():
+    """A DeclTensor node may appear in StorageRewrite's input"""
 
     @I.ir_module
     class Before:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer(16, "float32"), D: T.Buffer(16, "float32")):
-            B = T.decl_buffer(16, dtype="float32")
-            C = T.decl_buffer(16, dtype="float32")
+        @T.function
+        def main(A: T.Tensor(16, "float32"), D: T.Tensor(16, "float32")):
+            B = T.alloc_tensor(ty_args=[T.Tensor(16, "float32")])
+            C = T.alloc_tensor(ty_args=[T.Tensor(16, "float32")])
 
             for i in range(16):
                 B[i] = A[i]
@@ -414,10 +422,10 @@ def test_rewrite_decl_buffer():
 
     @I.ir_module
     class Expected:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer(16, "float32"), D: T.Buffer(16, "float32")):
-            B = T.decl_buffer(16, dtype="float32")
-            C = T.decl_buffer(16, dtype="float32", data=B.data)
+        @T.function
+        def main(A: T.Tensor(16, "float32"), D: T.Tensor(16, "float32")):
+            B = T.alloc_tensor(ty_args=[T.Tensor(16, "float32")])
+            C = T.decl_tensor(B.data, ty_args=[T.Tensor(16, "float32", data=B.data)])
 
             for i in range(16):
                 B[i] = A[i]
@@ -433,26 +441,26 @@ def test_rewrite_decl_buffer():
     tvm.ir.assert_structural_equal(After, Expected)
 
 
-def test_decl_buffer_alias_chain_uses_flat_root():
+def test_decl_tensor_alias_chain_uses_flat_root():
     """StorageRewrite resolves every alias in a chain to the same flat root."""
 
     @I.ir_module
     class Before:
-        @T.prim_func(s_tir=True)
-        def main(D: T.Buffer(1, "float32")):
-            A = T.decl_buffer(16, dtype="float32")
-            B = T.decl_buffer(16, dtype="float32", data=A.data)
-            C = T.decl_buffer(16, dtype="float32", data=B.data)
+        @T.function
+        def main(D: T.Tensor(1, "float32")):
+            A = T.alloc_tensor(ty_args=[T.Tensor(16, "float32")])
+            B = T.decl_tensor(A.data, ty_args=[T.Tensor(16, "float32", data=A.data)])
+            C = T.decl_tensor(B.data, ty_args=[T.Tensor(16, "float32", data=B.data)])
             A[0] = 1.0
             D[0] = C[0]
 
     @I.ir_module
     class Expected:
-        @T.prim_func(s_tir=True)
-        def main(D: T.Buffer(1, "float32")):
-            A = T.decl_buffer(16, dtype="float32")
-            B = T.decl_buffer(16, dtype="float32", data=A.data)
-            C = T.decl_buffer(16, dtype="float32", data=A.data)
+        @T.function
+        def main(D: T.Tensor(1, "float32")):
+            A = T.alloc_tensor(ty_args=[T.Tensor(16, "float32")])
+            B = T.decl_tensor(A.data, ty_args=[T.Tensor(16, "float32", data=A.data)])
+            C = T.decl_tensor(A.data, ty_args=[T.Tensor(16, "float32", data=A.data)])
             A[0] = 1.0
             D[0] = C[0]
 
@@ -461,16 +469,16 @@ def test_decl_buffer_alias_chain_uses_flat_root():
     tvm.ir.assert_structural_equal(After, Expected)
 
 
-def test_decl_buffer_alias_extends_source_lifetime():
+def test_decl_tensor_alias_extends_source_lifetime():
     """An access through an alias prevents reuse of its source allocation."""
 
-    @T.prim_func(s_tir=True)
-    def func(D: T.Buffer(1, "float32")):
-        A = T.decl_buffer(16, dtype="float32")
-        B = T.decl_buffer(16, dtype="float32", data=A.data)
+    @T.function
+    def func(D: T.Tensor(1, "float32")):
+        A = T.alloc_tensor(ty_args=[T.Tensor(16, "float32")])
+        B = T.decl_tensor(A.data, ty_args=[T.Tensor(16, "float32", data=A.data)])
         A[0] = 1.0
 
-        C = T.decl_buffer(16, dtype="float32")
+        C = T.alloc_tensor(ty_args=[T.Tensor(16, "float32")])
         C[0] = 2.0
         D[0] = B[0] + C[0]
 
@@ -478,26 +486,28 @@ def test_decl_buffer_alias_extends_source_lifetime():
     allocations = []
     tvm_ffi.structural_walk(
         after.body,
-        lambda node: allocations.append(node) if isinstance(node, tvm.tirx.AllocBuffer) else None,
+        lambda node: (
+            allocations.append(node) if _is_tensor_binding(node, "tirx.alloc_tensor") else None
+        ),
     )
     assert len(allocations) == 2
 
 
-def test_no_orphaned_decl_buffer():
-    """A DeclBuffer of an unused Allocate should be removed
+def test_no_orphaned_decl_tensor():
+    """A DeclTensor of an unused Allocate should be removed
 
     StorageRewrite removes any allocations that are unused.  When it
-    does so, any DeclBuffer that refers to that allocation should also
+    does so, any DeclTensor that refers to that allocation should also
     be removed.
     """
 
     @I.ir_module
     class Before:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer(16, "float32"), D: T.Buffer(16, "float32")):
-            B = T.decl_buffer(16, dtype="float32")
-            C = T.decl_buffer(16, dtype="float32")
-            Unused = T.decl_buffer(16, dtype="float32")
+        @T.function
+        def main(A: T.Tensor(16, "float32"), D: T.Tensor(16, "float32")):
+            B = T.alloc_tensor(ty_args=[T.Tensor(16, "float32")])
+            C = T.alloc_tensor(ty_args=[T.Tensor(16, "float32")])
+            Unused = T.alloc_tensor(ty_args=[T.Tensor(16, "float32")])
 
             for i in range(16):
                 B[i] = A[i]
@@ -510,10 +520,10 @@ def test_no_orphaned_decl_buffer():
 
     @I.ir_module
     class Expected:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer(16, "float32"), D: T.Buffer(16, "float32")):
-            B = T.decl_buffer(16, dtype="float32")
-            C = T.decl_buffer(16, dtype="float32", data=B.data)
+        @T.function
+        def main(A: T.Tensor(16, "float32"), D: T.Tensor(16, "float32")):
+            B = T.alloc_tensor(ty_args=[T.Tensor(16, "float32")])
+            C = T.decl_tensor(B.data, ty_args=[T.Tensor(16, "float32", data=B.data)])
 
             for i in range(16):
                 B[i] = A[i]

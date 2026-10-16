@@ -91,7 +91,7 @@ class ASTPrinter(ExprFunctor):
         Handles whether to include the ty fields.
         """
         fields = kwargs.copy()
-        if not node.ty.is_missing() and self.include_ty_annotations:
+        if not isinstance(node.ty, tvm.ir.MissingType) and self.include_ty_annotations:
             fields["ty"] = self.visit_ty_(node.ty)
         return self.build_ast_node(nodename, force_newline=force_newline, **fields)
 
@@ -198,10 +198,10 @@ class ASTPrinter(ExprFunctor):
             body=self.visit_expr(op.body),
         )
 
-    def visit_if_(self, op: relax.If) -> str:
+    def visit_if_expr_(self, op: relax.IfExpr) -> str:
         return self.build_expr(
             op,
-            "If",
+            "IfExpr",
             cond=self.visit_expr(op.cond),
             true_branch=self.visit_expr(op.true_branch),
             false_branch=self.visit_expr(op.false_branch),
@@ -209,6 +209,9 @@ class ASTPrinter(ExprFunctor):
 
     def visit_string_imm_(self, op: tvm.ir.StringImm) -> str:
         return self.build_expr(op, "StringImm", value=wrap_quotes(op.value))
+
+    def visit_data_type_imm_(self, op: tvm.ir.DataTypeImm) -> str:
+        return self.build_expr(op, "DataTypeImm", value=str(op.value))
 
     def visit_op_(self, op: tvm.ir.Op) -> str:
         # TODO: List other attributes?

@@ -24,26 +24,21 @@ from tvm.script import tirx as T
 from tvm.testing import env
 
 
-@T.prim_func(s_tir=True)
-def ptx_griddepcontrol(A: T.Buffer((32,), "float32"), B: T.Buffer((32,), "float32")) -> None:
+@T.function
+def ptx_griddepcontrol(A: T.Tensor((32,), "float32"), B: T.Tensor((32,), "float32")) -> None:
     T.func_attr({"global_symbol": "default_function", "tirx.noalias": True})
-    bx = T.env_thread("blockIdx.x")
-    tx = T.env_thread("threadIdx.x")
-    T.launch_thread(bx, 1)
-    T.launch_thread(tx, 32)
-    with T.sblock():
-        T.reads(A[0:32])
-        T.writes(B[0:32])
-        T.ptx.griddepcontrol.wait()
-        B[tx] = A[tx]
-        T.ptx.griddepcontrol.launch_dependents()
+    T.launch_thread("blockIdx.x", 1)
+    tx = T.launch_thread("threadIdx.x", 32)
+    T.ptx.griddepcontrol.wait()
+    B[tx] = A[tx]
+    T.ptx.griddepcontrol.launch_dependents()
 
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 def test_ptx_griddepcontrol():
     f = ptx_griddepcontrol
-    mod = tvm.compile(f, target="cuda")
+    mod = tvm.tirx.compile(f, target="cuda")
     A_np = np.random.default_rng(0).standard_normal(32).astype("float32")
     B_np = np.zeros((32,), dtype="float32")
 

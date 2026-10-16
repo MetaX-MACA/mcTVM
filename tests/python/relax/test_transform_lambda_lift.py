@@ -26,6 +26,7 @@ from tvm.ir.base import assert_structural_equal
 from tvm.relax import transform
 from tvm.script import ir as I
 from tvm.script import relax as R
+from tvm.script import s_tir as Ts
 from tvm.script import tirx as T
 
 
@@ -47,7 +48,7 @@ def test_basic():
     """Functions can be listed from local bindings to the IRModule"""
 
     # the target IRModule
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Expected:
         @R.function(private=True)
         def main_inner(
@@ -63,7 +64,7 @@ def test_basic():
             gv1: R.Tensor((10, 5), "float32") = Expected.main_inner(x1, y1)
             return gv1
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Before:
         @R.function
         def main(x1: R.Tensor((10, 5), "float32"), y1: R.Tensor((10, 5), "float32")) -> R.Tensor(
@@ -96,7 +97,7 @@ def test_input_module_is_unmodified():
     variable, as that variable may be used by another IRModule.
     """
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Before:
         @R.function
         def main(x: R.Tensor((2, 3), "float32"), y: R.Tensor((2, 3), "float32")) -> R.Tensor(
@@ -129,7 +130,7 @@ def test_closure():
     """Lifting functions may require producing closures"""
 
     # the expected IRModule
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Expected:
         @R.function
         def main(x: R.Tensor((2, 3), "float32"), y: R.Tensor((2, 3), "float32")) -> R.Tensor(
@@ -150,7 +151,7 @@ def test_closure():
             return inner_func
 
     # IRModule to perform Lambda Lifting
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Before:
         @R.function
         def main(x: R.Tensor((2, 3), "float32"), y: R.Tensor((2, 3), "float32")) -> R.Tensor(
@@ -182,7 +183,7 @@ def test_recursive():
     """The lifted function may be recursively defined"""
 
     # the expected IRModule
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Expected:
         @R.function(private=True)
         def main_while_loop(
@@ -212,7 +213,7 @@ def test_recursive():
             return gv
 
     # the IRModule to apply lambda lifting
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Before:
         @R.function
         def main(x: R.Tensor((2, 3), "float32")) -> R.Tensor:
@@ -256,7 +257,7 @@ def test_multi_func():
     """
 
     # expected IRModule
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Expected:
         @R.function
         def glob_func_1(
@@ -287,7 +288,7 @@ def test_multi_func():
             return s1
 
     # the IRModule to apply lambda lifting
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Before:
         @R.function
         def glob_func_1(
@@ -327,22 +328,22 @@ def test_multi_func():
 
 
 def test_no_local_func():
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Before:
-        @T.prim_func(s_tir=True)
+        @Ts.function
         def sub(
-            A: T.Buffer((16, 16), "float32"),
-            B: T.Buffer((16, 16), "float32"),
-            C: T.Buffer((16, 16), "float32"),
+            A: T.Tensor((16, 16), "float32"),
+            B: T.Tensor((16, 16), "float32"),
+            C: T.Tensor((16, 16), "float32"),
         ) -> None:
             for i, j in T.grid(16, 16):
-                with T.sblock("sub"):
-                    vi, vj = T.axis.remap("SS", [i, j])
+                with Ts.sblock("sub"):
+                    vi, vj = Ts.axis.remap("SS", [i, j])
                     C[vi, vj] = A[vi, vj] - B[vi, vj]
 
         @R.function
         def before(c0: R.Tensor((16, 16), "float32"), x: R.Tensor(dtype="float32", ndim=2)):
-            s = R.call_tir(Before.sub, (c0, x), R.Tensor((16, 16), dtype="float32"))
+            s = R.call_tir(Before.sub, (c0, x), ty_args=[R.Tensor((16, 16), dtype="float32")])
             return s
 
     before = Before
@@ -354,11 +355,11 @@ def test_no_local_func():
 
 
 def test_impure_function():
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Expected:
         @R.function(pure=False, private=True)
         def main_inner() -> R.Tuple:
-            y = R.print(format="Wow!")
+            y = R.print("Wow!")
             return y
 
         @R.function(pure=False)
@@ -366,13 +367,13 @@ def test_impure_function():
             gv1 = Expected.main_inner()
             return x
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Before:
         @R.function(pure=False)
         def main(x: R.Tensor((), "int32")) -> R.Tensor((), "int32"):
             @R.function(pure=False)
             def inner() -> R.Tuple:
-                y = R.print(format="Wow!")
+                y = R.print("Wow!")
                 return y
 
             gv1 = inner()
@@ -394,7 +395,7 @@ def test_lambda_function_with_same_name_as_global():
     choice of name for the hoisted function.
     """
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Before:
         @R.function
         def main(x1: R.Tensor((10, 5), "float32"), y1: R.Tensor((10, 5), "float32")) -> R.Tensor(
@@ -412,9 +413,9 @@ def test_lambda_function_with_same_name_as_global():
 
         @R.function
         def main_inner():
-            return R.tuple()
+            return ()
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Expected:
         @R.function
         def main(x1: R.Tensor((10, 5), "float32"), y1: R.Tensor((10, 5), "float32")) -> R.Tensor(
@@ -432,28 +433,34 @@ def test_lambda_function_with_same_name_as_global():
 
         @R.function
         def main_inner():
-            return R.tuple()
+            return ()
 
     after = transform.LambdaLift()(Before)
     assert_structural_equal(Expected, after)
 
 
 def test_symbolic_variable_defined_by_inner_func():
-    @I.ir_module(s_tir=True)
+    n = T.dynamic("n")
+    m = T.dynamic("m")
+
+    @I.ir_module
     class Before:
         @R.function
         def main(x1: R.Tensor((10, 5), "float32"), y1: R.Tensor((10, 5), "float32")) -> R.Tensor(
             (10, 5), "float32"
         ):
             @R.function
-            def inner(x2: R.Tensor(("n", "m"), "float32"), y2: R.Tensor(("n", "m"), "float32")):
+            def inner(x2: R.Tensor((n, m), "float32"), y2: R.Tensor((n, m), "float32")):
                 sum_inner = R.add(x2, y2)
                 return sum_inner
 
             sum_main = inner(x1, y1)
             return sum_main
 
-    @I.ir_module(s_tir=True)
+    n = T.dynamic("n")
+    m = T.dynamic("m")
+
+    @I.ir_module
     class Expected:
         @R.function
         def main(x1: R.Tensor((10, 5), "float32"), y1: R.Tensor((10, 5), "float32")) -> R.Tensor(
@@ -464,8 +471,8 @@ def test_symbolic_variable_defined_by_inner_func():
 
         @R.function(private=True)
         def main_inner(
-            x2: R.Tensor(("n", "m"), "float32"), y2: R.Tensor(("n", "m"), "float32")
-        ) -> R.Tensor(("n", "m"), "float32"):
+            x2: R.Tensor((n, m), "float32"), y2: R.Tensor((n, m), "float32")
+        ) -> R.Tensor((n, m), "float32"):
             sum_inner = R.add(x2, y2)
             return sum_inner
 
@@ -474,21 +481,22 @@ def test_symbolic_variable_defined_by_inner_func():
 
 
 def test_runtime_symbolic_variable_defined_by_inner_func():
-    @I.ir_module(s_tir=True)
+    n_from_param = T.dynamic("n")
+    n_from_match_cast = T.dynamic("n")
+
+    @I.ir_module
     class Before:
         @R.function
         def main(x: R.Tensor((4,), "float32")):
             @R.function
-            def from_param(y: R.Tensor(("n",), "float32")):
-                n = T.int64()
-                z = R.ones((n,), "float32")
+            def from_param(y: R.Tensor((n_from_param,), "float32")):
+                z = R.ones((n_from_param,), "float32")
                 return z
 
             @R.function
             def from_match_cast(y: R.Tensor(ndim=1, dtype="float32")):
-                n = T.int64()
-                y2 = R.match_cast(y, R.Tensor((n,), "float32"))
-                z = R.ones((n,), "float32")
+                y2 = R.match_cast(y, R.Tensor((n_from_match_cast,), "float32"))
+                z = R.ones((n_from_match_cast,), "float32")
                 return z
 
             a = from_param(x)
@@ -502,15 +510,15 @@ def test_runtime_symbolic_variable_defined_by_inner_func():
 
 
 def test_symbolic_variable_defined_by_outer_func():
-    @I.ir_module(s_tir=True)
+    n = T.dynamic("n")
+    m = T.dynamic("m")
+
+    @I.ir_module
     class Before:
         @R.function
-        def main(
-            x1: R.Tensor(("n", "m"), "float32"), y1: R.Tensor(("n", "m"), "float32")
-        ) -> R.Tensor(("n", "m"), "float32"):
-            n = T.int64()
-            m = T.int64()
-
+        def main(x1: R.Tensor((n, m), "float32"), y1: R.Tensor((n, m), "float32")) -> R.Tensor(
+            (n, m), "float32"
+        ):
             @R.function
             def inner(x2: R.Tensor((n, m), "float32"), y2: R.Tensor((n, m), "float32")):
                 sum_inner = R.add(x2, y2)
@@ -519,19 +527,25 @@ def test_symbolic_variable_defined_by_outer_func():
             sum_main = inner(x1, y1)
             return sum_main
 
-    @I.ir_module(s_tir=True)
+    n_main = T.dynamic("n")
+    m_main = T.dynamic("m")
+    n_main_inner = T.dynamic("n")
+    m_main_inner = T.dynamic("m")
+
+    @I.ir_module
     class Expected:
         @R.function
         def main(
-            x1: R.Tensor(("n", "m"), "float32"), y1: R.Tensor(("n", "m"), "float32")
-        ) -> R.Tensor(("n", "m"), "float32"):
+            x1: R.Tensor((n_main, m_main), "float32"), y1: R.Tensor((n_main, m_main), "float32")
+        ) -> R.Tensor((n_main, m_main), "float32"):
             sum_main = Expected.main_inner(x1, y1)
             return sum_main
 
         @R.function(private=True)
         def main_inner(
-            x2: R.Tensor(("n", "m"), "float32"), y2: R.Tensor(("n", "m"), "float32")
-        ) -> R.Tensor(("n", "m"), "float32"):
+            x2: R.Tensor((n_main_inner, m_main_inner), "float32"),
+            y2: R.Tensor((n_main_inner, m_main_inner), "float32"),
+        ) -> R.Tensor((n_main_inner, m_main_inner), "float32"):
             sum_inner = R.add(x2, y2)
             return sum_inner
 

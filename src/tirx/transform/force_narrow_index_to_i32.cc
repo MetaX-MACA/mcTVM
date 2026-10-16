@@ -19,61 +19,53 @@
 
 /*!
  * \file force_narrow_index_to_i32.cc
- * \brief Force narrow down indexing expressions and integer buffers to int32 dtype.
+ * \brief Force narrow down indexing expressions and integer tensors to int32 dtype.
  * \note This pass is not used in default cases.
  */
 
 #include <tvm/ffi/cast.h>
 #include <tvm/ffi/reflection/registry.h>
-#include <tvm/tirx/op.h>
+#include <tvm/ir/prim/op.h>
+#include <tvm/tirx/op/memory.h>
+#include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/transform.h>
+
+#include <utility>
 
 #include "../ir/data_type_rewriter.h"
 
 namespace tvm {
 namespace tirx {
-using namespace tvm::prim;
 
 class Int32DTypeNarrower : public IndexDataTypeNormalizer {
  public:
   using IndexDataTypeNormalizer::Mutate;
   using IndexDataTypeNormalizer::Mutate_;
-  static PrimFunc RewriteDataType(PrimFunc func) {
-    // Check if the integer parameter buffers have dtype other than int32.
-    for (const Var& param : func->params) {
-      if (auto buffer = param.as<BufferVar>();
-          buffer && buffer.value()->dtype.MatchesCode(DLDataTypeCode::kDLInt) &&
-          buffer.value()->dtype.bits() > 32) {
-        TVM_FFI_THROW(InternalError) << "The buffer parameter " << buffer.value() << " has dtype "
-                                     << buffer.value()->dtype << ". The function is " << func;
-      }
-    }
 
+  static Function RewriteDataType(Function func) {
+    CheckTensorParams(func);
     auto narrower = ffi::make_object<Int32DTypeNarrower>(func);
     return narrower->Rewrite(func);
   }
 
- public:
-  explicit Int32DTypeNarrower(PrimFunc func)
+  explicit Int32DTypeNarrower(Function func)
       : IndexDataTypeNormalizer(PrimType::Int(32)), func_(std::move(func)) {}
 
  private:
-  bool ShouldClampShiftAmounts() const final { return true; }
-
-  UnchangedOr<PrimExpr> Mutate_(const IntImmNode* op, InplaceMode inplace_mode) final {
-    // ignore the enabled condition and always rewrite i64
-    if (op->ty.as_or_throw<PrimType>() == PrimType::Int(64)) {
-      TVM_FFI_ICHECK_LE(op->value, max_value(target_data_type_).as_or_throw<IntImm>()->value);
-      return IntImm::Int32(op->value);
+  /*! \brief Reject integer tensor parameters wider than int32. */
+  static void CheckTensorParams(const Function& func) {
+    for (const Var& param : func->params) {
+      if (auto tensor = param.as<TensorVar>();
+          tensor && tensor.value()->dtype.MatchesCode(DLDataTypeCode::kDLInt) &&
+          tensor.value()->dtype.bits() > 32) {
+        TVM_FFI_THROW(InternalError) << "The tensor parameter " << tensor.value() << " has dtype "
+                                     << tensor.value()->dtype << ". The function is " << func;
+      }
     }
-    return ffi::Unchanged();
   }
 
-  UnchangedOr<Stmt> Mutate_(const AllocBufferNode* op, InplaceMode inplace_mode) final {
-    auto result = IndexDataTypeNormalizer::Mutate_(op, inplace_mode);
-    auto alloc =
-        std::move(result).ValueOrUnchanged(ffi::GetRef<Stmt>(op)).as_or_throw<AllocBuffer>();
-    const BufferVar& buf = alloc->buffer;
+  /*! \brief Reject allocated integer tensors wider than int32. */
+  void CheckAllocatedTensor(const TensorVar& buf) const {
     // Scalar assignments in TVMScript use local scalar storage.  Keep its explicit
     // dtype (e.g. an int64 opaque call result) and cast at narrowed index uses.
     // IsScalar checks the scalar layout contract, not merely the allocation size.
@@ -81,26 +73,50 @@ class Int32DTypeNarrower : public IndexDataTypeNormalizer {
     if (!is_local_scalar && buf->dtype.MatchesCode(DLDataTypeCode::kDLInt) &&
         buf->dtype.bits() > 32) {
       TVM_FFI_THROW(InternalError)
-          << "The buffer " << buf << " allocated in the function has dtype " << buf->dtype
+          << "The tensor " << buf << " allocated in the function has dtype " << buf->dtype
           << ". The function is " << func_;
     }
+  }
+
+  bool ShouldClampShiftAmounts() const final { return true; }
+
+  UnchangedOr<PrimExpr> Mutate_(const IntImmNode* op, InplaceMode inplace_mode) final {
+    // ignore the enabled condition and always rewrite i64
+    if (op->ty.as_or_throw<PrimType>() == PrimType::Int(64)) {
+      TVM_FFI_ICHECK_LE(op->value, prim::max_value(target_data_type_).as_or_throw<IntImm>()->value);
+      return IntImm::Int32(op->value);
+    }
+    return ffi::Unchanged();
+  }
+
+  UnchangedOr<Stmt> Mutate_(const BindNode* op, InplaceMode inplace_mode) final {
+    if (const auto* call = op->value.as<CallNode>();
+        call && call->op.same_as(tirx::alloc_tensor_op()))
+      return MutateAllocTensor(op, inplace_mode);
+    return IndexDataTypeNormalizer::Mutate_(op, inplace_mode);
+  }
+
+  UnchangedOr<Stmt> MutateAllocTensor(const BindNode* op, InplaceMode inplace_mode) {
+    auto result = IndexDataTypeNormalizer::Mutate_(op, inplace_mode);
+    auto alloc = std::move(result).ValueOrUnchanged(ffi::GetRef<Stmt>(op)).as_or_throw<Bind>();
+    CheckAllocatedTensor(alloc->var.as_or_throw<TensorVar>());
     return alloc;
   }
 
-  PrimFunc func_;
+  Function func_;
 };
 
-PrimFunc ForceNarrowIndexToInt32(PrimFunc func) {
+Function ForceNarrowIndexToInt32(Function func) {
   return Int32DTypeNarrower::RewriteDataType(func);
 }
 
 namespace transform {
 
 Pass ForceNarrowIndexToInt32() {
-  auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
+  auto pass_func = [](Function f, IRModule m, PassContext ctx) {
     return ForceNarrowIndexToInt32(f);
   };
-  return CreatePrimFuncPass(pass_func, 0, "tirx.NarrowDataType", {});
+  return CreateFunctionPass(pass_func, 0, "tirx.NarrowDataType");
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {

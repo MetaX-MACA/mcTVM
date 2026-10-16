@@ -495,9 +495,9 @@ struct SamplePerfectTileTraits : public UnpackedInstTraits<SamplePerfectTileTrai
   static constexpr size_t kNumAttrs = 2;
   static constexpr size_t kNumDecisions = 1;
 
-  static ffi::Array<ExprRV> UnpackedApplyToSchedule(Schedule sch, LoopRV loop_rv, IntImm n,
-                                                    IntImm max_innermost_factor,
-                                                    ffi::Optional<ffi::Array<int64_t>> decision) {
+  static ffi::Array<ffi::Optional<ExprRV>> UnpackedApplyToSchedule(
+      Schedule sch, LoopRV loop_rv, IntImm n, IntImm max_innermost_factor,
+      ffi::Optional<ffi::Array<int64_t>> decision) {
     return sch->SamplePerfectTile(loop_rv, n->value.as<int>().value(),
                                   max_innermost_factor->value.as<int>().value(), decision);
   }
@@ -581,10 +581,12 @@ struct SampleComputeLocationTraits : public UnpackedInstTraits<SampleComputeLoca
   friend struct ::tvm::s_tir::UnpackedInstTraits;
 };
 
-TVM_REGISTER_INST_KIND_TRAITS(SampleCategoricalTraits);
-TVM_REGISTER_INST_KIND_TRAITS(SamplePerfectTileTraits);
-TVM_REGISTER_INST_KIND_TRAITS(SamplePartitionedTileTraits);
-TVM_REGISTER_INST_KIND_TRAITS(SampleComputeLocationTraits);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  RegisterInstructionKind<SampleCategoricalTraits>();
+  RegisterInstructionKind<SamplePerfectTileTraits>();
+  RegisterInstructionKind<SamplePartitionedTileTraits>();
+  RegisterInstructionKind<SampleComputeLocationTraits>();
+}
 
 }  // namespace s_tir
 }  // namespace tvm

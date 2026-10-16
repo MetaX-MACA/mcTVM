@@ -20,7 +20,7 @@ import tvm_ffi
 from tvm_ffi import Map
 from tvm_ffi.core import String
 
-from tvm.runtime import Device, Object, convert
+from tvm.runtime import Device, Object, convert, device
 
 from . import _ffi_api
 
@@ -210,21 +210,6 @@ class Target(Object):
             return str(value) if isinstance(value, String) else value
         raise AttributeError(f"'Target' object has no attribute '{name}'")
 
-    def get_kind_attr(self, attr_name):
-        """Get additional attribute about the target kind.
-
-        Parameters
-        ----------
-        attr_name : str
-            The attribute name.
-
-        Returns
-        -------
-        value : object
-            The attribute value
-        """
-        return _ffi_api.TargetKindGetAttr(self.kind, attr_name)
-
     def get_target_device_type(self):
         """Returns the device_type for this target."""
         return _ffi_api.TargetGetDeviceType(self)
@@ -244,10 +229,22 @@ class Target(Object):
         return target
 
 
-def maca(model: str = "unknown") -> Target:
-    """Return a MACA target.
+def device_from_target(target, index=None):
+    """Construct a runtime device from a compilation target.
 
-    This compatibility helper is kept for existing MACA tests. New code should
-    construct targets with ``Target("maca")`` or a config dictionary.
+    Parameters
+    ----------
+    target : str or dict or tvm.target.Target
+        The compilation target whose device type should be used.
+
+    index : int, optional
+        The integer device index.
+
+    Returns
+    -------
+    dev : Device
+        The created device.
     """
-    return Target({"kind": "maca", "model": model})
+    if not isinstance(target, Target):
+        target = Target(target)
+    return device(target.get_target_device_type(), index)

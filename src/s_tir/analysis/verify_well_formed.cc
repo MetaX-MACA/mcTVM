@@ -23,12 +23,10 @@
 #include <tvm/s_tir/analysis.h>
 #include <tvm/s_tir/stmt_functor.h>
 
-#include "../ir/tir_visitor_with_path.h"
-
 namespace tvm {
 namespace s_tir {
-using tirx::ForNode;
-using tirx::PrimFunc;
+using tirx::Function;
+using tvm::ForNode;
 
 /*! \brief Verify all Expr inside the block does not contain:
  *    1. loop vars outside the current block.
@@ -36,7 +34,7 @@ using tirx::PrimFunc;
  */
 class BlockVarAccessVerifier : public StmtExprVisitor {
  public:
-  static bool Verify(const PrimFunc& func, bool assert_mode) {
+  static bool Verify(const Function& func, bool assert_mode) {
     auto verifier = ffi::make_object<BlockVarAccessVerifier>(assert_mode);
     verifier->Visit(func->body);
     return !verifier->has_error_;
@@ -73,7 +71,7 @@ class BlockVarAccessVerifier : public StmtExprVisitor {
         }
       }
     }
-    return std::nullopt;
+    return StmtExprVisitor::Visit_(op);
   }
 
   ffi::Optional<VisitInterrupt> Visit_(const ForNode* op) final {
@@ -94,7 +92,7 @@ class BlockVarAccessVerifier : public StmtExprVisitor {
     // Step 0. Skip block iter var's domain
 
     // Step 1. Visit read/write regions
-    auto fvisit_buffer_region = [this](const TensorRegion& s) -> ffi::Optional<VisitInterrupt> {
+    auto fvisit_tensor_region = [this](const TensorRegion& s) -> ffi::Optional<VisitInterrupt> {
       for (const auto& range : s->region) {
         TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(this->Visit(range->min));
         TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(this->Visit(range->extent));
@@ -102,15 +100,15 @@ class BlockVarAccessVerifier : public StmtExprVisitor {
       return std::nullopt;
     };
     for (const auto& region : op->reads) {
-      TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(fvisit_buffer_region(region));
+      TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(fvisit_tensor_region(region));
     }
     for (const auto& region : op->writes) {
-      TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(fvisit_buffer_region(region));
+      TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(fvisit_tensor_region(region));
     }
 
-    // Step 2. Visit match buffers
-    for (const auto& match_buffer_region : op->match_buffers) {
-      TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(fvisit_buffer_region(match_buffer_region->source));
+    // Step 2. Visit match tensors
+    for (const auto& match_tensor_region : op->match_tensors) {
+      TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(fvisit_tensor_region(match_tensor_region->source));
     }
 
     // Step 3. Visit init and body
@@ -136,30 +134,99 @@ class BlockVarAccessVerifier : public StmtExprVisitor {
   bool has_error_{false};
 };
 
-bool VerifyWellFormed(const tirx::PrimFunc& func, bool assert_mode) {
-  return BlockVarAccessVerifier::Verify(func, assert_mode) &&
-         tirx::VerifyWellFormedCommon<TIRVisitorWithPath>(func, assert_mode);
+// S-TIR definitions and scopes are part of this verifier, not its visitor base.
+class WellFormednessVerifier : public tirx::WellFormednessVerifier<StmtExprVisitor> {
+  using Parent = tirx::WellFormednessVerifier<StmtExprVisitor>;
+
+ public:
+  WellFormednessVerifier(Check check, bool assert_mode)
+      : Parent(GlobalVTable(), check, assert_mode) {}
+
+ protected:
+  using Parent::Visit_;
+  Result Visit_(const ForNode* op) override {
+    if (check_ == Check::kThreadBinding) {
+      if (auto tag = op->annotations.Get(attr::kThreadBinding)) {
+        Verify(op->kind == ForKind::kParallel)
+            << "ValueError: thread_binding requires a parallel loop at <current location>";
+        Verify(tag->as<ffi::String>().has_value())
+            << "TypeError: thread_binding annotation must be a string at <current location>";
+        Verify(op->HasTrivialStep())
+            << "ValueError: Thread binding loops require a unit step at <current location>";
+      }
+    }
+    return Parent::Visit_(op);
+  }
+
+  Result Visit_(const SBlockNode* op) override {
+    return WithScope([&]() -> Result {
+      for (size_t i = 0; i < op->iter_vars.size(); ++i) {
+        const auto& axis = op->iter_vars[i];
+        this->Visit(axis->dom);
+        Define(axis->var.as_or_throw<Var>(),
+               AccessPath::Root()->Attr("iter_vars")->ArrayItem(i)->Attr("var"));
+      }
+      for (size_t i = 0; i < op->alloc_tensors.size(); ++i) {
+        Define(op->alloc_tensors[i].var(), AccessPath::Root()->Attr("alloc_tensors")->ArrayItem(i));
+      }
+      for (size_t i = 0; i < op->match_tensors.size(); ++i) {
+        const auto& match = op->match_tensors[i];
+        this->Visit(match->source);
+        auto site = AccessPath::Root()->Attr("match_tensors")->ArrayItem(i)->Attr("tensor");
+        MatchTensorDefinitions(match->tensor, site->Attr("ty"));
+        Define(match->tensor.var(), site);
+      }
+      this->Visit(op->reads);
+      this->Visit(op->writes);
+      WithScope([&]() { return this->Visit(op->init); });
+      return WithScope([&]() { return this->Visit(op->body); });
+    });
+  }
+
+ private:
+  static const VTable* GlobalVTable() {
+    static const VTable table = [] {
+      VTable table;
+      Parent::InitVTable(&table);
+      table.Finalize();
+      return table;
+    }();
+    return &table;
+  }
+};
+
+bool VerifyThreadBindings(const ffi::ObjectRef& node, bool assert_mode) {
+  return ffi::make_object<WellFormednessVerifier>(WellFormednessVerifier::Check::kThreadBinding,
+                                                  assert_mode)
+      ->Run(node);
+}
+
+bool VerifyWellFormed(const tirx::Function& func, bool assert_mode) {
+  return VerifyThreadBindings(func, assert_mode) &&
+         BlockVarAccessVerifier::Verify(func, assert_mode) &&
+         tirx::VerifyWellFormedCommon<WellFormednessVerifier>(func, assert_mode);
 }
 
 bool VerifyWellFormed(const IRModule& mod, bool assert_mode) {
+  if (!VerifyThreadBindings(mod, assert_mode)) return false;
   for (const auto& [gvar, base_func] : mod->functions) {
-    if (auto func = base_func.as<tirx::PrimFunc>()) {
+    if (auto func = base_func.as<tirx::Function>()) {
       if (!BlockVarAccessVerifier::Verify(func.value(), assert_mode)) return false;
     }
   }
-  return tirx::VerifyWellFormedCommon<TIRVisitorWithPath>(mod, assert_mode);
+  return tirx::VerifyWellFormedCommon<WellFormednessVerifier>(mod, assert_mode);
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   ffi::reflection::GlobalDef().def(
       "s_tir.analysis.VerifyWellFormed", [](const ffi::ObjectRef& obj, bool assert_mode) {
-        if (auto func = obj.as<tirx::PrimFunc>()) {
+        if (auto func = obj.as<tirx::Function>()) {
           return s_tir::VerifyWellFormed(func.value(), assert_mode);
         }
         if (auto mod = obj.as<IRModule>()) {
           return s_tir::VerifyWellFormed(mod.value(), assert_mode);
         }
-        TVM_FFI_THROW(TypeError) << "Expected a PrimFunc or IRModule, but received "
+        TVM_FFI_THROW(TypeError) << "Expected a Function or IRModule, but received "
                                  << obj->GetTypeKey();
         TVM_FFI_UNREACHABLE();
       });

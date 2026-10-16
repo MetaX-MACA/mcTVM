@@ -32,7 +32,7 @@
 // passes the setuptools_scm-resolved version through CMake). The literal below is the
 // fallback for a bare build with no override.
 #ifndef TVM_VERSION
-#define TVM_VERSION "0.26.dev0"
+#define TVM_VERSION "0.28.dev0"
 #endif
 
 // TVM ships two shared libraries: libtvm_compiler and libtvm_runtime.
@@ -73,6 +73,14 @@
 #ifndef TVM_DLL
 #define TVM_DLL __attribute__((visibility("default")))
 #define TVM_DLL_EXPORT __attribute__((visibility("default")))
+#endif
+
+// Core IR, TIRx and shared compiler infrastructure are currently linked into
+// libtvm_compiler. Keep their ownership explicit while inheriting the compiler
+// export policy, including downstream TVM_DLL overrides. Embedders may override
+// TVM_TIRX_DLL independently.
+#ifndef TVM_TIRX_DLL
+#define TVM_TIRX_DLL TVM_DLL
 #endif
 
 // --- TVM_RUNTIME_DLL family (libtvm_runtime) ---

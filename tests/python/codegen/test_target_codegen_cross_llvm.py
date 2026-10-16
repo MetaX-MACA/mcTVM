@@ -32,22 +32,18 @@ from tvm.support import cc, utils
 from tvm.testing import env
 
 
-@I.ir_module(s_tir=True)
+@I.ir_module
 class AddModule:
-    @T.prim_func(s_tir=True)
+    @T.function
     def main(
-        A: T.Buffer((1024,), "float32"),
-        B: T.Buffer((1024,), "float32"),
-        C: T.Buffer((1024,), "float32"),
+        A: T.Tensor((1024,), "float32"),
+        B: T.Tensor((1024,), "float32"),
+        C: T.Tensor((1024,), "float32"),
     ):
         T.func_attr({"tirx.noalias": True})
         for i0_0 in T.parallel(256):
             for i0_1 in T.vectorized(4):
-                with T.sblock("C"):
-                    v_i0 = T.axis.spatial(1024, i0_0 * 4 + i0_1)
-                    T.reads(A[v_i0], B[v_i0])
-                    T.writes(C[v_i0])
-                    C[v_i0] = A[v_i0] + B[v_i0]
+                C[i0_0 * 4 + i0_1] = A[i0_0 * 4 + i0_1] + B[i0_0 * 4 + i0_1]
 
 
 @pytest.mark.skipif(not env.has_llvm(), reason="need llvm")
@@ -68,7 +64,7 @@ def test_llvm_add_pipeline():
             print(f"Skip because {target} is not enabled..")
             return
         temp = utils.tempdir()
-        f = tvm.tirx.build(AddModule, target=target)
+        f = tvm.tirx.compile(AddModule, target=target).mod
         path = temp.relpath("myadd.o")
         f.write_to_file(path)
         verify_elf(path, 0x28)
@@ -89,9 +85,9 @@ def test_llvm_add_pipeline():
             farm = remote.load_module("myadd.o")
             dev = remote.cpu(0)
             n = nn
-            a = tvm.runtime.tensor(np.random.uniform(size=n).astype("float32"), dev)
-            b = tvm.runtime.tensor(np.random.uniform(size=n).astype("float32"), dev)
-            c = tvm.runtime.tensor(np.zeros(n, dtype="float32"), dev)
+            a = dev.tensor(np.random.uniform(size=n).astype("float32"))
+            b = dev.tensor(np.random.uniform(size=n).astype("float32"))
+            c = dev.tensor(np.zeros(n, dtype="float32"))
             farm(a, b, c)
             tvm.testing.assert_allclose(c.numpy(), a.numpy() + b.numpy())
             print("Verification finish on remote..")

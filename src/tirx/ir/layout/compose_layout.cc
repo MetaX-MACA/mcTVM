@@ -47,7 +47,7 @@ PrimExpr ApplyFullSwizzle(const ComposeLayoutNode* layout, const PrimExpr& m) {
 }
 
 void AddExpr(std::optional<PrimExpr>* sum, const PrimExpr& term, const sym::Analyzer& analyzer) {
-  if (is_zero(term)) return;
+  if (IsZero(term)) return;
   if (sum->has_value()) {
     *sum = analyzer->Simplify(sum->value() + term);
   } else {
@@ -246,7 +246,7 @@ ffi::Map<ffi::String, PrimExpr> ApplyStructured(const ComposeLayoutNode* layout,
   }
 
   for (const auto& [axis, offset] : tile->offset) {
-    if (axis->name != "m") return fallback();
+    if (axis.name() != "m") return fallback();
     std::vector<PrimExpr> dynamic_terms;
     bool valid = true;
     CollectOffsetTerms(offset, 1, &dynamic_terms, &constant, &valid, analyzer);
@@ -301,13 +301,13 @@ ffi::Map<ffi::String, PrimExpr> ApplyStructured(const ComposeLayoutNode* layout,
 
 /**************** ComposeLayout ****************/
 ComposeLayout::ComposeLayout(int per_element, int swizzle_len, int atom_len, TileLayout tile_layout,
-                             bool swizzle_inner) {
-  auto n = ffi::make_object<ComposeLayoutNode>();
+                             bool swizzle_inner)
+    : Layout(ffi::UnsafeInit{}) {
+  auto n = ffi::make_object<ComposeLayoutNode>(std::move(tile_layout));
   n->per_element = per_element;
   n->swizzle_len = swizzle_len;
   n->atom_len = atom_len;
   n->swizzle_inner = swizzle_inner;
-  n->tile_layout = std::move(tile_layout);
   TVM_FFI_ICHECK(n->VerifyWellFormed()) << "ValueError: The compose layout is not well-formed";
   int swizzle_mask = (1 << swizzle_len) - 1;
   n->inner_mask = swizzle_mask;
@@ -451,10 +451,10 @@ ffi::Optional<Layout> ComposeLayoutNode::IsTileOuter(
 }
 
 ffi::Optional<Layout> ComposeLayoutNode::Slice(const ffi::Array<PrimExpr>& shape,
-                                               const Region& region) const {
+                                               const ffi::Array<Range>& region) const {
   // A bare swizzle (ComposeLayout with a trivial tile) carries only the swizzle
   // period, not a tile matching `shape`; substitute an identity tile over the
-  // buffer shape first, matching the former SwizzleLayoutNode::Slice.
+  // tensor shape first, matching the former SwizzleLayoutNode::Slice.
   TileLayout base = this->tile_layout;
   if (base->IsTrivial()) {
     base = IdentityTileLayout(shape);

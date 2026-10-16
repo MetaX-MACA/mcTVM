@@ -43,9 +43,12 @@
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <tvm/ffi/extra/module.h>
 #include <tvm/ffi/reflection/registry.h>
+#include <tvm/ir/function.h>
 #include <tvm/runtime/logging.h>
+#include <tvm/support/file_utils.h>
 #include <tvm/target/codegen.h>
 #include <tvm/tirx/analysis.h>
+#include <tvm/tirx/function.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -56,7 +59,6 @@
 #include <utility>
 #include <vector>
 
-#include "../../../../runtime/file_utils.h"
 #include "../../../../runtime/metadata.h"
 #include "../../../../target/build_common.h"
 #include "../../../../target/llvm/codegen_cpu.h"
@@ -107,7 +109,7 @@ class CodeGenHexagon final : public CodeGenCPU {
 
   bool IsQHLFunction(const std::string& func);
 
-  llvm::Value* VectorLookupLoad(BufferVar buffer, PrimType buffer_type,
+  llvm::Value* VectorLookupLoad(TensorVar buffer, PrimType buffer_type,
                                 ffi::Array<PrimExpr> indices);
   llvm::Value* Intrinsic(llvm::Intrinsic::ID, llvm::ArrayRef<llvm::Value*> args);
   std::vector<std::string> fqhl_list_ = {
@@ -202,7 +204,7 @@ llvm::Value* CodeGenHexagon::CreateCallExtern(Type ret_type, ffi::String global_
 llvm::Value* CodeGenHexagon::Dispatch_(const TensorLoadNode* op) {
   // Check if we can generate a vector lookup.
   if (!op->indices[0].as<prim::RampNode>()) {
-    if (auto* vlut = VectorLookupLoad(op->source.as_or_throw<tvm::tirx::BufferVar>(),
+    if (auto* vlut = VectorLookupLoad(op->source.as_or_throw<tvm::tirx::TensorVar>(),
                                       op->ty.as_or_throw<PrimType>(), op->indices)) {
       return vlut;
     }
@@ -211,27 +213,6 @@ llvm::Value* CodeGenHexagon::Dispatch_(const TensorLoadNode* op) {
 }
 
 llvm::Value* CodeGenHexagon::CreateIntrinsic(const CallNode* op) {
-  if (op->op.same_as(builtin::start_profile_intrinsic()) ||
-      op->op.same_as(builtin::end_profile_intrinsic())) {
-    llvm::Value* id = MakeValue(op->args[0].as_or_throw<PrimExpr>());
-    auto instrprof_id = llvm::Intrinsic::hexagon_instrprof_custom;
-#if TVM_LLVM_VERSION >= 200
-    llvm::Function* func = llvm::cast<llvm::Function>(
-        llvm::Intrinsic::getOrInsertDeclaration(module_.get(), instrprof_id, {}));
-#else
-    llvm::Function* func = llvm::Intrinsic::getDeclaration(module_.get(), instrprof_id);
-#endif
-    llvm::GlobalVariable* name_var = module_->getGlobalVariable("handler_name");
-    if (!name_var) {
-      llvm::StringRef init_str = "lwp_handler";
-      llvm::Constant* init = llvm::ConstantDataArray::getString(module_->getContext(), init_str);
-
-      name_var = new llvm::GlobalVariable(*module_, init->getType(), true,
-                                          llvm::GlobalValue::InternalLinkage, init, "handler_name");
-    }
-    llvm::Type* t_int8_p_ = llvmGetPointerTo(t_int8_, 0);
-    return builder_->CreateCall(func, {llvm::ConstantExpr::getBitCast(name_var, t_int8_p_), id});
-  }
   return CodeGenCPU::CreateIntrinsic(op);
 }
 
@@ -284,7 +265,7 @@ CodeGenLLVM::TypedPointer CodeGenHexagon::CreateBufferPtr(llvm::Value* buffer_pt
       << "-d buffer indices";
 
   // Use the first index to identify the pointer.
-  Type type_void_ptr = PointerType::VoidPointerTy();
+  Type type_void_ptr = PtrType::VoidPtrType();
   CodeGenLLVM::TypedPointer buffer_chunk_ptr_ptr =
       CodeGenCPU::CreateBufferPtr(buffer_ptr, type_void_ptr, {indices[0]}, type_void_ptr);
   llvm::Value* buffer_chunk_ptr =
@@ -327,7 +308,7 @@ llvm::Value* CodeGenHexagon::Intrinsic(llvm::Intrinsic::ID IntID,
   return builder_->CreateCall(intf_callee, conv_args);
 }
 
-llvm::Value* CodeGenHexagon::VectorLookupLoad(BufferVar buffer, PrimType buffer_type,
+llvm::Value* CodeGenHexagon::VectorLookupLoad(TensorVar buffer, PrimType buffer_type,
                                               ffi::Array<PrimExpr> indices) {
   PrimExpr index = indices[0];
   PrimType index_ty = index.ty();
@@ -353,9 +334,9 @@ llvm::Value* CodeGenHexagon::VectorLookupLoad(BufferVar buffer, PrimType buffer_
   PrimType table_type = buffer_type.WithLanes(table_elem_count);
 
   auto table_all = MakeValue(
-      BufferLoad(buffer, {
-                             prim::Ramp(IntImm(int32, 0), IntImm(int32, 1), table_elem_count),
-                         }));
+      MakeTensorLoad(buffer, {
+                                 prim::Ramp(IntImm(int32, 0), IntImm(int32, 1), table_elem_count),
+                             }));
 
   // The number of value vectors should be a power of 2.
   int table_vec_count = llvm::PowerOf2Ceil(GetVectorBytes(table_type) / native_vector_bytes);
@@ -485,13 +466,13 @@ ffi::Module BuildHexagon(IRModule mod, Target target) {
   std::string entry_func;
 
   for (auto kv : mod->functions) {
-    if (!kv.second->IsInstance<PrimFuncNode>()) {
+    if (!kv.second->IsInstance<FunctionNode>()) {
       // (@jroesch): we relax constraints here, relax functions will just be ignored.
-      DLOG(INFO) << "Can only lower IR Module with PrimFuncs, but got " << kv.second->GetTypeKey();
+      DLOG(INFO) << "Can only lower IR Module with Functions, but got " << kv.second->GetTypeKey();
       continue;
     }
-    auto f = kv.second.as_or_throw<PrimFunc>();
-    if (f->HasNonzeroAttr(tirx::attr::kIsEntryFunc)) {
+    auto f = kv.second.as_or_throw<Function>();
+    if (f->HasNonzeroAttr(tvm::tirx::attr::kIsEntryFunc)) {
       auto global_symbol = f->GetAttr<ffi::String>(tvm::attr::kGlobalSymbol);
       TVM_FFI_ICHECK(global_symbol.has_value());
       entry_func = global_symbol.value();
@@ -566,7 +547,7 @@ ffi::Module BuildHexagon(IRModule mod, Target target) {
 
   const auto f = tvm::ffi::Function::GetGlobal("tvm.contrib.hexagon.link_shared");
   TVM_FFI_ICHECK(f.has_value()) << "tvm.contrib.hexagon.link_shared does not to exist, "
-                                   "do import tvm.contrib.hexagon";
+                                   "load the Hexagon backend linker";
 
   ffi::Array<Expr> o_names = {StringImm(o_name)};
   ffi::Map<ffi::String, ffi::String> extra_args;
@@ -586,8 +567,7 @@ ffi::Module BuildHexagon(IRModule mod, Target target) {
   // The new design takes Bytes (not a filename); slurp the linked .so into
   // memory.  Receiver materializes the bytes back to a tempfile internally
   // before dlopen.
-  std::string so_data;
-  runtime::LoadBinaryFromFile(so_name, &so_data);
+  std::string so_data = support::ReadBytesFromFile(so_name);
 
   // Pack auxiliaries into the unified source map.  Variant lets text blobs
   // (asm/ll) and binary blobs (obj/bc) coexist in their natural form.

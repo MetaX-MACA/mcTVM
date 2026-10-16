@@ -22,14 +22,17 @@
  */
 #include "codegen_opencl.h"
 
+#include <tvm/backend/opencl/op/memory.h>
 #include <tvm/ffi/cast.h>
 #include <tvm/ffi/reflection/registry.h>
+#include <tvm/ir/function.h>
+#include <tvm/support/gpu_thread_tag.h>
+#include <tvm/tirx/op/memory.h>
 
 #include <cmath>
 #include <string>
 #include <vector>
 
-#include "../../../runtime/thread_storage_scope.h"
 #include "../../../target/build_common.h"
 #include "../runtime/texture.h"
 #include "opencl_fallback_module.h"
@@ -44,11 +47,11 @@ const VarNode* TryUnwrapTextureVar(const Expr& texture) {
     return var;
   }
   if (const auto* call = texture.as<CallNode>();
-      call && call->op.same_as(tirx::builtin::buffer_data())) {
+      call && call->op.same_as(tirx::tensor_data_ptr_op())) {
     TVM_FFI_ICHECK_EQ(call->args.size(), 1U);
     const auto* buffer = call->args[0].as<VarNode>();
-    TVM_FFI_ICHECK(buffer && buffer->ty.as<BufferTypeNode>())
-        << "buffer_data expects a Var with BufferType";
+    TVM_FFI_ICHECK(buffer && buffer->ty.as<TensorTypeNode>())
+        << "tensor_data_ptr expects a Var with TensorType";
     return buffer;
   }
   return nullptr;
@@ -56,15 +59,15 @@ const VarNode* TryUnwrapTextureVar(const Expr& texture) {
 
 struct TextureArgument {
   const VarNode* var;
-  const PointerTypeNode* pointer_type;
+  const PtrTypeNode* pointer_type;
 };
 
 TextureArgument UnwrapTextureArgument(const Expr& texture) {
   const auto* var = TryUnwrapTextureVar(texture);
   TVM_FFI_ICHECK(var)
-      << "Texture arguments must be a pointer Var or a buffer_data(BufferVar) projection";
-  const auto* pointer_type = texture->ty.as<PointerTypeNode>();
-  TVM_FFI_ICHECK(pointer_type) << "Texture arguments must have PointerType";
+      << "Texture arguments must be a pointer Var or a tensor_data_ptr(TensorVar) projection";
+  const auto* pointer_type = texture->ty.as<PtrTypeNode>();
+  TVM_FFI_ICHECK(pointer_type) << "Texture arguments must have PtrType";
   TVM_FFI_ICHECK(runtime::IsTextureStorage(std::string(pointer_type->storage_scope)))
       << "Texture intrinsics only support texture buffers";
   return {var, pointer_type};
@@ -92,19 +95,22 @@ class InferTextureAccess : public StmtExprVisitor {
     }
     return storage_scope_qualifiers;
   }
-  ffi::Optional<VisitInterrupt> Visit_(const DeclBufferNode* op) final {
-    if (const VarNode* source = TryUnwrapTextureVar(op->data)) {
-      auto it = buffer_data_map_.find(source);
-      buffer_data_map_[op->buffer.get()] = it == buffer_data_map_.end() ? source : it->second;
+  ffi::Optional<VisitInterrupt> Visit_(const BindNode* op) final {
+    if (const auto* call = op->value.as<CallNode>();
+        call && call->op.same_as(tirx::decl_tensor_op())) {
+      if (const VarNode* source = TryUnwrapTextureVar(call->args[0])) {
+        auto it = buffer_data_map_.find(source);
+        buffer_data_map_[op->var.get()] = it == buffer_data_map_.end() ? source : it->second;
+      }
     }
     return StmtExprVisitor::Visit_(op);
   }
   ffi::Optional<VisitInterrupt> Visit_(const CallNode* op) final {
-    if (op->op.same_as(tirx::builtin::texture2d_load())) {
+    if (op->op.same_as(backend::opencl::texture2d_load_op())) {
       const VarNode* texture = UnwrapTextureArgument(op->args[0]).var;
       auto it = buffer_data_map_.find(texture);
       var_access_map_[it == buffer_data_map_.end() ? texture : it->second] |= kReadAccess;
-    } else if (op->op.same_as(tirx::builtin::texture2d_store())) {
+    } else if (op->op.same_as(backend::opencl::texture2d_store_op())) {
       const VarNode* texture = UnwrapTextureArgument(op->args[0]).var;
       auto it = buffer_data_map_.find(texture);
       var_access_map_[it == buffer_data_map_.end() ? texture : it->second] |= kWriteAccess;
@@ -122,11 +128,13 @@ CodeGenOpenCL::CodeGenOpenCL() {
   restrict_keyword_ = "restrict";
 }
 
-void CodeGenOpenCL::InitFuncState(const PrimFunc& f) {
+void CodeGenOpenCL::InitFuncState(const Function& f) {
   CodeGenC::InitFuncState(f);
-  this->SetTextureScope(ffi::make_object<InferTextureAccess>()->Infer(f->body));
+  if (f->body.has_value()) {
+    this->SetTextureScope(ffi::make_object<InferTextureAccess>()->Infer(f->body.value()));
+  }
   for (Var arg : f->params) {
-    auto ptr_type = arg->ty.as<PointerTypeNode>();
+    auto ptr_type = arg->ty.as<PtrTypeNode>();
     if (ptr_type && runtime::IsTextureStorage(std::string(ptr_type->storage_scope))) {
       // Storage scope qualifiers for textures are inferred
       // and set prior to function codegen.
@@ -140,9 +148,9 @@ void CodeGenOpenCL::InitFuncState(const PrimFunc& f) {
 
 void CodeGenOpenCL::PrintFuncPrefix(std::ostream& os) { os << "__kernel "; }
 
-void CodeGenOpenCL::PreFunctionBody(const PrimFunc& f) {
+void CodeGenOpenCL::PreFunctionBody(const Function& f) {
   for (Var arg : f->params) {
-    auto ptr_type = arg->ty.as<PointerTypeNode>();
+    auto ptr_type = arg->ty.as<PtrTypeNode>();
     if (ptr_type && runtime::IsTextureStorage(std::string(ptr_type->storage_scope))) {
       this->stream << "  const sampler_t image_sampler = "
                       "CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n";
@@ -228,16 +236,19 @@ std::string CodeGenOpenCL::Finish() {
   return CodeGenC::Finish();
 }
 
-void CodeGenOpenCL::BindThreadIndex(const IterVar& iv) {
-  TVM_FFI_ICHECK(!var_idmap_.count(iv->var.get()));
-  runtime::ThreadScope ts = runtime::ThreadScope::Create(iv->thread_tag);
+void CodeGenOpenCL::BindThreadIndex(const PrimVar& var, const ffi::String& thread_tag) {
+  TVM_FFI_ICHECK(!var_idmap_.count(var.get()));
+  support::GPUThreadTag ts = support::GPUThreadTag::Parse(thread_tag);
+  TVM_FFI_ICHECK_GE(ts.dim_index, 0);
+  TVM_FFI_ICHECK_LT(ts.dim_index, 3);
   std::ostringstream os;
   if (ts.rank == 1) {
     os << "get_local_id(" << ts.dim_index << ")";
   } else {
+    TVM_FFI_ICHECK_EQ(ts.rank, 0) << "Unsupported OpenCL thread tag " << thread_tag;
     os << "get_group_id(" << ts.dim_index << ")";
   }
-  var_idmap_[iv->var.get()] = CastFromTo(os.str(), PrimType::UInt(64), iv->var.ty());
+  var_idmap_[var.get()] = CastFromTo(os.str(), PrimType::UInt(64), var.ty());
 }
 
 void CodeGenOpenCL::PrintType(const PrimType& t, std::ostream& os) {  // NOLINT(*)
@@ -316,7 +327,7 @@ void CodeGenOpenCL::PrintType(const PrimType& t, std::ostream& os) {  // NOLINT(
 void CodeGenOpenCL::PrintType(const Type& type, std::ostream& os) {  // NOLINT(*)
   if (auto* ptr = type.as<PrimTypeNode>()) {
     return PrintType(ffi::GetRef<PrimType>(ptr), os);
-  } else if (auto* ptr = type.as<PointerTypeNode>()) {
+  } else if (auto* ptr = type.as<PtrTypeNode>()) {
     if (runtime::IsTextureStorage(std::string(ptr->storage_scope))) {
       os << "image2d_array_t";
     } else {
@@ -415,7 +426,7 @@ void CodeGenOpenCL::PrintStorageScope(const std::string& scope, std::ostream& os
 
 void CodeGenOpenCL::PrintRestrict(const Var& v, std::ostream& os) {
   // Apply restrict qualifer for non-texture types only
-  if (auto* ptr = v->ty.as<PointerTypeNode>()) {
+  if (auto* ptr = v->ty.as<PtrTypeNode>()) {
     if (!runtime::IsTextureStorage(std::string(ptr->storage_scope))) {
       os << ' ' << restrict_keyword_;
     }
@@ -445,35 +456,45 @@ std::string CodeGenOpenCL::CastTo(std::string value, const PrimType& target) {
   }
 }
 
-void CodeGenOpenCL::Dispatch_(const AllocBufferNode* op) {
+void CodeGenOpenCL::Dispatch_(const BindNode* op) {
+  if (const auto* call = op->value.as<CallNode>(); call) {
+    if (call->op.same_as(tirx::alloc_tensor_op())) return DispatchAllocTensor(op, call);
+  }
+  CodeGenC::Dispatch_(op);
+}
+
+void CodeGenOpenCL::DispatchAllocTensor(const BindNode* op, const CallNode* buffer_call) {
+  tvm::Tuple shape = tvm::Tuple(buffer_call->ty_args[0].as_or_throw<tirx::TensorType>()->shape);
+  DLDataType dtype = buffer_call->ty_args[0].as_or_throw<tirx::TensorType>()->dtype->dtype;
+  TensorVar buffer = op->var.as_or_throw<TensorVar>();
   // Compute constant_size from buffer shape
   size_t constant_size = 1;
-  for (const auto& dim : op->buffer->shape) {
+  for (const auto& dim : shape->fields) {
     const IntImmNode* dim_imm = dim.as<IntImmNode>();
     TVM_FFI_ICHECK(dim_imm) << "Can only handle constant size stack allocation for now";
     constant_size *= dim_imm->value.as<size_t>().value();
   }
-  allocation_size_.insert({op->buffer.get(), constant_size * op->buffer->dtype.lanes()});
-  CodeGenC::Dispatch_(op);
+  allocation_size_.insert({buffer.get(), constant_size * PrimType(dtype).lanes()});
+  CodeGenC::DispatchAllocTensor(op, buffer_call);
 }
 
 void CodeGenOpenCL::Dispatch_(const CallNode* op, std::ostream& os) {
-  if (op->op.same_as(tirx::builtin::address_of())) {
+  if (op->op.same_as(tirx::address_of_op())) {
     // Overload tvm_address_of to add storage scope (e.g. __global).
     const TensorLoadNode* load = op->args[0].as<TensorLoadNode>();
     TVM_FFI_ICHECK(op->args.size() == 1 && load);
     TVM_FFI_ICHECK_EQ(load->indices.size(), 1)
         << "CodeGenOpenCL only supports flat memory allocations.";
     os << "((";
-    auto it = alloc_storage_scope_.find(load->source.as_or_throw<tvm::tirx::BufferVar>().get());
+    auto it = alloc_storage_scope_.find(load->source.as_or_throw<tvm::tirx::TensorVar>().get());
     if (it != alloc_storage_scope_.end()) {
       PrintStorageScope(it->second, os);
     }
     this->PrintType(load->ty.as_or_throw<PrimType>().WithLanes(1), os);
-    os << " *)" << this->GetVarID(load->source.as_or_throw<tvm::tirx::BufferVar>().get()) << " + ";
+    os << " *)" << this->GetVarID(load->source.as_or_throw<tvm::tirx::TensorVar>().get()) << " + ";
     this->PrintExpr(load->indices[0], os);
     os << ')';
-  } else if (op->op.same_as(tirx::builtin::texture2d_store())) {
+  } else if (op->op.same_as(backend::opencl::texture2d_store_op())) {
     TextureArgument texture = UnwrapTextureArgument(op->args[0]);
     const int channel_size = op->args[4].as_or_throw<IntImm>()->value.as<int>().value();
     TVM_FFI_ICHECK(channel_size == 64 || channel_size == 128)
@@ -507,7 +528,7 @@ void CodeGenOpenCL::Dispatch_(const CallNode* op, std::ostream& os) {
     this->PrintType(channel_type, os);
     os << "(" << value << ")";
     os << ")";
-  } else if (op->op.same_as(tirx::builtin::texture2d_load())) {
+  } else if (op->op.same_as(backend::opencl::texture2d_load_op())) {
     TextureArgument texture = UnwrapTextureArgument(op->args[0]);
     enable_compliant_texture_reads_ = true;
     std::stringstream ss;
@@ -738,30 +759,30 @@ void CodeGenOpenCL::SetTextureScope(
 ffi::Module BuildOpenCL(IRModule mod, Target target) {
   bool output_ssa = false;
 
-  ffi::Map<GlobalVar, PrimFunc> functions;
+  ffi::Map<GlobalVar, Function> functions;
   for (auto [gvar, base_func] : mod->functions) {
-    TVM_FFI_ICHECK(base_func->IsInstance<PrimFuncNode>())
-        << "CodeGenOpenCL: Can only take PrimFunc";
-    auto prim_func = base_func.as_or_throw<PrimFunc>();
-    auto calling_conv = prim_func->GetAttr<CallingConv>(tvm::attr::kCallingConv);
+    TVM_FFI_ICHECK(base_func->IsInstance<FunctionNode>())
+        << "CodeGenOpenCL: Can only take Function";
+    auto function = base_func.as_or_throw<Function>();
+    auto calling_conv = function->GetAttr<CallingConv>(tvm::attr::kCallingConv);
     TVM_FFI_ICHECK(calling_conv.has_value())
         << "CodeGenOpenCL: expected kCallingConv attribute to be set.";
     TVM_FFI_ICHECK(calling_conv.value() == CallingConv::kDeviceKernelLaunch)
         << "CodeGenOpenCL: expect calling_conv equals CallingConv::kDeviceKernelLaunch, but got "
         << static_cast<int>(calling_conv.value());
-    functions.Set(gvar, prim_func);
+    functions.Set(gvar, function);
   }
 
   std::stringstream code;
   const auto fpostproc = tvm::ffi::Function::GetGlobal("tvm_callback_opencl_postproc");
-  for (auto [gvar, prim_func] : functions) {
+  for (auto [gvar, function] : functions) {
     code << "// Function: " << gvar->name_hint << std::endl;
     CodeGenOpenCL cg;
     cg.Init(output_ssa);
-    for (auto [other_gvar, other_prim_func] : functions) {
-      cg.DeclareFunction(other_gvar, other_prim_func);
+    for (auto [other_gvar, other_function] : functions) {
+      cg.DeclareFunction(other_gvar, other_function);
     }
-    cg.AddFunction(gvar, prim_func);
+    cg.AddFunction(gvar, function);
     std::string fsource = cg.Finish();
     if (fpostproc) {
       fsource = (*fpostproc)(fsource, target).cast<std::string>();

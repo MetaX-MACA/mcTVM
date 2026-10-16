@@ -29,21 +29,17 @@ from tvm.testing import env
 @pytest.mark.skipif(not env.has_rocm(), reason="need rocm")
 def test_rocm_inf_nan():
     def check_inf_nan(n, value, dtype):
-        @I.ir_module(s_tir=True)
+        @I.ir_module
         class Module:
-            @T.prim_func(s_tir=True)
-            def main(A: T.Buffer((1,), dtype), C: T.Buffer((1,), dtype)):
+            @T.function
+            def main(A: T.Tensor((1,), dtype), C: T.Tensor((1,), dtype)):
                 T.func_attr({"tirx.noalias": True})
-                for i_0 in T.thread_binding(1, thread="blockIdx.x"):
-                    for i_1 in T.thread_binding(128, thread="threadIdx.x"):
-                        with T.sblock("C"):
-                            v_i = T.axis.spatial(1, i_0 * 128 + i_1)
-                            T.where(i_0 * 128 + i_1 < 1)
-                            T.reads()
-                            T.writes(C[v_i])
-                            C[v_i] = T.Cast(dtype, value)
+                with T.launch_thread("blockIdx.x", 1) as i_0:
+                    with T.launch_thread("threadIdx.x", 128) as i_1:
+                        if i_0 * 128 + i_1 < 1:
+                            C[i_0 * 128 + i_1] = T.Cast(dtype, value)
 
-        fun = tvm.compile(Module, "rocm")
+        fun = tvm.tirx.compile(Module, "rocm")
 
         def run_and_check():
             dev = tvm.rocm(0)
@@ -89,20 +85,16 @@ def test_rocm_vectorize_add():
         vec_dtype = f"{dtype}x{lanes}"
         num_blocks = n // 4
 
-        @I.ir_module(s_tir=True)
+        @I.ir_module
         class Module:
-            @T.prim_func(s_tir=True)
-            def main(A: T.Buffer((n,), vec_dtype), B: T.Buffer((n,), vec_dtype)):
+            @T.function
+            def main(A: T.Tensor((n,), vec_dtype), B: T.Tensor((n,), vec_dtype)):
                 T.func_attr({"tirx.noalias": True})
-                for i_0 in T.thread_binding(num_blocks, thread="blockIdx.x"):
-                    for i_1 in T.thread_binding(4, thread="threadIdx.x"):
-                        with T.sblock("B"):
-                            v_i = T.axis.spatial(n, i_0 * 4 + i_1)
-                            T.reads(A[v_i])
-                            T.writes(B[v_i])
-                            B[v_i] = A[v_i] + T.Broadcast(T.Cast(dtype, 1), lanes)
+                with T.launch_thread("blockIdx.x", num_blocks) as i_0:
+                    with T.launch_thread("threadIdx.x", 4) as i_1:
+                        B[i_0 * 4 + i_1] = A[i_0 * 4 + i_1] + T.Broadcast(T.Cast(dtype, 1), lanes)
 
-        fun = tvm.compile(Module, target="rocm")
+        fun = tvm.tirx.compile(Module, target="rocm")
 
         def run_and_check():
             dev = tvm.rocm(0)
@@ -120,24 +112,20 @@ def test_rocm_vectorize_add():
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_rocm(), reason="need rocm")
 def test_rocm_warp_shuffle():
-    @T.prim_func(s_tir=True)
+    @T.function
     def func(
-        A_handle: T.handle,
+        A: T.Tensor((32,), dtype="float32"),
     ):
-        A = T.match_buffer(A_handle, (32,), dtype="float32")
+        with T.launch_thread("blockIdx.x", 1) as bx:
+            with T.launch_thread("threadIdx.x", 32) as tx:
+                A_local = T.alloc_tensor(ty_args=[T.Tensor((1,), "float32", scope="local")])
+                mask = T.alloc_tensor(ty_args=[T.Tensor((1,), "uint32", scope="local")])
+                t0 = T.alloc_tensor(ty_args=[T.Tensor((1,), "float32", scope="local")])
+                A_local[0] = A[tx]
+                A_local[0] = T.gpu_warp_shuffle(mask[0], A_local[0], 0, 32, 32)
+                A[tx] = A_local[0]
 
-        for bx in T.thread_binding(1, thread="blockIdx.x"):
-            for tx in T.thread_binding(32, thread="threadIdx.x"):
-                with T.sblock("test"):
-                    A_local = T.sblock_alloc_buffer((1,), "float32", scope="local")
-                    mask = T.sblock_alloc_buffer((1,), "uint32", scope="local")
-                    t0 = T.sblock_alloc_buffer((1,), "float32", scope="local")
-
-                    A_local[0] = A[tx]
-                    A_local[0] = T.tvm_warp_shuffle(mask[0], A_local[0], 0, 32, 32)
-                    A[tx] = A_local[0]
-
-    mod = tvm.compile(func, target="rocm")
+    mod = tvm.tirx.compile(func, target="rocm")
 
     def run_and_check():
         dev = tvm.rocm(0)
@@ -151,21 +139,17 @@ def test_rocm_warp_shuffle():
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_rocm(), reason="need rocm")
 def test_rocm_vectorized_exp():
-    @T.prim_func(s_tir=True)
+    @T.function
     def func(
-        A_handle: T.handle,
-        B_handle: T.handle,
+        A: T.Tensor((4,), dtype="float32"),
+        B: T.Tensor((4,), dtype="float32"),
     ):
-        A = T.match_buffer(A_handle, (4,), dtype="float32")
-        B = T.match_buffer(B_handle, (4,), dtype="float32")
+        with T.launch_thread("blockIdx.x", 1) as bx:
+            with T.launch_thread("threadIdx.x", 1) as tx:
+                for i in T.vectorized(0, 4):
+                    B[i] = T.exp2(A[i])
 
-        for bx in T.thread_binding(1, thread="blockIdx.x"):
-            for tx in T.thread_binding(1, thread="threadIdx.x"):
-                with T.sblock("test"):
-                    for i in T.vectorized(0, 4):
-                        B[i] = T.exp2(A[i])
-
-    mod = tvm.compile(func, target="rocm")
+    mod = tvm.tirx.compile(func, target="rocm")
 
     def run_and_check():
         dev = tvm.rocm(0)
@@ -183,21 +167,17 @@ def test_export_load_with_fallback(monkeypatch, tmp_path):
     """Force the codegen wrapper into the fallback branch, then export+load+run."""
     n = 1024
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Module:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer((n,), "float32"), B: T.Buffer((n,), "float32")):
+        @T.function
+        def main(A: T.Tensor((n,), "float32"), B: T.Tensor((n,), "float32")):
             T.func_attr({"tirx.noalias": True})
-            for i_0 in T.thread_binding(n // 32, thread="blockIdx.x"):
-                for i_1 in T.thread_binding(32, thread="threadIdx.x"):
-                    with T.sblock("B"):
-                        v_i = T.axis.spatial(n, i_0 * 32 + i_1)
-                        T.reads(A[v_i])
-                        T.writes(B[v_i])
-                        B[v_i] = A[v_i] + 1.0
+            with T.launch_thread("blockIdx.x", n // 32) as i_0:
+                with T.launch_thread("threadIdx.x", 32) as i_1:
+                    B[i_0 * 32 + i_1] = A[i_0 * 32 + i_1] + 1.0
 
     monkeypatch.setenv("TVM_COMPILE_FORCE_FALLBACK", "1")
-    host_lib = tvm.compile(Module, target="rocm")
+    host_lib = tvm.tirx.compile(Module, target="rocm")
     monkeypatch.delenv("TVM_COMPILE_FORCE_FALLBACK")
 
     lib_path = str(tmp_path / "lib.so")

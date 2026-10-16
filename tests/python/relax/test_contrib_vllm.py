@@ -21,6 +21,7 @@ import tvm_ffi
 import tvm
 import tvm.testing
 from tvm import relax
+from tvm.relax import ExternFunc as _ExternFunc
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tirx as T
@@ -64,28 +65,32 @@ def build_and_run(mod, inputs_np, target, legalize=True):
 
 
 def test_attention():
+    num_seqs = T.dynamic("num_seqs")
+    num_blocks = T.dynamic("num_blocks")
+    max_num_blocks_per_seq = T.dynamic("max_num_blocks_per_seq")
+
     @I.ir_module
     class ModulePagedAttentionV1:
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("llvm"),
+                    R.vdevice("llvm"),
                 ]
             }
         )
 
         @R.function
         def main(
-            query: R.Tensor(("num_seqs", 1, 64), dtype="float16"),
-            key_cache: R.Tensor(("num_blocks", 1, 8, 16, 8), dtype="float16"),
-            value_cache: R.Tensor(("num_blocks", 1, 64, 16), dtype="float16"),
-            block_tables: R.Tensor(("num_seqs", "max_num_blocks_per_seq"), dtype="int32"),
-            context_lens: R.Tensor(("num_seqs",), dtype="int32"),
-        ) -> R.Tensor(("num_seqs", 1, 64), dtype="float16"):
+            query: R.Tensor((num_seqs, 1, 64), dtype="float16"),
+            key_cache: R.Tensor((num_blocks, 1, 8, 16, 8), dtype="float16"),
+            value_cache: R.Tensor((num_blocks, 1, 64, 16), dtype="float16"),
+            block_tables: R.Tensor((num_seqs, max_num_blocks_per_seq), dtype="int32"),
+            context_lens: R.Tensor((num_seqs,), dtype="int32"),
+        ) -> R.Tensor((num_seqs, 1, 64), dtype="float16"):
             with R.dataflow():
                 max_len = R.to_vdevice(R.max(context_lens), "llvm:0")
                 out = R.call_dps_packed(
-                    "tvm.contrib.vllm.single_query_cached_kv_attention_v1",
+                    _ExternFunc("tvm.contrib.vllm.single_query_cached_kv_attention_v1"),
                     [
                         query,
                         key_cache,
@@ -95,31 +100,34 @@ def test_attention():
                         16,
                         max_len,
                     ],
-                    out_ty=query.ty,
+                    ty_args=[query.ty],
                 )
                 R.output(out)
             return out
+
+    num_seqs = T.dynamic("num_seqs")
+    num_blocks = T.dynamic("num_blocks")
+    max_num_blocks_per_seq = T.dynamic("max_num_blocks_per_seq")
 
     @I.ir_module
     class ModulePagedAttentionV2:
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("llvm"),
+                    R.vdevice("llvm"),
                 ]
             }
         )
 
         @R.function
         def main(
-            query: R.Tensor(("num_seqs", 1, 64), dtype="float16"),
-            key_cache: R.Tensor(("num_blocks", 1, 8, 16, 8), dtype="float16"),
-            value_cache: R.Tensor(("num_blocks", 1, 64, 16), dtype="float16"),
-            block_tables: R.Tensor(("num_seqs", "max_num_blocks_per_seq"), dtype="int32"),
-            context_lens: R.Tensor(("num_seqs",), dtype="int32"),
-        ) -> R.Tensor(("num_seqs", 1, 64), dtype="float16"):
+            query: R.Tensor((num_seqs, 1, 64), dtype="float16"),
+            key_cache: R.Tensor((num_blocks, 1, 8, 16, 8), dtype="float16"),
+            value_cache: R.Tensor((num_blocks, 1, 64, 16), dtype="float16"),
+            block_tables: R.Tensor((num_seqs, max_num_blocks_per_seq), dtype="int32"),
+            context_lens: R.Tensor((num_seqs,), dtype="int32"),
+        ) -> R.Tensor((num_seqs, 1, 64), dtype="float16"):
             with R.dataflow():
-                num_seqs = T.int64()
                 max_len = R.to_vdevice(R.max(context_lens), "llvm:0")
                 # alloc workspace
                 exp_sums = R.zeros((num_seqs, 1, 1), "float32")
@@ -127,7 +135,7 @@ def test_attention():
                 tmp_out = R.zeros((num_seqs, 1, 1, 64), "float16")
 
                 out = R.call_dps_packed(
-                    "tvm.contrib.vllm.single_query_cached_kv_attention_v2",
+                    _ExternFunc("tvm.contrib.vllm.single_query_cached_kv_attention_v2"),
                     [
                         query,
                         key_cache,
@@ -140,7 +148,7 @@ def test_attention():
                         max_logits,
                         tmp_out,
                     ],
-                    out_ty=query.ty,
+                    ty_args=[query.ty],
                 )
                 R.output(out)
             return out
@@ -344,19 +352,22 @@ def test_attention():
 
 
 def test_cache():
+    num_tokens = T.dynamic("num_tokens")
+    num_blocks = T.dynamic("num_blocks")
+
     @I.ir_module
     class Module:
         @R.function
         def main(
-            key: R.Tensor(("num_tokens", 1, 8), dtype="float16"),
-            value: R.Tensor(("num_tokens", 1, 8), dtype="float16"),
-            key_cache: R.Tensor(("num_blocks", 1, 1, 16, 8), dtype="float16"),
-            value_cache: R.Tensor(("num_blocks", 1, 8, 16), dtype="float16"),
-            slot_mapping: R.Tensor(("num_tokens",), dtype="int32"),
+            key: R.Tensor((num_tokens, 1, 8), dtype="float16"),
+            value: R.Tensor((num_tokens, 1, 8), dtype="float16"),
+            key_cache: R.Tensor((num_blocks, 1, 1, 16, 8), dtype="float16"),
+            value_cache: R.Tensor((num_blocks, 1, 8, 16), dtype="float16"),
+            slot_mapping: R.Tensor((num_tokens,), dtype="int32"),
         ) -> R.Tuple(
             [
-                R.Tensor(("num_blocks", 1, 8, 16, 8), dtype="float16"),
-                R.Tensor(("num_blocks", 1, 8, 16), dtype="float16"),
+                R.Tensor((num_blocks, 1, 8, 16, 8), dtype="float16"),
+                R.Tensor((num_blocks, 1, 8, 16), dtype="float16"),
             ]
         ):
             with R.dataflow():

@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for IKET lowering, metadata, installation versions, and trace contracts."""
+"""Tests for IKET lowering, metadata, installation checks, and trace contracts."""
 
 import hashlib
 import importlib
@@ -27,6 +27,7 @@ import subprocess
 import sys
 from importlib import metadata
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -40,36 +41,43 @@ TARGET = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
 ORACLE_PATH = Path(__file__).parent / "oracle" / "iket_official_cutlass_4_6_0_oracle.json"
 
 
-@T.prim_func
-def serial_a(out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@pytest.fixture(autouse=True)
+def _source_codegen_without_cuda(monkeypatch):
+    # Metadata and source checks do not require an installed CUDA compiler.
+    if not env.has_cuda():
+        monkeypatch.setenv("TVM_COMPILE_FORCE_FALLBACK", "1")
+
+
+@T.function
+def serial_a(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
+    tx = T.cuda.thread_idx("x")
     iket.mark("a")
     out[tx] = tx + 1
 
 
-@T.prim_func
-def serial_b(out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def serial_b(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
+    tx = T.cuda.thread_idx("x")
     iket.mark("b")
     out[tx] = tx + 2
 
 
-@T.prim_func
-def plain_entry(out: T.Buffer((32,), "int32")):
-    T.device_entry()
-    tx = T.thread_id([32])
+@T.function
+def plain_entry(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
+    tx = T.cuda.thread_idx("x")
     out[tx] = tx + 7
 
 
-@T.prim_func
-def push_pop_kernel(out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def push_pop_kernel(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
+    tx = T.cuda.thread_idx("x")
     iket.range_push("outer")
     iket.range_push("inner")
     iket.mark("point")
@@ -78,12 +86,12 @@ def push_pop_kernel(out: T.Buffer((32,), "int32")):
     out[tx] = tx
 
 
-@T.prim_func
-def token_loop(n: T.int32, out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def token_loop(n: T.int32, out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
-    token = iket.sentinel_token("sentinel")
+    tx = T.cuda.thread_idx("x")
+    token: T.uint32 = iket.sentinel_token("sentinel")
     for i in T.serial(n, unroll=False):
         iket.range_end(token)
         if i % 2 == 0:
@@ -94,20 +102,20 @@ def token_loop(n: T.int32, out: T.Buffer((32,), "int32")):
     out[tx] = tx + n
 
 
-@T.prim_func
-def payload_kernel(out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def payload_kernel(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
+    tx = T.cuda.thread_idx("x")
     iket.mark("payload", tx)
     out[tx] = tx
 
 
-@T.prim_func
-def payload_types(n: T.int64, out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def payload_types(n: T.int64, out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
+    tx = T.cuda.thread_idx("x")
     iket.mark("bool", tx == 0)
     iket.mark("i8", T.int8(-8))
     iket.mark("u8", T.uint8(8))
@@ -119,107 +127,107 @@ def payload_types(n: T.int64, out: T.Buffer((32,), "int32")):
     iket.mark("u64", T.uint64(64))
     iket.mark("f32", T.float32(-3.25))
     iket.mark("f64", T.float64(6.5))
-    token = iket.range_start("token_payload", T.int32(-7))
+    token: T.uint32 = iket.range_start("token_payload", T.int32(-7))
     iket.range_end(token, T.int32(9))
     iket.range_push("stack_payload", T.float32(1.5))
     iket.range_pop()
     out[tx] = tx
 
 
-@T.prim_func
-def payload_presence_mismatch(out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def payload_presence_mismatch(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
-    token = iket.range_start("mismatch", tx)
+    tx = T.cuda.thread_idx("x")
+    token: T.uint32 = iket.range_start("mismatch", tx)
     iket.range_end(token)
     out[tx] = tx
 
 
-@T.prim_func
-def payload_type_mismatch(out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def payload_type_mismatch(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
-    token = iket.range_start("mismatch", tx)
+    tx = T.cuda.thread_idx("x")
+    token: T.uint32 = iket.range_start("mismatch", tx)
     iket.range_end(token, T.uint32(tx))
     out[tx] = tx
 
 
-@T.prim_func
-def sentinel_only_payload(out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def sentinel_only_payload(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
-    token = iket.sentinel_token("not-a-declaration")
+    tx = T.cuda.thread_idx("x")
+    token: T.uint32 = iket.sentinel_token("not-a-declaration")
     iket.range_end(token, out[tx])
     out[tx] = tx
 
 
-@T.prim_func
-def payload_float16(out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def payload_float16(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
+    tx = T.cuda.thread_idx("x")
     iket.mark("bad", T.float16(1))
     out[tx] = tx
 
 
-@T.prim_func
-def payload_bfloat16(out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def payload_bfloat16(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
+    tx = T.cuda.thread_idx("x")
     iket.mark("bad", T.bfloat16(1))
     out[tx] = tx
 
 
-@T.prim_func
-def payload_pointer(out: T.Buffer((32,), "int32")):
-    T.device_entry()
-    tx = T.thread_id([32])
+@T.function
+def payload_pointer(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
+    tx = T.cuda.thread_idx("x")
     T.evaluate(tvm.tirx.call_intrin("", "tirx.cuda.iket_mark", "bad", out.data))
     out[tx] = tx
 
 
-@T.prim_func
-def payload_vector(out: T.Buffer((1,), "int32x4")):
+@T.function
+def payload_vector(out: T.Tensor((1,), "int32x4")):
     T.device_entry()
     T.evaluate(tvm.tirx.call_intrin("", "tirx.cuda.iket_mark", "bad", out[0]))
 
 
-@T.prim_func
-def schema_i32(out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def schema_i32(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
+    tx = T.cuda.thread_idx("x")
     iket.mark("shared-schema", T.int32(tx))
     out[tx] = tx
 
 
-@T.prim_func
-def schema_u32(out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def schema_u32(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
+    tx = T.cuda.thread_idx("x")
     iket.mark("shared-schema", T.uint32(tx))
     out[tx] = tx
 
 
-@T.prim_func
-def schema_no_payload(out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def schema_no_payload(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
+    tx = T.cuda.thread_idx("x")
     iket.mark("shared-schema")
     out[tx] = tx
 
 
-@T.prim_func
-def marks_30(out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def marks_30(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
+    tx = T.cuda.thread_idx("x")
     iket.mark("e00")
     iket.mark("e01")
     iket.mark("e02")
@@ -253,11 +261,11 @@ def marks_30(out: T.Buffer((32,), "int32")):
     out[tx] = tx
 
 
-@T.prim_func
-def marks_31(out: T.Buffer((32,), "int32")):
-    T.device_entry()
+@T.function
+def marks_31(out: T.Tensor((32,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
     iket = IketProfiler()
-    tx = T.thread_id([32])
+    tx = T.cuda.thread_idx("x")
     iket.mark("e00")
     iket.mark("e01")
     iket.mark("e02")
@@ -322,11 +330,11 @@ def _event_bytes(source, name):
 
 def _many_marks(count):
     marks = "\n".join(f'    iket.mark("e{index:04d}")' for index in range(count))
-    source = f"""@T.prim_func
-def main(out: T.Buffer((1,), "int32")):
-    T.device_entry()
+    source = f"""@T.function
+def main(out: T.Tensor((1,), "int32")):
+    T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=1))
     iket = IketProfiler()
-    tx = T.thread_id([1])
+    tx = T.cuda.thread_idx("x")
 {marks}
     out[tx] = 1
 """
@@ -349,7 +357,10 @@ def _nvrtc_disassemble(source, tmp_path):
     from tvm.support.nvcc import compile_cuda
 
     tmp_path.mkdir(parents=True, exist_ok=True)
-    cubin = compile_cuda(source, target_format="cubin", arch="sm_100a", compiler="nvrtc")
+    cubin = compile_cuda(
+        source,
+        backend_config={"cuda": {"arch": "sm_100a", "compiler": "nvrtc", "target_format": "cubin"}},
+    )
     cubin_path = tmp_path / "kernel.cubin"
     cubin_path.write_bytes(cubin)
     return subprocess.run(
@@ -370,15 +381,25 @@ def test_public_interface_is_official_only():
     assert callable(cuda_transforms.LowerIket)
 
     script = serial_a.script()
-    assert 'T.cuda.iket.mark("a")' in script
+    assert 'T.cuda.iket_mark("a")' in script
     assert "T.tirx.iket" not in script
-    assert tvm.script.from_source(script).script() == script
+    assert (
+        tvm.script.from_source(
+            script, extra_vars={"I": tvm.script.ir, "T": tvm.script.tirx}
+        ).script()
+        == script
+    )
 
     payload_script = payload_types.script()
-    assert 'T.cuda.iket.mark("i8", T.int8(-8))' in payload_script
-    assert 'T.cuda.iket.range_start("token_payload", -7)' in payload_script
-    assert "T.cuda.iket.range_end(token, 9)" in payload_script
-    assert tvm.script.from_source(payload_script).script() == payload_script
+    assert 'T.cuda.iket_mark("i8", T.int8(-8))' in payload_script
+    assert 'T.cuda.iket_range_start("token_payload", -7)' in payload_script
+    assert "T.cuda.iket_range_end(token[0], 9)" in payload_script
+    assert (
+        tvm.script.from_source(
+            payload_script, extra_vars={"I": tvm.script.ir, "T": tvm.script.tirx}
+        ).script()
+        == payload_script
+    )
 
 
 @pytest.mark.parametrize(
@@ -387,8 +408,8 @@ def test_public_interface_is_official_only():
 )
 def test_annotation_ops_are_cuda_owned(name):
     op = tvm.ir.Op.get(f"tirx.cuda.iket_{name}")
-    assert op.get_attr("TIRxOpCategory") == "device_intrin"
-    assert op.get_attr("TDeviceIntrinsicNamespace") == "cuda"
+    assert op.get_attr("FTileOpDispatch") is None
+    assert op.name.startswith("tirx.cuda.")
 
 
 def test_regular_lowering_strips_annotations_and_tokens():
@@ -399,11 +420,11 @@ def test_regular_lowering_strips_annotations_and_tokens():
     assert "token:" not in script
 
     def make_kernel(with_annotation):
-        @T.prim_func
-        def main(out: T.Buffer((32,), "int32")):
-            T.device_entry()
+        @T.function
+        def main(out: T.Tensor((32,), "int32")):
+            T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
             iket = IketProfiler()
-            tx = T.thread_id([32])
+            tx = T.cuda.thread_idx("x")
             if with_annotation and tx % 2 == 0:
                 iket.mark("strip-me")
             out[tx] = tx + 1
@@ -412,41 +433,46 @@ def test_regular_lowering_strips_annotations_and_tokens():
 
     sources = []
     for with_annotation in (False, True):
-        executable = tvm.compile(
+        executable = tvm.tirx.compile(
             tvm.IRModule({"main": make_kernel(with_annotation)}),
             target=TARGET,
-            tir_pipeline="tirx",
+            pipeline="tirx",
         )
         sources.append(executable.mod.imports[0].inspect_source("cuda"))
     assert sources[0] == sources[1]
     assert "iket" not in sources[1].lower()
 
 
-def test_verified_injected_child_automatically_enables_plain_jit(monkeypatch):
+@pytest.mark.parametrize("config_env", ["IKET_INJECTION_CONFIG", "SMODEL_INJECTION_CONFIG"])
+def test_verified_injected_child_automatically_enables_plain_jit(monkeypatch, config_env):
+    monkeypatch.delenv("IKET_INJECTION_CONFIG", raising=False)
+    monkeypatch.delenv("SMODEL_INJECTION_CONFIG", raising=False)
     monkeypatch.setenv("TVM_IKET_INJECTED_CHILD_ENABLE", "1")
-    monkeypatch.setenv("TVM_IKET_OFFICIAL_PROFILE", "cutlass-4.6.0")
+    monkeypatch.delenv("TVM_IKET_OFFICIAL_PROFILE", raising=False)
     monkeypatch.setenv("CUDA_INJECTION64_PATH", "/verified/libsmodel_injection.so")
-    monkeypatch.setenv("SMODEL_INJECTION_CONFIG", "/verified/config.json")
-    executable = tvm.compile(tvm.IRModule({"main": serial_a}), target=TARGET, tir_pipeline="tirx")
+    monkeypatch.setenv(config_env, "/verified/config.json")
+    executable = tvm.tirx.compile(tvm.IRModule({"main": serial_a}), target=TARGET, pipeline="tirx")
     source = _cuda_source(executable)
     assert "__iket_evt_decl_a_1_attrs" in source
 
 
 @pytest.mark.parametrize(
     "missing_env",
-    ("CUDA_INJECTION64_PATH", "SMODEL_INJECTION_CONFIG", "TVM_IKET_INJECTED_CHILD_ENABLE"),
+    ("CUDA_INJECTION64_PATH", "config", "TVM_IKET_INJECTED_CHILD_ENABLE"),
 )
-def test_injected_child_auto_enable_remains_fail_closed(monkeypatch, missing_env):
+@pytest.mark.parametrize("config_env", ["IKET_INJECTION_CONFIG", "SMODEL_INJECTION_CONFIG"])
+def test_injected_child_auto_enable_remains_fail_closed(monkeypatch, missing_env, config_env):
+    monkeypatch.delenv("IKET_INJECTION_CONFIG", raising=False)
+    monkeypatch.delenv("SMODEL_INJECTION_CONFIG", raising=False)
     values = {
         "TVM_IKET_INJECTED_CHILD_ENABLE": "1",
-        "TVM_IKET_OFFICIAL_PROFILE": "cutlass-4.6.0",
         "CUDA_INJECTION64_PATH": "/verified/libsmodel_injection.so",
-        "SMODEL_INJECTION_CONFIG": "/verified/config.json",
+        config_env: "/verified/config.json",
     }
     for name, value in values.items():
         monkeypatch.setenv(name, value)
-    monkeypatch.delenv(missing_env)
-    executable = tvm.compile(tvm.IRModule({"main": serial_a}), target=TARGET, tir_pipeline="tirx")
+    monkeypatch.delenv(config_env if missing_env == "config" else missing_env)
+    executable = tvm.tirx.compile(tvm.IRModule({"main": serial_a}), target=TARGET, pipeline="tirx")
     assert "iket" not in _cuda_source(executable).lower()
 
 
@@ -459,17 +485,27 @@ def test_injected_child_auto_enable_remains_fail_closed(monkeypatch, missing_env
 )
 def test_tirx_pipelines_immediately_lower_iket(module_name, factory_name):
     factory = getattr(importlib.import_module(module_name), factory_name)
-    source = inspect.getsource(factory)
-    assert re.search(
-        r"tirx\.transform\.SplitHostDevice\(\),\s+cuda_transforms\.LowerIket\(\)", source
-    )
+    visited = []
+
+    @tvm.transform.pass_instrument
+    class RecordPasses:
+        def run_before_pass(self, mod, info):
+            visited.append(("before", info.name))
+
+        def run_after_pass(self, mod, info):
+            visited.append(("after", info.name))
+
+    pipeline, _, _ = factory()
+    with tvm.transform.PassContext(instruments=[RecordPasses()]):
+        pipeline(tvm.IRModule())
+
+    split = visited.index(("after", tvm.tirx.transform.SplitHostDevice().info.name))
+    assert visited[split + 1] == ("before", cuda_transforms.LowerIket().info.name)
 
 
 @pytest.mark.parametrize(
     ("module_name", "factory_name"),
     [
-        ("tvm.s_tir.pipeline", "default_s_tir_pipeline"),
-        ("tvm.s_tir.backend.adreno.pipeline", "default_tir_pipeline"),
         ("tvm.backend.trn.pipeline", "trn_pipeline"),
     ],
 )
@@ -759,87 +795,102 @@ def test_multi_kernel_module_has_no_tvm_control_plane():
 
 
 def test_proxy_fails_closed_and_forbids_export(tmp_path, monkeypatch):
+    from tvm.tirx.cuda import iket as _iket_official
+
     executable = _compile(serial_a)
     with pytest.raises(RuntimeError, match="cannot be exported"):
         executable.export_library(tmp_path / "official.so")
 
-    monkeypatch.delenv("TVM_IKET_OFFICIAL_PROFILE", raising=False)
-    with pytest.raises(RuntimeError, match="TVM_IKET_OFFICIAL_PROFILE must be set"):
+    monkeypatch.setattr(_iket_official, "_validate_official_installation", lambda: None)
+    monkeypatch.delenv("CUDA_INJECTION64_PATH", raising=False)
+    with pytest.raises(RuntimeError, match="CUDA_INJECTION64_PATH was not supplied"):
         executable.jit()
     assert executable._executable._jitted_mod is None  # pylint: disable=protected-access
 
 
-def test_environment_validation_is_not_process_cached(monkeypatch):
+def test_environment_validation_is_not_process_cached(tmp_path, monkeypatch):
     from tvm.tirx.cuda import iket as _iket_official
 
-    profile = {
-        "nvrtc_version": (13, 2),
-        "minimum_versions": {"nvidia-cutlass-dsl-libs-base": "4.6.0"},
-        "exact_versions": {},
-    }
-
-    class FakeDistribution:
-        version = "4.6.0"
-
-    monkeypatch.setitem(_iket_official._OFFICIAL_PROFILES, "cutlass-4.6.0", profile)
-    monkeypatch.setattr(_iket_official.metadata, "distribution", lambda _name: FakeDistribution())
     monkeypatch.setattr(_iket_official, "_validate_run_iket_entrypoint", lambda: None)
-    monkeypatch.setattr(_iket_official, "_validate_injection_environment", lambda: None)
-    monkeypatch.setattr(_iket_official, "_validate_nvrtc_version", lambda _version: None)
-    monkeypatch.setenv("TVM_IKET_OFFICIAL_PROFILE", "cutlass-4.6.0")
+    monkeypatch.setattr(_iket_official, "_validate_nvrtc_available", lambda: None)
+    injection = tmp_path / "libsmodel_injection.so"
+    injection.write_bytes(b"injection")
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"toolName": "tracker"}))
+    monkeypatch.setenv("CUDA_INJECTION64_PATH", str(injection))
+    monkeypatch.setenv("SMODEL_INJECTION_CONFIG", str(config))
+    monkeypatch.delenv("TVM_IKET_OFFICIAL_PROFILE", raising=False)
 
     _iket_official.validate_official_environment()
-    monkeypatch.delenv("TVM_IKET_OFFICIAL_PROFILE")
-    with pytest.raises(RuntimeError, match="TVM_IKET_OFFICIAL_PROFILE must be set"):
+    monkeypatch.delenv("CUDA_INJECTION64_PATH")
+    with pytest.raises(RuntimeError, match="CUDA_INJECTION64_PATH was not supplied"):
         _iket_official.validate_official_environment()
 
 
-@pytest.mark.parametrize(
-    ("version", "expected_error"),
-    (
-        ("4.5.0", "must be 4.6.0 or newer"),
-        ("4.6.0", None),
-        ("4.6.2", None),
-    ),
-)
-def test_official_installation_accepts_newer_cutlass(monkeypatch, version, expected_error):
+@pytest.mark.parametrize("version", ("4.5.0", "4.6.0", "4.6.2", "5.0.0.dev1"))
+def test_installation_ignores_package_versions(tmp_path, monkeypatch, version):
     from tvm.tirx.cuda import iket as _iket_official
 
-    profile = {
-        "nvrtc_version": (13, 2),
-        "minimum_versions": {"nvidia-cutlass-dsl-libs-base": "4.6.0"},
-        "exact_versions": {},
-    }
+    executable = tmp_path / "run-iket"
+    executable.write_text("#!/bin/sh\n")
+    executable.chmod(0o755)
+    entry_point = metadata.EntryPoint(
+        name="run-iket", value="iket.cli.main:entrypoint", group="console_scripts"
+    )
 
-    class FakeDistribution:
-        pass
+    def distribution(name):
+        if name == "nvidia-cutlass-dsl-libs-base":
+            return SimpleNamespace(version=version, entry_points=(entry_point,))
+        raise metadata.PackageNotFoundError(name)
 
-    distribution = FakeDistribution()
-    distribution.version = version
-    monkeypatch.setitem(_iket_official._OFFICIAL_PROFILES, "cutlass-4.6.0", profile)
-    monkeypatch.setattr(_iket_official.metadata, "distribution", lambda _name: distribution)
-    monkeypatch.setattr(_iket_official, "_validate_run_iket_entrypoint", lambda: None)
-    monkeypatch.setattr(_iket_official, "_validate_nvrtc_version", lambda _version: None)
-
-    if expected_error:
-        with pytest.raises(RuntimeError, match=expected_error):
-            _iket_official._validate_official_installation(  # pylint: disable=protected-access
-                "cutlass-4.6.0"
-            )
-    else:
-        _iket_official._validate_official_installation(  # pylint: disable=protected-access
-            "cutlass-4.6.0"
-        )
+    monkeypatch.setattr(_iket_official.metadata, "distribution", distribution)
+    monkeypatch.setattr(_iket_official.shutil, "which", lambda _name: str(executable))
+    monkeypatch.setattr(_iket_official, "_validate_nvrtc_available", lambda: None)
+    assert _iket_official._validate_official_installation() == str(executable)  # pylint: disable=protected-access
 
 
-def test_injection_environment_accepts_run_iket_two_passes(tmp_path, monkeypatch):
+@pytest.mark.parametrize("version", ((12, 9), (13, 2), (13, 4), (14, 0)))
+def test_nvrtc_version_unrestricted(monkeypatch, version):
     from tvm.tirx.cuda import iket as _iket_official
 
-    injection = tmp_path / "libsmodel_injection.so"
+    nvrtc = SimpleNamespace(nvrtcVersion=lambda: (0, *version))
+    monkeypatch.setitem(sys.modules, "cuda.bindings", SimpleNamespace(nvrtc=nvrtc))
+    _iket_official._validate_nvrtc_available()  # pylint: disable=protected-access
+
+
+def test_nvrtc_error_status(monkeypatch):
+    from tvm.tirx.cuda import iket as _iket_official
+
+    nvrtc = SimpleNamespace(nvrtcVersion=lambda: (1, 0, 0))
+    monkeypatch.setitem(sys.modules, "cuda.bindings", SimpleNamespace(nvrtc=nvrtc))
+    with pytest.raises(_iket_official.IketProfileError, match="CUDA NVRTC is unavailable"):
+        _iket_official._validate_nvrtc_available()  # pylint: disable=protected-access
+
+
+@pytest.mark.parametrize("error_type", (ImportError, OSError, RuntimeError))
+def test_nvrtc_load_error(monkeypatch, error_type):
+    from tvm.tirx.cuda import iket as _iket_official
+
+    def unavailable_nvrtc():
+        raise error_type("NVRTC could not be loaded")
+
+    nvrtc = SimpleNamespace(nvrtcVersion=unavailable_nvrtc)
+    monkeypatch.setitem(sys.modules, "cuda.bindings", SimpleNamespace(nvrtc=nvrtc))
+    with pytest.raises(_iket_official.IketProfileError, match="CUDA NVRTC is unavailable"):
+        _iket_official._validate_nvrtc_available()  # pylint: disable=protected-access
+
+
+@pytest.mark.parametrize("config_env", ["IKET_INJECTION_CONFIG", "SMODEL_INJECTION_CONFIG"])
+def test_injection_environment_accepts_run_iket_two_passes(tmp_path, monkeypatch, config_env):
+    from tvm.tirx.cuda import iket as _iket_official
+
+    monkeypatch.delenv("IKET_INJECTION_CONFIG", raising=False)
+    monkeypatch.delenv("SMODEL_INJECTION_CONFIG", raising=False)
+    injection = tmp_path / "libiket_injection.so"
     injection.write_bytes(b"injection")
     config_path = tmp_path / "config.json"
     monkeypatch.setenv("CUDA_INJECTION64_PATH", str(injection))
-    monkeypatch.setenv("SMODEL_INJECTION_CONFIG", str(config_path))
+    monkeypatch.setenv(config_env, str(config_path))
 
     config_path.write_text(json.dumps({"toolName": "tracker", "toolConfig": {}}))
     _iket_official._validate_injection_environment()  # pylint: disable=protected-access
@@ -859,6 +910,27 @@ def test_injection_environment_accepts_run_iket_two_passes(tmp_path, monkeypatch
     config_path.write_text(json.dumps({"toolName": "other"}), encoding="utf-8")
     with pytest.raises(RuntimeError, match="not generated by run-iket profile"):
         _iket_official._validate_injection_environment()  # pylint: disable=protected-access
+
+
+def test_injection_environment_prefers_current_config(tmp_path, monkeypatch):
+    from tvm.tirx.cuda import iket as _iket_official
+
+    injection = tmp_path / "libiket_injection.so"
+    injection.touch()
+    current = tmp_path / "current.json"
+    legacy = tmp_path / "legacy.json"
+    current.write_text(json.dumps({"toolName": "tracker"}), encoding="utf-8")
+    legacy.write_text("invalid", encoding="utf-8")
+    monkeypatch.setenv("CUDA_INJECTION64_PATH", str(injection))
+    monkeypatch.setenv("IKET_INJECTION_CONFIG", str(current))
+    monkeypatch.setenv("SMODEL_INJECTION_CONFIG", str(legacy))
+    _iket_official._validate_injection_environment()
+    current.write_text("invalid", encoding="utf-8")
+    legacy.write_text(json.dumps({"toolName": "tracker"}), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="IKET_INJECTION_CONFIG is not valid JSON"):
+        _iket_official._validate_injection_environment()
+    monkeypatch.setenv("IKET_INJECTION_CONFIG", "")
+    _iket_official._validate_injection_environment()
 
 
 def test_cutlass_4_6_0_oracle_manifest_integrity():
@@ -938,7 +1010,7 @@ def test_cutlass_4_6_0_oracle_manifest_integrity():
 def test_external_trace_contract():
     trace_path = os.environ.get("TVM_IKET_OFFICIAL_TRACE_JSON")
     if trace_path is None:
-        pytest.skip("set TVM_IKET_OFFICIAL_TRACE_JSON after the locked run-iket workload")
+        pytest.skip("set TVM_IKET_OFFICIAL_TRACE_JSON after a run-iket workload")
     trace = json.loads(Path(trace_path).read_text(encoding="utf-8"))
     assert len(trace["launches"]) == 3
     launches = {launch["kernelName"]: launch for launch in trace["launches"]}

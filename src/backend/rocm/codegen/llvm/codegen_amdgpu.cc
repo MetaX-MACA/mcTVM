@@ -39,6 +39,9 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Target/TargetMachine.h>
 #include <tvm/ffi/reflection/registry.h>
+#include <tvm/support/gpu_thread_tag.h>
+#include <tvm/tirx/op/memory.h>
+#include <tvm/tirx/stmt.h>
 #if TVM_LLVM_VERSION < 170
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
 #endif
@@ -66,12 +69,9 @@ static inline int DetectROCMmaxThreadsPerBlock() {
   tvm_dev.device_type = kDLROCM;
   tvm_dev.device_id = 0;
   tvm::runtime::DeviceAPI* api = tvm::runtime::DeviceAPI::Get(tvm_dev, true);
-  if (api != nullptr) {
-    ffi::Any val;
-    api->GetAttr(tvm_dev, tvm::runtime::kExist, &val);
-    if (val.cast<int>() == 1) {
-      tvm::runtime::DeviceAPI::Get(tvm_dev)->GetAttr(tvm_dev, tvm::runtime::kMaxThreadsPerBlock,
-                                                     &val);
+  if (api != nullptr && api->GetAttr(tvm_dev, "exist").cast<bool>()) {
+    ffi::Any val = api->GetAttr(tvm_dev, "max_threads_per_block");
+    if (val.type_index() != kTVMFFINone) {
       return val.cast<int>();
     }
   }
@@ -87,7 +87,7 @@ class CodeGenAMDGPU : public CodeGenLLVM {
   CodeGenAMDGPU() = default;
   virtual ~CodeGenAMDGPU() = default;
 
-  void AddFunction(const GlobalVar& gvar, const PrimFunc& f) final {
+  void AddFunction(const GlobalVar& gvar, const Function& f) final {
     // add function as void return value
     CodeGenLLVM::AddFunctionInternal(gvar, f);
     function_->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
@@ -96,25 +96,37 @@ class CodeGenAMDGPU : public CodeGenLLVM {
     function_->addFnAttr("amdgpu-flat-work-group-size", attr.str());
   }
 
-  void Dispatch_(const AllocBufferNode* op) final {
+  void Dispatch_(const BindNode* op) final {
+    if (const auto* call = op->value.as<CallNode>();
+        call && call->op.same_as(tirx::alloc_tensor_op())) {
+      return DispatchAllocTensor(op, call);
+    }
+    CodeGenLLVM::Dispatch_(op);
+  }
+
+  void DispatchAllocTensor(const BindNode* op, const CallNode* buffer_call) {
+    tvm::Tuple shape = tvm::Tuple(buffer_call->ty_args[0].as_or_throw<tirx::TensorType>()->shape);
+    DLDataType dtype = buffer_call->ty_args[0].as_or_throw<tirx::TensorType>()->dtype->dtype;
+    ffi::String scope = buffer_call->ty_args[0].as_or_throw<tirx::TensorType>()->storage_scope;
+    TensorVar buffer = op->var.as_or_throw<TensorVar>();
+    DictAttrs annotations = buffer_call->attrs.value().as_or_throw<DictAttrs>();
     llvm::Value* buf = nullptr;
-    StorageInfo& info = alloc_storage_info_[op->buffer.get()];
-    auto storage_scope = runtime::StorageScope::Create(GetPtrStorageScope(op->buffer.var()));
-    PrimType dtype = op->buffer->dtype;
+    StorageInfo& info = alloc_storage_info_[buffer.get()];
+    auto storage_scope = runtime::StorageScope::Create(scope);
 
     if (storage_scope.rank == runtime::StorageRank::kShared && storage_scope.tag == ".dyn") {
       LOG(WARNING) << "Dynamic shared memory support for rocm is experimental.";
-      buf = AllocateSharedMemory(dtype, 0, 3, std::min(info.alignment, 16),
+      buf = AllocateSharedMemory(PrimType(dtype), 0, 3, std::min(info.alignment, 16),
                                  llvm::GlobalValue::ExternalLinkage);
     } else {
-      const IntImmNode* dim_imm = op->buffer->shape[0].as<IntImmNode>();
+      const IntImmNode* dim_imm = shape->fields[0].as<IntImmNode>();
       TVM_FFI_ICHECK(dim_imm) << "Can only handle constant size stack allocation in GPU";
       size_t constant_size = dim_imm->value.as<size_t>().value();
       TVM_FFI_ICHECK_GT(constant_size, 0)
           << "Can only handle constant size stack allocation in GPU";
 
       if (constant_size % 4 == 0 && info.alignment == 0) {
-        info.alignment = GetTempAllocaAlignment(dtype, constant_size);
+        info.alignment = GetTempAllocaAlignment(PrimType(dtype), constant_size);
       }
       // maximum necessary alignment in the AMD devices
       if (info.alignment > 16) {
@@ -122,7 +134,8 @@ class CodeGenAMDGPU : public CodeGenLLVM {
       }
       if (storage_scope.rank == runtime::StorageRank::kLocal) {
         llvm::AllocaInst* alloca = WithFunctionEntry([&]() {
-          return builder_->CreateAlloca(DTypeToLLVMType(dtype), ConstInt32(constant_size));
+          return builder_->CreateAlloca(DTypeToLLVMType(PrimType(dtype)),
+                                        ConstInt32(constant_size));
         });
         auto alignment = static_cast<unsigned>(alloca->getAlign().value());
         if (alignment < static_cast<unsigned>(info.alignment)) {
@@ -133,23 +146,24 @@ class CodeGenAMDGPU : public CodeGenLLVM {
         TVM_FFI_ICHECK(storage_scope.rank == runtime::StorageRank::kShared)
             << "Can only allocate shared or local memory inside kernel";
         // Shared memory: address space == 3
-        buf = AllocateSharedMemory(dtype, constant_size, 3, info.alignment,
+        buf = AllocateSharedMemory(PrimType(dtype), constant_size, 3, info.alignment,
                                    llvm::GlobalValue::PrivateLinkage);
       }
     }
 
-    buf = builder_->CreatePointerCast(
-        buf, llvmGetPointerTo(DTypeToLLVMType(dtype), buf->getType()->getPointerAddressSpace()));
-    TVM_FFI_ICHECK(!var_map_.count(op->buffer.get()));
-    var_map_[op->buffer.get()] = buf;
-    if (op->annotations.count(tirx::attr::kVolatile)) {
-      volatile_buf_.insert(op->buffer.get());
+    buf = builder_->CreatePointerCast(buf,
+                                      llvmGetPointerTo(DTypeToLLVMType(PrimType(dtype)),
+                                                       buf->getType()->getPointerAddressSpace()));
+    TVM_FFI_ICHECK(!var_map_.count(buffer.get()));
+    var_map_[buffer.get()] = buf;
+    if (annotations->dict.count(tvm::tirx::attr::kVolatile)) {
+      volatile_buf_.insert(buffer.get());
     }
   }
 
   // Return the thread index via intrinsics.
-  llvm::Value* GetThreadIndex(const IterVar& iv) final {
-    runtime::ThreadScope ts = runtime::ThreadScope::Create(iv->thread_tag);
+  llvm::Value* GetThreadIndex(const PrimVar& var, const ffi::String& thread_tag) final {
+    support::GPUThreadTag ts = support::GPUThreadTag::Parse(thread_tag);
     llvm::Intrinsic::ID intrin_id = llvm::Intrinsic::amdgcn_workitem_id_x;
     if (ts.rank == 1) {
       switch (ts.dim_index) {
@@ -188,7 +202,7 @@ class CodeGenAMDGPU : public CodeGenLLVM {
     llvm::Function* f = llvm::Intrinsic::getDeclaration(module_.get(), intrin_id);
 #endif
     llvm::Value* result = builder_->CreateCall(f, {});
-    return this->CreateCast(PrimType::Int(32), iv->var.ty(), result);
+    return this->CreateCast(PrimType::Int(32), var.ty(), result);
   }
 
   llvm::Value* CreateStorageSync(const CallNode* op) final {
@@ -219,7 +233,7 @@ class CodeGenAMDGPU : public CodeGenLLVM {
   unsigned GetGlobalAddressSpace() const final { return 1; }
 
   llvm::Value* CreateIntrinsic(const CallNode* op) final {
-    if (op->op.same_as(builtin::atomic_add())) {
+    if (op->op.same_as(tirx::atomic_add_op())) {
       const ffi::Array<Expr>& args = op->args;
       PrimExpr value = args[1].as_or_throw<PrimExpr>();
       PrimType value_ty = value.ty();

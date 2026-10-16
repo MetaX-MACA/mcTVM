@@ -14,52 +14,66 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Tests for tirx.analysis.undefined_vars (VarUseDefAnalyzer)."""
+"""Tests for tirx.analysis.undefined_vars."""
 
 import tvm
 import tvm.testing
 from tvm import tirx
 
 
-def test_decl_buffer_data_is_use():
-    """DeclBuffer's data var should be reported as undefined (USE), not defined.
+def test_decl_tensor_data_is_use():
+    """DeclTensor's data var should be reported as undefined (USE), not defined.
 
-    When UndefinedVars encounters a DeclBuffer, the data pointer references
+    When UndefinedVars encounters a DeclTensor, the data pointer references
     an existing variable from the enclosing scope.  It must appear in the
     undefined list so that callers (e.g., CreateComputeScope) capture it.
     """
     n = tirx.Var("n", "int32")
-    from tvm.ir import PointerType, PrimType
+    from tvm.ir import PrimType, PtrType
 
-    data_ptr = tirx.Var("buf_data", PointerType(PrimType("float32")))
-    buf = tirx.decl_buffer((n,), "float32", "buf", data=data_ptr)
+    data_ptr = tirx.Var("buf_data", PtrType(PrimType("float32")))
+    buf = tirx.decl_tensor((n,), "float32", "buf", data=data_ptr)
 
-    body = tirx.Evaluate(tirx.BufferLoad(buf, [0]))
-    decl = tirx.DeclBuffer(buf, data=data_ptr)
-    stmt = tirx.SeqStmt([decl, body])
+    body = tvm.ir.Evaluate(tirx.TensorLoad(buf, [0]))
+    decl = tvm.ir.Bind(
+        buf,
+        tvm.ir.Call(
+            "tirx.decl_tensor",
+            [data_ptr],
+            ty_args=[buf.ty],
+        ),
+    )
+    stmt = tvm.ir.SeqStmt([decl, body])
 
     undef = tvm.tirx.analysis.undefined_vars(stmt, [])
     undef_names = {v.name for v in undef}
-    # data_ptr must be undefined (it comes from outside the DeclBuffer)
+    # data_ptr must be undefined (it comes from outside the DeclTensor)
     assert "buf_data" in undef_names, f"Expected buf_data in undefined vars, got {undef_names}"
 
 
-def test_decl_buffer_elem_offset_is_use():
-    """DeclBuffer's elem_offset var should be reported as undefined (USE).
+def test_decl_tensor_elem_offset_is_use():
+    """DeclTensor's elem_offset var should be reported as undefined (USE).
 
-    After FlattenBuffer, DeclBuffer nodes carry elem_offset vars from
-    match_buffer entries.  These must appear in the undefined list.
+    After FlattenTensor, DeclTensor nodes carry elem_offset vars from
+    match_tensor entries.  These must appear in the undefined list.
     """
-    from tvm.ir import PointerType, PrimType
+    from tvm.ir import PrimType, PtrType
 
     n = tirx.Var("n", "int32")
-    data_ptr = tirx.Var("buf_data", PointerType(PrimType("float32")))
+    data_ptr = tirx.Var("buf_data", PtrType(PrimType("float32")))
     elem_off = tirx.Var("buf_elem_offset", "int32")
-    buf = tirx.decl_buffer((n,), "float32", "buf", data=data_ptr, elem_offset=elem_off)
+    buf = tirx.decl_tensor((n,), "float32", "buf", data=data_ptr, elem_offset=elem_off)
 
-    body = tirx.Evaluate(tirx.BufferLoad(buf, [0]))
-    decl = tirx.DeclBuffer(buf, data=data_ptr)
-    stmt = tirx.SeqStmt([decl, body])
+    body = tvm.ir.Evaluate(tirx.TensorLoad(buf, [0]))
+    decl = tvm.ir.Bind(
+        buf,
+        tvm.ir.Call(
+            "tirx.decl_tensor",
+            [data_ptr],
+            ty_args=[buf.ty],
+        ),
+    )
+    stmt = tvm.ir.SeqStmt([decl, body])
 
     undef = tvm.tirx.analysis.undefined_vars(stmt, [])
     undef_names = {v.name for v in undef}
@@ -69,31 +83,39 @@ def test_decl_buffer_elem_offset_is_use():
     )
 
 
-def test_alloc_buffer_data_is_def():
-    """AllocBuffer's data var should NOT be reported as undefined (it's a DEF).
+def test_alloc_tensor_data_is_def():
+    """AllocTensor's data var should NOT be reported as undefined (it's a DEF).
 
-    AllocBuffer allocates new storage — the data pointer is a new definition,
+    AllocTensor allocates new storage — the data pointer is a new definition,
     not a reference to an external variable.
     """
     n = tirx.Var("n", "int32")
-    buf = tirx.decl_buffer((n,), "float32", "buf")
+    buf = tirx.decl_tensor((n,), "float32", "buf")
 
-    body = tirx.Evaluate(tirx.BufferLoad(buf, [0]))
-    alloc = tirx.AllocBuffer(buf)
-    stmt = tirx.SeqStmt([alloc, body])
+    body = tvm.ir.Evaluate(tirx.TensorLoad(buf, [0]))
+    alloc = tvm.ir.Bind(
+        buf,
+        tvm.ir.Call(
+            "tirx.alloc_tensor",
+            [],
+            attrs=tvm.ir.DictAttrs({}),
+            ty_args=[buf.ty],
+        ),
+    )
+    stmt = tvm.ir.SeqStmt([alloc, body])
 
     undef = tvm.tirx.analysis.undefined_vars(stmt, [])
     undef_names = {v.name for v in undef}
-    # The buffer Var itself is defined by AllocBuffer.
+    # The tensor Var itself is defined by AllocTensor.
     assert buf.name not in undef_names
     # shape var n should be undefined (comes from enclosing scope)
     assert "n" in undef_names, f"Expected shape var 'n' in undefined vars, got {undef_names}"
 
 
-def test_buffer_data_projection_is_buffer_use():
-    """An opaque data projection must retain the BufferVar identity."""
-    buf = tirx.decl_buffer((16,), "float32", "buf")
-    stmt = tirx.Evaluate(buf.data)
+def test_tensor_data_projection_is_tensor_use():
+    """An opaque data projection must retain the TensorVar identity."""
+    buf = tirx.decl_tensor((16,), "float32", "buf")
+    stmt = tvm.ir.Evaluate(buf.data)
 
     undef = tvm.tirx.analysis.undefined_vars(stmt, [])
     assert len(undef) == 1

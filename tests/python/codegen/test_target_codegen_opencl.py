@@ -32,26 +32,20 @@ target = "opencl"
 @pytest.mark.skipif(not env.has_opencl(), reason="need opencl")
 def test_opencl_ternary_expression():
     def check_if_then_else(n, dtype):
-        @I.ir_module(s_tir=True)
+        @I.ir_module
         class Module:
-            @T.prim_func(s_tir=True)
-            def main(A: T.Buffer((1,), dtype), C: T.Buffer((1,), dtype)):
+            @T.function
+            def main(A: T.Tensor((1,), dtype), C: T.Tensor((1,), dtype)):
                 T.func_attr({"tirx.noalias": True})
-                for i in T.thread_binding(1, thread="threadIdx.x"):
-                    with T.sblock("C"):
-                        v_i = T.axis.spatial(1, i)
-                        T.reads(A[0])
-                        T.writes(C[v_i])
-                        C[v_i] = T.max(
-                            T.Cast(dtype, 2),
-                            T.if_then_else(
-                                0 < T.Cast("int32", A[0]),
-                                T.Cast(dtype, 1),
-                                T.Cast(dtype, 3),
-                            ),
-                        )
+                with T.launch_thread("threadIdx.x", 1) as i:
+                    C[i] = T.max(
+                        T.Cast(dtype, 2),
+                        T.if_then_else(
+                            0 < T.Cast("int32", A[0]), T.Cast(dtype, 1), T.Cast(dtype, 3)
+                        ),
+                    )
 
-        fun = tvm.tirx.build(Module, target=target)
+        fun = tvm.tirx.compile(Module, target=target).mod
 
         def run_and_check():
             dev = tvm.opencl(0)
@@ -62,26 +56,18 @@ def test_opencl_ternary_expression():
         tvm.testing.run_with_gpu_lock(run_and_check)
 
     def check_select(n, dtype):
-        @I.ir_module(s_tir=True)
+        @I.ir_module
         class Module:
-            @T.prim_func(s_tir=True)
-            def main(A: T.Buffer((1,), dtype), C: T.Buffer((1,), dtype)):
+            @T.function
+            def main(A: T.Tensor((1,), dtype), C: T.Tensor((1,), dtype)):
                 T.func_attr({"tirx.noalias": True})
-                for i in T.thread_binding(1, thread="threadIdx.x"):
-                    with T.sblock("C"):
-                        v_i = T.axis.spatial(1, i)
-                        T.reads(A[0])
-                        T.writes(C[v_i])
-                        C[v_i] = T.max(
-                            T.Cast(dtype, 2),
-                            T.Select(
-                                0 < T.Cast("int32", A[0]),
-                                T.Cast(dtype, 1),
-                                T.Cast(dtype, 3),
-                            ),
-                        )
+                with T.launch_thread("threadIdx.x", 1) as i:
+                    C[i] = T.max(
+                        T.Cast(dtype, 2),
+                        T.Select(0 < T.Cast("int32", A[0]), T.Cast(dtype, 1), T.Cast(dtype, 3)),
+                    )
 
-        fun = tvm.tirx.build(Module, target=target)
+        fun = tvm.tirx.compile(Module, target=target).mod
 
         def run_and_check():
             dev = tvm.opencl(0)
@@ -105,19 +91,15 @@ def test_opencl_ternary_expression():
 @pytest.mark.skipif(not env.has_opencl(), reason="need opencl")
 def test_opencl_inf_nan():
     def check_inf_nan(n, value, dtype):
-        @I.ir_module(s_tir=True)
+        @I.ir_module
         class Module:
-            @T.prim_func(s_tir=True)
-            def main(A: T.Buffer((1,), dtype), C: T.Buffer((1,), dtype)):
+            @T.function
+            def main(A: T.Tensor((1,), dtype), C: T.Tensor((1,), dtype)):
                 T.func_attr({"tirx.noalias": True})
-                for i in T.thread_binding(1, thread="threadIdx.x"):
-                    with T.sblock("C"):
-                        v_i = T.axis.spatial(1, i)
-                        T.reads()
-                        T.writes(C[v_i])
-                        C[v_i] = T.Cast(dtype, value)
+                with T.launch_thread("threadIdx.x", 1) as i:
+                    C[i] = T.Cast(dtype, value)
 
-        fun = tvm.tirx.build(Module, target=target)
+        fun = tvm.tirx.compile(Module, target=target).mod
 
         def run_and_check():
             dev = tvm.opencl(0)
@@ -139,19 +121,15 @@ def test_opencl_inf_nan():
 @pytest.mark.skipif(not env.has_opencl(), reason="need opencl")
 def test_opencl_max():
     def check_max(n, dtype):
-        @I.ir_module(s_tir=True)
+        @I.ir_module
         class Module:
-            @T.prim_func(s_tir=True)
-            def main(A: T.Buffer((1,), dtype), C: T.Buffer((1,), dtype)):
+            @T.function
+            def main(A: T.Tensor((1,), dtype), C: T.Tensor((1,), dtype)):
                 T.func_attr({"tirx.noalias": True})
-                for i in T.thread_binding(1, thread="threadIdx.x"):
-                    with T.sblock("C"):
-                        v_i = T.axis.spatial(1, i)
-                        T.reads(A[0])
-                        T.writes(C[v_i])
-                        C[v_i] = T.max(A[0] + T.Cast(dtype, 1), T.Cast(dtype, 0))
+                with T.launch_thread("threadIdx.x", 1) as i:
+                    C[i] = T.max(A[0] + T.Cast(dtype, 1), T.Cast(dtype, 0))
 
-        fun = tvm.tirx.build(Module, target=target)
+        fun = tvm.tirx.compile(Module, target=target).mod
 
         def run_and_check():
             dev = tvm.opencl(0)
@@ -171,19 +149,15 @@ def test_opencl_max():
 
 def test_opencl_erf():
     def check_erf(n, dtype):
-        @I.ir_module(s_tir=True)
+        @I.ir_module
         class Module:
-            @T.prim_func(s_tir=True)
-            def main(A: T.Buffer((1,), dtype), C: T.Buffer((1,), dtype)):
+            @T.function
+            def main(A: T.Tensor((1,), dtype), C: T.Tensor((1,), dtype)):
                 T.func_attr({"tirx.noalias": True})
-                for i0 in T.thread_binding(1, thread="threadIdx.x"):
-                    with T.sblock("C"):
-                        v_i0 = T.axis.spatial(1, i0)
-                        T.reads(A[v_i0])
-                        T.writes(C[v_i0])
-                        C[v_i0] = T.erf(A[v_i0])
+                with T.launch_thread("threadIdx.x", 1) as i0:
+                    C[i0] = T.erf(A[i0])
 
-        fun = tvm.tirx.build(Module, target=target)
+        fun = tvm.tirx.compile(Module, target=target).mod
 
         source_str = fun.imports[0].inspect_source()
         matches = re.findall("erf", source_str)
@@ -197,23 +171,21 @@ def test_opencl_erf():
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_opencl(), reason="need opencl")
 def test_opencl_type_casting():
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Module:
-        @T.prim_func(s_tir=True)
-        def main(C: T.Buffer((32,), "float32")):
+        @T.function
+        def main(C: T.Tensor((32,), "float32")):
             T.func_attr({"tirx.noalias": True})
-            for i_0 in T.thread_binding(8, thread="threadIdx.x"):
+            with T.launch_thread("threadIdx.x", 8) as i_0:
                 for i_1 in T.vectorized(4):
-                    with T.sblock("C"):
-                        v_i = T.axis.spatial(32, i_0 * 4 + i_1)
-                        T.reads()
-                        T.writes(C[v_i])
-                        C[v_i] = T.Select(
-                            v_i // 4 == 3 and v_i % 3 == 1, T.float32(1.0), T.float32(0.0)
-                        )
+                    C[i_0 * 4 + i_1] = T.Select(
+                        (i_0 * 4 + i_1) // 4 == 3 and (i_0 * 4 + i_1) % 3 == 1,
+                        T.float32(1.0),
+                        T.float32(0.0),
+                    )
 
     def check_type_casting(n, dtype):
-        fun = tvm.tirx.build(Module, target=target)
+        fun = tvm.tirx.compile(Module, target=target).mod
         assembly = fun.imports[0].inspect_source()
         lcond = "convert_int4(((convert_uint4(((uint4)(((convert_int(get_local_id(0))) == 3), ((convert_int(get_local_id(0))) == 3), ((convert_int(get_local_id(0))) == 3), ((convert_int(get_local_id(0))) == 3)))))"
         rcond = "(convert_uint4(((((int4)(((convert_int(get_local_id(0))))+(1*0), ((convert_int(get_local_id(0))))+(1*1), ((convert_int(get_local_id(0))))+(1*2), ((convert_int(get_local_id(0))))+(1*3))) % ((int4)(3, 3, 3, 3))) == ((int4)(1, 1, 1, 1))))))))"
@@ -250,19 +222,15 @@ def test_opencl_ceil_log2(target):
         is_adreno = "adreno" in target_obj.attrs.get("device", "")
         inter_dtype = "float32" if is_adreno else "float64"
 
-        @I.ir_module(s_tir=True)
+        @I.ir_module
         class Module:
-            @T.prim_func(s_tir=True)
-            def main(C: T.Buffer((n,), "int32")):
+            @T.function
+            def main(C: T.Tensor((n,), "int32")):
                 T.func_attr({"tirx.noalias": True})
-                for i in T.thread_binding(n, thread="threadIdx.x"):
-                    with T.sblock("C"):
-                        v_i = T.axis.spatial(n, i)
-                        T.reads()
-                        T.writes(C[v_i])
-                        C[v_i] = T.Cast("int32", T.ceil(T.log2(T.Cast(inter_dtype, v_i))))
+                with T.launch_thread("threadIdx.x", n) as i:
+                    C[i] = T.Cast("int32", T.ceil(T.log2(T.Cast(inter_dtype, i))))
 
-        fun = tvm.tirx.build(Module, target=target)
+        fun = tvm.tirx.compile(Module, target=target).mod
         assembly = fun.imports[0].inspect_source()
         if is_adreno:
             pattern = "convert_float"
@@ -277,7 +245,7 @@ def _get_maximum_kernel_args(source):
     def get_kernel_args(source):
         import re
 
-        p = re.tirx.build(r"__kernel void .+\((.*)\)")
+        p = re.compile(r"__kernel void .+\((.*)\)")
         args = p.findall(source)
         return args
 
@@ -296,21 +264,17 @@ def test_export_load_with_fallback(monkeypatch, tmp_path):
 
     n = 1024
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Module:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer((n,), "float32"), B: T.Buffer((n,), "float32")):
+        @T.function
+        def main(A: T.Tensor((n,), "float32"), B: T.Tensor((n,), "float32")):
             T.func_attr({"tirx.noalias": True})
-            for i_0 in T.thread_binding(n // 32, thread="blockIdx.x"):
-                for i_1 in T.thread_binding(32, thread="threadIdx.x"):
-                    with T.sblock("B"):
-                        v_i = T.axis.spatial(n, i_0 * 32 + i_1)
-                        T.reads(A[v_i])
-                        T.writes(B[v_i])
-                        B[v_i] = A[v_i] + 1.0
+            with T.launch_thread("blockIdx.x", n // 32) as i_0:
+                with T.launch_thread("threadIdx.x", 32) as i_1:
+                    B[i_0 * 32 + i_1] = A[i_0 * 32 + i_1] + 1.0
 
     monkeypatch.setenv("TVM_COMPILE_FORCE_FALLBACK", "1")
-    host_lib = tvm.compile(Module, target=target)
+    host_lib = tvm.tirx.compile(Module, target=target)
     monkeypatch.delenv("TVM_COMPILE_FORCE_FALLBACK")
 
     lib_path = str(tmp_path / "lib.so")

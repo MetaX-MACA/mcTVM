@@ -15,19 +15,17 @@
     specific language governing permissions and limitations
     under the License.
 
-copy → vec_auto register path
-==============================
+ld / st: register transfers
+===========================
 
-The register implementation path inside the registered ``vec_auto`` variant
-lowers a synchronous ``copy`` where **exactly one side is a register** (``local``)
-buffer and the other is ``shared*`` or ``global``.  It is not a separate
-``reg`` dispatch name; automatic selection or ``dispatch="vec_auto"`` reaches
-this path.  Unlike :doc:`gmem_smem`, the partition is **not synthesized** — it is
-*induced* by the register operand's layout: that layout's thread-axis iters
-already say which thread owns which logical coordinate, so the dispatch drops
+``Tx.cuda.tile.ld`` loads from shared or global memory into local registers;
+``Tx.cuda.tile.st`` stores registers to memory. With ``vec_bits=0``, the
+register layout determines the vector width. A positive ``vec_bits`` fixes
+the width. The partition is induced by the register operand's layout: that layout's thread-axis iters
+already say which thread owns which logical coordinate, so the lowerer drops
 those axes, leaves each thread its private bundle of elements, and copies them
 in a vectorized serial loop. Source:
-``python/tvm/backend/cuda/tile_primitive/copy/vec_auto_reg.py``.
+``python/tvm/backend/cuda/tile/copy/vec_auto_reg.py``.
 
 What it accepts
 ---------------
@@ -73,7 +71,7 @@ What it accepts
        its region
 
 Demonstration program
-----------------------
+---------------------
 
 A warp round-trips a ``32×8`` ``float32`` tile shared → register → shared, with the
 register layout ``S[(32,8):(1@laneid, 1)]`` — **lane ``i`` owns row ``i``** (8
@@ -81,31 +79,37 @@ contiguous elements). From ``test_reg.py``:
 
 .. code-block:: python
 
-    from tvm.tirx.layout import S, TileLayout, laneid
+    from tvm.tirx.layout import S, TileLayout
+    from tvm.backend.cuda.axis import laneid
 
     shape, dtype = (32, 8), "float32"
-    r_layout = TileLayout(S[shape : (1 @ laneid, 1)])   # lane i -> row i, 8 regs
+    r_layout = TileLayout(S[shape : (1 @ laneid, 1)])  # lane i -> row i, 8 regs
     s_layout = TileLayout(S[shape])
     fs = (slice(0, 32), slice(0, 8))
 
-    @Tx.prim_func
-    def kernel(B_ptr: Tx.handle):
-        B = Tx.match_buffer(B_ptr, shape, dtype)
-        Tx.device_entry(); Tx.cta_id([1]); Tx.lane_id([32]); tid = Tx.thread_id([32])
-        A_smem = Tx.alloc_buffer(shape, dtype, scope="shared", layout=s_layout)
-        for kk in range(8): A_smem[tid, kk] = Tx.cast(tid * 100 + kk + 1, dtype)
+
+    @Tx.function
+    def kernel(B: Tx.Tensor(shape, dtype)):
+
+        Tx.device_entry(launch=Tx.cuda.LaunchConfig(grid=(1,), block=(32,)))
+        _index = Tx.cuda.block_idx("x")
+        _lane = Tx.cuda.lane_id()
+        tid = Tx.cuda.thread_idx("x")
+        A_smem = Tx.alloc_tensor(ty_args=[Tx.Tensor(shape, dtype, scope="shared", layout=s_layout)])
+        for kk in range(8):
+            A_smem[tid, kk] = Tx.cast(tid * 100 + kk + 1, dtype)
         Tx.cuda.cta_sync()
-        R = Tx.alloc_buffer(shape, dtype, scope="local", layout=r_layout)
-        Tx.tile.warp.copy(R[fs], A_smem[fs])    # shared -> register  (this dispatch)
+        R = Tx.alloc_tensor(ty_args=[Tx.Tensor(shape, dtype, scope="local", layout=r_layout)])
+        Tx.cuda.tile.ld(R[fs], A_smem[fs], scope="warp")  # shared -> register  (this dispatch)
         # ... clear A_smem, cta_sync ...
-        Tx.tile.warp.copy(A_smem[fs], R[fs])    # register -> shared  (this dispatch)
+        Tx.cuda.tile.st(A_smem[fs], R[fs], scope="warp")  # register -> shared  (this dispatch)
         # ... cta_sync; B[tid, kk] = A_smem[tid, kk] ...
 
 Algorithm
 ---------
 
 **1. Inherit the partition from R.** The register layout's thread axis (``laneid``)
-states that lane ``i`` owns row ``i``; the dispatch aligns the other (shared) side
+states that lane ``i`` owns row ``i``; the lowerer aligns the other (shared) side
 to that order, then **drops the thread iters** — what remains is each thread's
 private memory bundle: here ``8`` contiguous elements per lane.
 
@@ -118,9 +122,9 @@ which thread owns which element — and never appear in a single thread's physic
 address). For ``8`` contiguous ``float32`` that is ``vec = 4``, so ``outer = 2``.
 
 **3. Per-thread base offset + serial loop.** The shared-side base offset is built
-from thread-axis placeholders (substituted with the real ``Tx.lane_id()`` etc.),
-and the register side is a flat per-thread ``local`` buffer. The emit is a serial
-loop (not ``Tx.unroll`` — same flooding rationale as :doc:`gmem_smem`):
+from thread-axis placeholders (substituted with the real ``Tx.cuda.lane_id()`` etc.),
+and the register side is a flat per-thread ``local`` tensor. The emit is a serial
+loop to limit generated code size:
 
 .. code-block:: python
 
@@ -148,7 +152,9 @@ Generated TIRx IR
 
 .. code-block:: python
 
-    r_local = Tx.decl_buffer((8,), data=R.data, scope="local")   # 8 fp32 elements / lane
+    r_local = Tx.decl_tensor(
+        R.data, ty_args=[Tx.Tensor((8,), scope="local")]
+    )  # 8 fp32 elements / lane
     r_words = r_local.view("uint32")
     for f in range(2):                                           # outer = 8 / vec 4
         s_ptr = pointer_offset(A_smem, ...)                      # this lane's row

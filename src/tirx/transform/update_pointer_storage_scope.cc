@@ -19,15 +19,15 @@
 
 /*!
  * \file update_pointer_storage_scope.cc
- * \brief A pass to update storage scopes for buffer variables.
+ * \brief A pass to update storage scopes for tensor and pointer variables.
  */
 #include "update_pointer_storage_scope.h"
 
 #include <tvm/ffi/cast.h>
 #include <tvm/ffi/extra/structural_equal.h>
 #include <tvm/ir/prim/expr.h>
-#include <tvm/tirx/builtin.h>
-#include <tvm/tirx/op.h>
+#include <tvm/ir/prim/op.h>
+#include <tvm/tirx/op/memory.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/transform.h>
 
@@ -41,21 +41,20 @@ namespace tvm {
 namespace tirx {
 
 Var WithStorageScope(const VarNode* buffer_var, ffi::String storage_scope) {
-  auto* ptr_type = buffer_var->ty.as<PointerTypeNode>();
+  auto* ptr_type = buffer_var->ty.as<PtrTypeNode>();
   TVM_FFI_ICHECK(ptr_type) << "The provided variable is not of pointer type";
-  return Var(buffer_var->name, PointerType(ptr_type->element_type, storage_scope),
-             buffer_var->span);
+  return Var(buffer_var->name, PtrType(ptr_type->element_type, storage_scope), buffer_var->loc);
 }
 
 UpdatePointerStorageScope::UpdatePointerStorageScope(
     const std::unordered_map<Var, ffi::String, ffi::ObjectPtrHash, ffi::ObjectPtrEqual>&
         new_storage_scopes) {
   for (auto& kv : new_storage_scopes) {
-    if (kv.first->ty.as<BufferTypeNode>()) {
-      BufferVar buffer = GetBufferVar(kv.first.get());
-      auto type = CopyBufferType(buffer);
+    if (kv.first->ty.as<TensorTypeNode>()) {
+      TensorVar tensor = GetTensorVar(kv.first.get());
+      auto type = CopyTensorType(tensor);
       type->storage_scope = kv.second;
-      BufferVar replacement = RebuildBufferVar(buffer, std::move(type));
+      TensorVar replacement = RebuildTensorVar(tensor, std::move(type));
       VarRemapSet(kv.first, replacement);
     } else {
       VarRemapSet(kv.first, WithStorageScope(kv.first.get(), kv.second));
@@ -63,22 +62,37 @@ UpdatePointerStorageScope::UpdatePointerStorageScope(
   }
 }
 
+UnchangedOr<Stmt> UpdatePointerStorageScope::Mutate_(const BindNode* op, InplaceMode inplace_mode) {
+  const auto* call = op->value.as<CallNode>();
+  if (call &&
+      (call->op.same_as(tirx::alloc_tensor_op()) || call->op.same_as(tirx::decl_tensor_op()))) {
+    if (auto mapped = VarRemapGet(op->var); mapped != nullptr) {
+      tensor_scopes_.emplace(call, mapped.as_or_throw<TensorVar>().scope());
+      auto result = StmtExprMutator::Mutate_(op, inplace_mode);
+      tensor_scopes_.erase(call);
+      return result;
+    }
+  }
+  return StmtExprMutator::Mutate_(op, inplace_mode);
+}
+
 UnchangedOr<Expr> UpdatePointerStorageScope::Mutate_(const CallNode* op, InplaceMode inplace_mode) {
   auto result = StmtExprMutator::Mutate_(op, inplace_mode);
-  if (!result.IsUnchanged()) {
-    op = ffi::AnyView(result).as<CallNode>();
-    if (!op->unique()) inplace_mode = InplaceMode::kDisallow;
+  if (auto it = tensor_scopes_.find(op); it != tensor_scopes_.end()) {
+    Expr value = std::move(result).ValueOrUnchanged(ffi::GetRef<Expr>(op));
+    auto call = value.as_or_throw<Call>();
+    auto type = call->ty_args[0].as_or_throw<TensorType>();
+    if (type->storage_scope != it->second) {
+      auto updated = ffi::make_object<TensorTypeNode>(*type.get());
+      updated->storage_scope = it->second;
+      auto copy = ffi::make_object<CallNode>(*call.get());
+      copy->ty_args.Set(0, TensorType(std::move(updated)));
+      return ReinferMutatedCallType(Expr(std::move(copy)), op, inplace_mode);
+    }
+    return value;
   }
-  if (!op->op.same_as(builtin::buffer_data()) || op->args.size() != 1) return result;
-  PointerType type = op->args[0].as_or_throw<BufferVar>().DataPointerType();
-  if (ffi::StructuralEqual()(op->ty, type)) return result;
-  if (inplace_mode == InplaceMode::kAllow) {
-    const_cast<CallNode*>(op)->ty = std::move(type);
-    return result;
-  }
-  auto copy = ffi::make_object<CallNode>(*op);
-  copy->ty = std::move(type);
-  return Expr(std::move(copy));
+  if (!op->op.same_as(tirx::tensor_data_ptr_op())) return result;
+  return ReinferMutatedCallType(std::move(result), op, inplace_mode);
 }
 
 }  // namespace tirx

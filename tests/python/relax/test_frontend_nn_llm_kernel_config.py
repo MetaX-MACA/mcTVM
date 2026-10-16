@@ -19,6 +19,7 @@ import pytest
 
 import tvm
 import tvm.testing
+from tvm.relax.frontend.nn.llm._decode_kernels import _merge_state_inplace
 from tvm.relax.frontend.nn.llm._kernel_common import (
     _get_prefill_kernel_config,
     _get_prefill_shared_memory_usage,
@@ -72,7 +73,7 @@ def test_non_power_of_two_head_prefill_reduces_query_tile_for_metal():
     assert func.attrs["tirx.is_scheduled"]
     assert _get_allocated_shared_memory(func) == 18_784
     assert 18_784 <= int(target.attrs["max_shared_memory_per_block"])
-    assert tvm.tirx.build(func, target=target).imports[0].inspect_source()
+    assert tvm.tirx.compile(func, target=target).mod.imports[0].inspect_source()
 
 
 def test_reduced_query_tile_keeps_the_real_head_dimension():
@@ -90,7 +91,7 @@ def test_reduced_query_tile_keeps_the_real_head_dimension():
     assert func.attrs["tirx.is_scheduled"]
     assert _get_allocated_shared_memory(func) == 20_320
     assert 20_320 <= int(target.attrs["max_shared_memory_per_block"])
-    assert tvm.tirx.build(func, target=target).imports[0].inspect_source()
+    assert tvm.tirx.compile(func, target=target).mod.imports[0].inspect_source()
 
 
 def test_fallback_can_select_larger_nearby_query_tile():
@@ -108,7 +109,7 @@ def test_fallback_can_select_larger_nearby_query_tile():
     assert func.attrs["tirx.is_scheduled"]
     assert _get_allocated_shared_memory(func) == 31_072
     assert 31_072 <= int(target.attrs["max_shared_memory_per_block"])
-    assert tvm.tirx.build(func, target=target).imports[0].inspect_source()
+    assert tvm.tirx.compile(func, target=target).mod.imports[0].inspect_source()
 
 
 @pytest.mark.parametrize(
@@ -136,7 +137,7 @@ def test_fallback_can_expand_key_tile_for_factorization(
     assert func.attrs["tirx.is_scheduled"]
     assert _get_allocated_shared_memory(func) == expected_shared_memory
     assert expected_shared_memory <= int(target.attrs["max_shared_memory_per_block"])
-    assert tvm.tirx.build(func, target=target).imports[0].inspect_source()
+    assert tvm.tirx.compile(func, target=target).mod.imports[0].inspect_source()
 
 
 def test_normal_head_prefill_keeps_existing_metal_config():
@@ -238,6 +239,39 @@ def test_wide_head_tree_attention_has_legal_metal_schedule(kernel):
     assert func.attrs["tirx.is_scheduled"]
     assert _get_allocated_shared_memory(func) == 24_928
     assert 24_928 <= int(target.attrs["max_shared_memory_per_block"])
+
+
+@pytest.mark.parametrize("head_dim", [128, 256, 512])
+def test_merge_state_waits_before_overwriting_the_shared_lse(head_dim):
+    """merge_state_inplace must synchronize between reading and overwriting S.
+
+    Every threadIdx.x thread of a block reads the same S element and later writes it back. The
+    threads only advance in step while bdx fits in one warp, and bdx is head_dim // VEC_SIZE, so a
+    head_dim above 128 spreads them over several warps. Without a barrier a warp that finishes
+    early overwrites S while another warp has yet to read it, and that warp then rescales its slice
+    of V with an already merged LSE, corrupting whole warp-sized spans of the output.
+    """
+    target = tvm.target.Target("metal")
+    func = _merge_state_inplace(8, head_dim, "float16", target, global_symbol="merge")
+    lines = [
+        line.strip()
+        for line in tvm.tirx.compile(func, target=target)
+        .mod.imports[0]
+        .inspect_source()
+        .splitlines()
+    ]
+
+    loads = [i for i, line in enumerate(lines) if "= S_ptr[" in line]
+    stores = [i for i, line in enumerate(lines) if line.startswith("S_ptr[")]
+    assert loads and stores, "expected the kernel to both read and write the shared LSE"
+
+    last_load, first_store = max(loads), min(stores)
+    assert any(
+        last_load < i < first_store for i, line in enumerate(lines) if "threadgroup_barrier" in line
+    ), "no barrier between reading the shared LSE and overwriting it"
+    assert any("threadIdx.x) == 0" in line for line in lines[last_load:first_store]), (
+        "the shared LSE should be stored by a single thread"
+    )
 
 
 if __name__ == "__main__":

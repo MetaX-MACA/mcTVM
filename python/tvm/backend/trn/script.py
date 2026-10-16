@@ -18,41 +18,38 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
-
 from . import op as _trn_op
-
-OpWrapper = Callable[[Callable[..., Any]], Callable[..., Any]]
-
-
-def _default_op_wrapper() -> OpWrapper:
-    from tvm.tirx.script.builder.ir import _op_wrapper  # pylint: disable=import-outside-toplevel
-
-    return _op_wrapper
 
 
 class NKINamespace:
     """The NKI instructions submodule."""
 
-    def __init__(self, op_wrapper: OpWrapper | None = None):
-        wrap = op_wrapper or _default_op_wrapper()
-        self.load = wrap(_trn_op.nki_load)
-        self.store = wrap(_trn_op.nki_store)
-        self.tensor_copy = wrap(_trn_op.nki_tensor_copy)
-        self.matmul = wrap(_trn_op.nki_matmul)
-        self.activation = wrap(_trn_op.nki_activation)
-        self.activation_reduce = wrap(_trn_op.nki_activation_reduce)
-        self.reciprocal = wrap(_trn_op.nki_reciprocal)
-        self.tensorreduce = wrap(_trn_op.nki_tensorreduce)
-        self.tensortensor = wrap(_trn_op.nki_tensortensor)
-        self.tensorscalar = wrap(_trn_op.nki_tensorscalar)
-        self.tensorscalar_reduce = wrap(_trn_op.nki_tensorscalar_reduce)
-        self.scalar_tensor_tensor = wrap(_trn_op.nki_scalar_tensor_tensor)
-        self.scalar_tensor_scalar = wrap(_trn_op.nki_scalar_tensor_scalar)
-        self.memset = wrap(_trn_op.nki_memset)
-        self.identity = wrap(_trn_op.nki_identity)
-        self.affine_select = wrap(_trn_op.nki_affine_select)
+    def __init__(self):
+        self.load = _trn_op.nki_load
+        self.store = _trn_op.nki_store
+        self.tensor_copy = _trn_op.nki_tensor_copy
+        self.matmul = _trn_op.nki_matmul
+        self.activation = _trn_op.nki_activation
+        self.activation_reduce = _trn_op.nki_activation_reduce
+        self.reciprocal = _trn_op.nki_reciprocal
+        self.tensorreduce = _trn_op.nki_tensorreduce
+        self.tensortensor = _trn_op.nki_tensortensor
+        self.tensorscalar = _trn_op.nki_tensorscalar
+        self.tensorscalar_reduce = _trn_op.nki_tensorscalar_reduce
+        self.scalar_tensor_tensor = _trn_op.nki_scalar_tensor_tensor
+        self.scalar_tensor_scalar = _trn_op.nki_scalar_tensor_scalar
+        self.memset = _trn_op.nki_memset
+        self.identity = _trn_op.nki_identity
+        self.affine_select = _trn_op.nki_affine_select
+
+    @staticmethod
+    def tensorized_instruction():
+        """Tensorize the NKI instructions in the region body."""
+        from tvm.tirx.script.ir_builder import (
+            region,  # pylint: disable=import-outside-toplevel
+        )
+
+        return region("tirx.nki.tensorized_instruction", [])
 
 
-__all__ = ["NKINamespace", "OpWrapper"]
+__all__ = ["NKINamespace"]
