@@ -349,7 +349,7 @@ class PatternKindAnalyzer : public s_tir::StmtExprVisitor {
 
   /*! \brief Whether a block only copies one buffer load to its output. */
   static bool IsPureCopyBlock(const s_tir::SBlockNode* block) {
-    const auto* store = block->body.as<BufferStoreNode>();
+    const auto* store = block->body.as<TensorStoreNode>();
     if (store == nullptr) {
       return false;
     }

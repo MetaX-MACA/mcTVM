@@ -23,7 +23,6 @@ from unittest.mock import patch
 
 import pytest
 
-import tvm
 from tvm.support import mxcc
 
 
@@ -72,12 +71,12 @@ class TestMacaArchDetection(unittest.TestCase):
                     self.assertEqual(arch, "xcore1000")
 
 
-def test_maca_compile_callback_uses_explicit_target_mcpu():
-    target = tvm.target.Target({"kind": "maca", "mcpu": "xcore1000"})
-
+def test_maca_compile_callback_uses_backend_config_arch():
     with patch("tvm.support.mxcc.subprocess.Popen", side_effect=RuntimeError("captured")) as popen:
         with pytest.raises(RuntimeError, match="captured"):
-            mxcc.tvm_callback_maca_compile("__global__ void kernel() {}", target)
+            mxcc.tvm_callback_maca_compile(
+                "__global__ void kernel() {}", '{"maca":{"arch":"xcore1000"}}'
+            )
 
     command = popen.call_args.args[0]
     assert "-offload-arch=xcore1000" in command

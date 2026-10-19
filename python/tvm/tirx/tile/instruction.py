@@ -371,6 +371,7 @@ for _name in (
     "TMAAttrs",
     "TcCopyAttrs",
     "TcMmaAttrs",
+    "MacaMmaAttrs",
     "MathAttrs",
     "TrnAttrs",
 ):

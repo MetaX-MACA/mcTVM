@@ -147,7 +147,7 @@ class BaseKernel:  # pylint: disable=too-few-public-methods
         load_meta = tvm_ffi.get_global_func("runtime.LoadMetaDataFromJSON")
         fmap = load_meta(tvm_metadata)
         create_maca = tvm_ffi.get_global_func("ffi.Module.create.maca")
-        kernel_module = create_maca(binary_bytes, fmt, fmap, "")
+        kernel_module = create_maca(binary_bytes, fmt, fmap, "", "{}")
         maca_func = kernel_module.get_function(kernel_name)
         if maca_func:
             tvm_ffi.registry.register_global_func(kernel_name, maca_func, override=True)

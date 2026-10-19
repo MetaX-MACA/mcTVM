@@ -113,7 +113,7 @@ def _make_maca_wmma_tile(dtype, trans_b):
         )
 
     return mfma_schedule(
-        te.create_prim_func((a, b, c)),
+        te.create_function((a, b, c)),
         16,
         dtype,
         trans_b,

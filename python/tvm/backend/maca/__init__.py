@@ -23,7 +23,7 @@ from tvm_ffi.libinfo import load_lib_ctypes
 
 from tvm.base import _LOADED_LIBS
 
-_LAZY_SUBMODULES = {"intrinsics", "op", "script", "tile_primitive"}
+_LAZY_SUBMODULES = {"intrinsics", "launch", "op", "script", "tile"}
 
 
 def _detect_target_from_device(dev):
@@ -43,9 +43,11 @@ def _detect_target_from_device(dev):
 
 def register_backend():
     """Register MACA-owned Python semantics."""
+    from . import exec_scope
+    from tvm.tirx.script.ir_builder import op as builder_op  # pylint: disable=import-outside-toplevel
     from tvm.target.detect_target import register_device_target_detector
-    from tvm.tirx.script.builder import ir as builder_ir  # pylint: disable=import-outside-toplevel
 
+    exec_scope.register()
     runtime_dir = Path(_LOADED_LIBS["tvm_runtime"]._name).resolve().parent
     try:
         _LOADED_LIBS["tvm_runtime_maca"] = load_lib_ctypes(
@@ -59,20 +61,22 @@ def register_backend():
 
     register_device_target_detector("maca", _detect_target_from_device)
     for name, namespace in script_namespaces().items():
-        builder_ir.register_script_namespace(name, namespace)
+        builder_op.register_script_namespace(name, namespace)
 
     import_module(f"{__name__}.intrinsics")
-    import_module(f"{__name__}.tile_primitive")
 
 
 def script_namespaces(**_):
     """Return MACA-owned TVMScript namespaces."""
+    from .tile.instructions import make_namespace  # pylint: disable=import-outside-toplevel
     from .script import (  # pylint: disable=import-outside-toplevel
         MACANamespace,
     )
 
+    maca = MACANamespace()
+    maca.tile = make_namespace()
     return {
-        "maca": MACANamespace(),
+        "maca": maca,
     }
 
 
@@ -89,10 +93,11 @@ def __getattr__(name: str):
 
 __all__ = [
     "intrinsics",
+    "launch",
     "op",
     "register_backend",
     "script",
     "script_namespace",
     "script_namespaces",
-    "tile_primitive",
+    "tile",
 ]

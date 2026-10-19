@@ -49,10 +49,11 @@ static constexpr const int kMaxNumGPUs = 32;
  * \param fmt The format of the data, can be "mcir"
  * \param fmap The map function information map of each function.
  * \param maca_source Optional, maca source file
+ * \param backend_config Optional, serialized MACA backend configuration
  */
 TVM_RUNTIME_DLL ffi::Module MACAModuleCreate(ffi::Bytes data, ffi::String fmt,
                                              ffi::Map<ffi::String, FunctionInfo> fmap,
-                                             ffi::String maca_source);
+                                             ffi::String maca_source, ffi::String backend_config);
 }  // namespace runtime
 }  // namespace tvm
 #endif  // TVM_BACKEND_MACA_RUNTIME_MACA_MODULE_H_

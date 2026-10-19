@@ -269,17 +269,10 @@ def test_multi_device():
         I.module_global_infos(
             {
                 "vdevice": [
-<<<<<<< HEAD
-                    I.vdevice("llvm"),
-                    I.vdevice("maca", 0),
-                    I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "maca"}, 0),
-=======
                     R.vdevice("llvm"),
-                    R.vdevice("cuda", 0),
+                    R.vdevice("maca", 0),
                     R.vdevice("metal", 0, "global"),
                     R.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
->>>>>>> github-metax/main
                 ]
             }
         )
@@ -292,13 +285,8 @@ def test_multi_device():
         ) -> R.Tensor((2, 3), "float32", "maca"):
             with R.dataflow():
                 lv0 = R.add(x, y)
-<<<<<<< HEAD
-                lv0 = R.hint_on_device(lv0, tvm.cpu())
-                lv1 = R.to_vdevice(lv0, "maca")
-=======
                 lv0 = R.hint_on_device(lv0, device_type=1, index=0)
-                lv1 = R.to_vdevice(lv0, "cuda")
->>>>>>> github-metax/main
+                lv1 = R.to_vdevice(lv0, "maca")
                 lv2 = R.add(z, z)
                 gv = R.multiply(lv1, lv2)
                 R.output(gv)
@@ -310,17 +298,10 @@ def test_multi_device():
         I.module_global_infos(
             {
                 "vdevice": [
-<<<<<<< HEAD
-                    I.vdevice("llvm"),
-                    I.vdevice("maca", 0),
-                    I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "maca"}, 0),
-=======
                     R.vdevice("llvm"),
-                    R.vdevice("cuda", 0),
+                    R.vdevice("maca", 0),
                     R.vdevice("metal", 0, "global"),
                     R.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
->>>>>>> github-metax/main
                 ]
             }
         )
@@ -350,17 +331,10 @@ def test_insert_to_vdevice():
         I.module_global_infos(
             {
                 "vdevice": [
-<<<<<<< HEAD
-                    I.vdevice("llvm"),
-                    I.vdevice("maca", 0),
-                    I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "maca"}, 0),
-=======
                     R.vdevice("llvm"),
-                    R.vdevice("cuda", 0),
+                    R.vdevice("maca", 0),
                     R.vdevice("metal", 0, "global"),
                     R.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
->>>>>>> github-metax/main
                 ]
             }
         )
@@ -374,15 +348,9 @@ def test_insert_to_vdevice():
             with R.dataflow():
                 lv0 = R.hint_on_device(y, device_type=1, index=0)
                 lv1 = R.add(x, lv0)
-<<<<<<< HEAD
-                lv2 = R.hint_on_device(lv1, tvm.maca())
-                lv3 = R.add(lv2, lv2)
-                lv4 = R.hint_on_device(z, tvm.maca())
-=======
                 lv2 = R.hint_on_device(lv1, device_type=2, index=0)
                 lv3 = R.add(lv2, lv2)
                 lv4 = R.hint_on_device(z, device_type=2, index=0)
->>>>>>> github-metax/main
                 gv = R.multiply(lv3, lv4)
                 R.output(gv)
             return gv
@@ -393,17 +361,10 @@ def test_insert_to_vdevice():
         I.module_global_infos(
             {
                 "vdevice": [
-<<<<<<< HEAD
-                    I.vdevice("llvm"),
-                    I.vdevice("maca", 0),
-                    I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "maca"}, 0),
-=======
                     R.vdevice("llvm"),
-                    R.vdevice("cuda", 0),
+                    R.vdevice("maca", 0),
                     R.vdevice("metal", 0, "global"),
                     R.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
->>>>>>> github-metax/main
                 ]
             }
         )

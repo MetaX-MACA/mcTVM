@@ -22,6 +22,7 @@
  * \brief Annotate and split device functions from host, then lower kernel launches.
  */
 #include <tvm/backend/cuda/attr.h>
+#include <tvm/backend/maca/attr.h>
 #include <tvm/ffi/cast.h>
 #include <tvm/ffi/extra/structural_mutate.h>
 #include <tvm/ffi/function.h>
@@ -123,6 +124,8 @@ Function AnnotateDeviceRegionsForSplit(Function func) {
 
 // Launch operands belong to the host region, independently of device captures.
 Stmt MakeCudaKernelLaunch(const GlobalVar& symbol, Function* func, ffi::Array<Expr> args,
+                          const RegionStmtNode* region);
+Stmt MakeMacaKernelLaunch(const GlobalVar& symbol, Function* func, ffi::Array<Expr> args,
                           const RegionStmtNode* region);
 
 // Host/device function extraction
@@ -272,6 +275,10 @@ class HostDeviceSplitter : public StmtExprMutator {
       device_func = WithAttr(std::move(device_func), tvm::tirx::attr::kKernelLaunchParams,
                              launch_params.value());
     }
+    if (auto launch_params = region->attrs->dict.Get(tvm::backend::maca::attr::kLaunchFields)) {
+      device_func = WithAttr(std::move(device_func), tvm::backend::maca::attr::kLaunchFields,
+                             launch_params.value());
+    }
     auto num_inputs = cur_func_->GetAttr<int64_t>(tvm::attr::kNumInputs);
     if (num_inputs.has_value()) {
       device_func = WithAttr(std::move(device_func), tvm::attr::kNumInputs, num_inputs);
@@ -279,6 +286,11 @@ class HostDeviceSplitter : public StmtExprMutator {
     GlobalVar kernel_symbol_global = var_supply_();
     if (region->attrs->dict.count(tvm::backend::cuda::attr::kLaunchFields)) {
       Stmt launch = MakeCudaKernelLaunch(kernel_symbol_global, &device_func, call_args, region);
+      (*device_mod_)->Add(kernel_symbol_global, device_func);
+      return launch;
+    }
+    if (region->attrs->dict.count(tvm::backend::maca::attr::kLaunchFields)) {
+      Stmt launch = MakeMacaKernelLaunch(kernel_symbol_global, &device_func, call_args, region);
       (*device_mod_)->Add(kernel_symbol_global, device_func);
       return launch;
     }
@@ -366,6 +378,28 @@ class DeviceInfoCollector : public StmtExprVisitor {
     if (func->GetAttr<ffi::Array<ffi::String>>(tvm::backend::cuda::attr::kLaunchFields)) {
       collector->info_.global_symbol =
           func->GetAttr<ffi::String>(tvm::attr::kGlobalSymbol).value_or(gvar->name_hint);
+      return collector->info_;
+    }
+
+    // A MACA native launch carries its ordered runtime ABI tags separately
+    // from the CUDA launch-field schema.  Visit the body so dynamic shared
+    // memory requirements are still inferred, then retain the explicit MACA
+    // tags as the function's launch metadata.
+    if (auto requested =
+            func->GetAttr<ffi::Array<ffi::String>>(tvm::backend::maca::attr::kLaunchFields)) {
+      collector->Visit(func->body);
+      if (!collector->dyn_shmem_size.has_value() && collector->inferred_shmem_size_.has_value()) {
+        const auto* inferred = collector->inferred_shmem_size_.value().as<IntImmNode>();
+        TVM_FFI_ICHECK(allow_placeholder || !(inferred && inferred->value == 0))
+            << "Function " << gvar->name_hint
+            << " allocates dynamic shared memory with a placeholder extent but does not declare "
+               "its size; use LaunchConfig.dynamic_smem_bytes or SMEMPool.commit().";
+        collector->dyn_shmem_size = collector->inferred_shmem_size_;
+      }
+      collector->info_.launch_params = requested.value();
+      collector->info_.global_symbol =
+          func->GetAttr<ffi::String>(tvm::attr::kGlobalSymbol).value_or(gvar->name_hint);
+      collector->info_.dynamic_smem_requirement = collector->dyn_shmem_size;
       return collector->info_;
     }
 
@@ -653,6 +687,60 @@ Stmt MakeCudaKernelLaunch(const GlobalVar& symbol, Function* func, ffi::Array<Ex
   auto attrs = ffi::make_object<CallFFIKernelAttr>();
   attrs->launch_fields = fields;
   attrs->kernel_attrs = kernel_attrs;
+  attrs->num_kernel_args = args.size();
+  ffi::Array<Expr> call_args{StringImm(symbol->name_hint)};
+  call_args.insert(call_args.end(), args.begin(), args.end());
+  call_args.insert(call_args.end(), values.begin(), values.end());
+  host_stmts.push_back(
+      Evaluate(Call(PrimType::Int(32), call_ffi_kernel_op(), call_args, Attrs(attrs))));
+  return SeqStmt(host_stmts);
+}
+
+Stmt MakeMacaKernelLaunch(const GlobalVar& symbol, Function* func, ffi::Array<Expr> args,
+                          const RegionStmtNode* region) {
+  auto fields = region->attrs->dict.at(tvm::backend::maca::attr::kLaunchFields)
+                    .as_or_throw<ffi::Array<ffi::String>>();
+  ffi::Array<Expr> values = region->args;
+  auto info = DeviceInfoCollector::Collect(symbol, *func, true);
+  ffi::Array<Stmt> host_stmts;
+  if (auto required = info.dynamic_smem_requirement) {
+    sym::Analyzer analyzer;
+    auto bytes = analyzer->Simplify(required.value());
+    int index = -1;
+    for (size_t i = 0; i < fields.size(); ++i) {
+      if (fields[i] == tvm::runtime::launch_param::kUseDynamicSharedMemoryTag) {
+        index = static_cast<int>(i);
+        break;
+      }
+    }
+    if (index < 0) {
+      TVM_FFI_CHECK(!prim::IsZero(bytes), ValueError)
+          << "A shared.dyn placeholder requires LaunchConfig.dynamic_smem_bytes";
+      fields.push_back(tvm::runtime::launch_param::kUseDynamicSharedMemoryTag);
+      values.push_back(bytes);
+    } else {
+      auto available = values[index].as_or_throw<PrimExpr>();
+      auto condition = analyzer->Simplify(available >= bytes);
+      TVM_FFI_CHECK(!prim::IsZero(condition), ValueError)
+          << "LaunchConfig.dynamic_smem_bytes is smaller than the kernel allocation";
+      if (!prim::IsOne(condition)) {
+        host_stmts.push_back(AssertStmt(
+            condition, StringImm("ValueError"),
+            {StringImm("LaunchConfig.dynamic_smem_bytes is smaller than the kernel allocation")}));
+      }
+    }
+  }
+
+  // MACA's runtime consumes the same ordered legacy launch tags as the CUDA
+  // runtime wrapper.  Keep the tags on the kernel function because MACA does
+  // not use the CUDA-only launch-field metadata.
+  *func =
+      WithAttrs(std::move(*func), {{tvm::attr::kCallingConv, tvm::CallingConv::kDeviceKernelLaunch},
+                                   {tvm::attr::kGlobalSymbol, symbol->name_hint},
+                                   {tvm::backend::maca::attr::kLaunchFields, fields},
+                                   {tvm::tirx::attr::kKernelLaunchParams, fields}});
+  auto attrs = ffi::make_object<CallFFIKernelAttr>();
+  attrs->launch_params = fields;
   attrs->num_kernel_args = args.size();
   ffi::Array<Expr> call_args{StringImm(symbol->name_hint)};
   call_args.insert(call_args.end(), args.begin(), args.end());

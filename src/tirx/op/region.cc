@@ -22,6 +22,7 @@
  * \brief TIRx region operations.
  */
 #include <tvm/backend/cuda/attr.h>
+#include <tvm/backend/maca/attr.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ir/prim/op.h>
 #include <tvm/ir/stmt.h>
@@ -70,13 +71,21 @@ const Op& device_entry_op() {
 void ValidateDeviceEntry(const RegionStmtNode* region) {
   TVM_FFI_CHECK(region->result_vars.empty() && region->body_params.empty(), ValueError)
       << "device_entry expects no results or body parameters";
-  if (auto fields = region->attrs->dict.Get(tvm::backend::cuda::attr::kLaunchFields)) {
+  TVM_FFI_CHECK(!(region->attrs->dict.count(tvm::backend::cuda::attr::kLaunchFields) &&
+                  region->attrs->dict.count(tvm::backend::maca::attr::kLaunchFields)),
+                ValueError)
+      << "device_entry cannot mix CUDA and MACA launch metadata";
+  auto fields = region->attrs->dict.Get(tvm::backend::cuda::attr::kLaunchFields);
+  if (!fields) {
+    fields = region->attrs->dict.Get(tvm::backend::maca::attr::kLaunchFields);
+  }
+  if (fields) {
     TVM_FFI_CHECK_EQ(fields->as_or_throw<ffi::Array<ffi::String>>().size(), region->args.size(),
                      ValueError)
         << "device_entry launch fields must describe every configuration operand";
   } else {
     TVM_FFI_CHECK(region->args.empty(), ValueError)
-        << "device_entry configuration operands require cuda.launch_fields";
+        << "device_entry configuration operands require a launch parameter attribute";
   }
 }
 

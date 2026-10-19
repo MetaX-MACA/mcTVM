@@ -715,11 +715,12 @@ def device_entry(
     attrs=None,
     body_params=None,
 ) -> frame.RegionFrame:
-    """Enter a device kernel with independent CUDA launch and compile settings.
+    """Enter a device kernel with independent launch and compile settings.
 
     LaunchConfig values are ordinary region operands. BackendConfig supplies
     static per-entry overrides. Canonical operands and attributes are accepted
-    for IR reconstruction. Other backends may use the argument-free entry.
+    for IR reconstruction. CUDA and MACA accept their backend LaunchConfig;
+    other backends may use the argument-free entry.
     """
     if launch is not None and (launch_values or attrs is not None):
         raise ValueError("device_entry launch cannot be combined with canonical operands or attrs")
@@ -734,6 +735,14 @@ def device_entry(
         if kernel_attrs is not None:
             raise ValueError("device_entry kernel_attrs require a launch configuration")
         return region("tirx.device_entry", launch_values, attrs=attributes, body_params=body_params)
+    if getattr(launch, "_config_type", None) == "MacaLaunchConfig":
+        if kernel_attrs is not None:
+            raise TypeError("MACA LaunchConfig does not support CUDA kernel_attrs")
+        from tvm.backend.maca.launch import pack_launch
+
+        names, values = pack_launch(launch)
+        attributes["maca.launch_fields"] = names
+        return region("tirx.device_entry", values, attrs=attributes, body_params=body_params)
     from tvm.backend.cuda.launch._impl import pack_kernel_attrs, pack_launch
 
     names, values = pack_launch(launch)

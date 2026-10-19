@@ -28,19 +28,18 @@
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/runtime/logging.h>
+#include <tvm/support/bytes_io.h>
 
 #include <array>
+#include <cstdint>
 #include <mutex>
 #include <string>
-#include <unordered_map>
 #include <utility>
-#include <vector>
 
-#include "../../../runtime/file_utils.h"
 #include "../../../runtime/metadata.h"
+#include "../../../runtime/launch_param.h"
 #include "../../../runtime/pack_args.h"
 #include "../../../runtime/thread_storage_scope.h"
-#include "../../../support/bytes_io.h"
 #include "maca_common.h"
 
 namespace tvm {
@@ -53,8 +52,13 @@ namespace runtime {
 class MACAModuleNode : public ffi::ModuleObj {
  public:
   explicit MACAModuleNode(ffi::Bytes data, ffi::String fmt,
-                          ffi::Map<ffi::String, FunctionInfo> fmap, ffi::String maca_source)
-      : data_(data), fmt_(fmt), fmap_(fmap), maca_source_(maca_source) {
+                          ffi::Map<ffi::String, FunctionInfo> fmap, ffi::String maca_source,
+                          ffi::String backend_config)
+      : data_(data),
+        fmt_(fmt),
+        fmap_(fmap),
+        maca_source_(maca_source),
+        backend_config_(backend_config.empty() ? ffi::String("{}") : std::move(backend_config)) {
     std::fill(module_.begin(), module_.end(), nullptr);
   }
   // destructor
@@ -87,37 +91,24 @@ class MACAModuleNode : public ffi::ModuleObj {
   }
   ffi::Optional<ffi::Function> GetFunction(const ffi::String& name) final;
 
-  void WriteToFile(const ffi::String& file_name, const ffi::String& format) const final {
-    std::string fmt = GetFileFormat(file_name, format);
-    std::string meta_file = GetMetaFilePath(file_name);
-    if (fmt == "maca") {
-      TVM_FFI_ICHECK_NE(maca_source_.length(), 0);
-      SaveMetaDataToFile(meta_file, fmap_);
-      SaveBinaryToFile(file_name, std::string(maca_source_.data(), maca_source_.size()));
-    } else {
-      TVM_FFI_ICHECK_EQ(fmt, fmt_) << "Can only save to format=" << fmt_;
-      SaveMetaDataToFile(meta_file, fmap_);
-      SaveBinaryToFile(file_name, std::string(data_.data(), data_.size()));
-    }
-  }
-
   ffi::Bytes SaveToBytes() const final {
     std::string buffer;
     support::BytesOutStream stream(&buffer);
     stream.Write(fmt_);
     stream.Write(fmap_);
     stream.Write(data_);
+    stream.Write(backend_config_);
     return ffi::Bytes(buffer);
   }
 
   ffi::String InspectSource(const ffi::String& format) const final {
+    if (format == "backend_config") return backend_config_;
     if (format == fmt_) return ffi::String(data_.data(), data_.size());
-    if (maca_source_.length() != 0) {
+    if ((format.empty() || format == "maca") && maca_source_.length() != 0) {
       return maca_source_;
-    } else {
-      if (fmt_ == "fatbin") return ffi::String(data_.data(), data_.size());
-      return "";
     }
+    if (format.empty() && fmt_ == "fatbin") return ffi::String(data_.data(), data_.size());
+    return ffi::String();
   }
 
   // get a mcFunction_t from primary context in device_id
@@ -160,6 +151,8 @@ class MACAModuleNode : public ffi::ModuleObj {
   ffi::Map<ffi::String, FunctionInfo> fmap_;
   // The maca source.
   ffi::String maca_source_;
+  // Serialized compile configuration used when recompiling the source.
+  ffi::String backend_config_;
   // the internal modules per GPU, to be lazily initialized.
   std::array<mcModule_t, kMaxNumGPUs> module_;
   // internal mutex when updating the module
@@ -193,9 +186,9 @@ class MACAWrappedFunc {
     void* config[] = {MC_LAUNCH_PARAM_BUFFER_POINTER, packed_args, MC_LAUNCH_PARAM_BUFFER_SIZE,
                       &packed_nbytes, MC_LAUNCH_PARAM_END};
     // MACA supports only extra_args.
-    MACA_DRIVER_CALL(mcModuleLaunchKernel(fcache_[device_id], wl.grid_dim(0), wl.grid_dim(1),
-                                          wl.grid_dim(2), wl.block_dim(0), wl.block_dim(1),
-                                          wl.block_dim(2), wl.dyn_shmem_size, strm, nullptr,
+    MACA_DRIVER_CALL(mcModuleLaunchKernel(fcache_[device_id], wl.GridDim(0), wl.GridDim(1),
+                                          wl.GridDim(2), wl.BlockDim(0), wl.BlockDim(1),
+                                          wl.BlockDim(2), wl.dyn_shmem_size, strm, nullptr,
                                           reinterpret_cast<void**>(&config)));
   }
 
@@ -225,19 +218,23 @@ ffi::Optional<ffi::Function> MACAModuleNode::GetFunction(const ffi::String& name
 }
 
 ffi::Module MACAModuleCreate(ffi::Bytes data, ffi::String fmt,
-                             ffi::Map<ffi::String, FunctionInfo> fmap, ffi::String maca_source) {
-  auto n = ffi::make_object<MACAModuleNode>(data, fmt, fmap, maca_source);
+                             ffi::Map<ffi::String, FunctionInfo> fmap, ffi::String maca_source,
+                             ffi::String backend_config) {
+  auto n = ffi::make_object<MACAModuleNode>(data, fmt, fmap, maca_source, backend_config);
   return ffi::Module(n);
 }
 
-ffi::Module MACAModuleLoadFile(const std::string& file_name, const std::string& format) {
-  std::string data;
-  ffi::Map<ffi::String, FunctionInfo> fmap;
-  std::string fmt = GetFileFormat(file_name, format);
-  std::string meta_file = GetMetaFilePath(file_name);
-  LoadBinaryFromFile(file_name, &data);
-  LoadMetaDataFromFile(meta_file, &fmap);
-  return MACAModuleCreate(ffi::Bytes(std::move(data)), ffi::String(fmt), fmap, ffi::String());
+static ffi::Module MACAModuleCreateImpl(ffi::Bytes data, ffi::String fmt,
+                                        ffi::Map<ffi::String, FunctionInfo> fmap,
+                                        ffi::String maca_source, ffi::String backend_config) {
+  if (fmt == "maca") {
+    if (maca_source.empty()) maca_source = ffi::String(data.data(), data.size());
+    auto compile = ffi::Function::GetGlobalRequired("tvm_callback_maca_compile");
+    data = compile(maca_source, backend_config).cast<ffi::Bytes>();
+    fmt = "mcbin";
+  }
+  return MACAModuleCreate(std::move(data), std::move(fmt), std::move(fmap),
+                          std::move(maca_source), std::move(backend_config));
 }
 
 ffi::Module MACAModuleLoadFromBytes(const ffi::Bytes& bytes) {
@@ -245,22 +242,36 @@ ffi::Module MACAModuleLoadFromBytes(const ffi::Bytes& bytes) {
   ffi::Bytes data;
   ffi::Map<ffi::String, FunctionInfo> fmap;
   ffi::String fmt;
-  stream.Read(&fmt);
+  TVM_FFI_ICHECK(stream.Read(&fmt));
   TVM_FFI_ICHECK(stream.Read(&fmap));
-  stream.Read(&data);
-  return MACAModuleCreate(std::move(data), std::move(fmt), std::move(fmap), ffi::String());
+  TVM_FFI_ICHECK(stream.Read(&data));
+  ffi::String backend_config;
+  // Accept older serialized modules that end after the code bytes, but reject
+  // truncated or trailing compile configuration data.
+  uint64_t length = 0;
+  size_t count = stream.Read(&length, sizeof(length));
+  if (count != 0) {
+    TVM_FFI_ICHECK(count == sizeof(length) && length <= bytes.size());
+    std::string config(length, '\0');
+    TVM_FFI_ICHECK_EQ(stream.Read(config.data(), length), length);
+    backend_config = ffi::String(config);
+    char trailing;
+    TVM_FFI_ICHECK_EQ(stream.Read(&trailing, 1), 0);
+  }
+  ffi::String source = fmt == "maca" ? ffi::String(data.data(), data.size()) : ffi::String();
+  return MACAModuleCreateImpl(std::move(data), std::move(fmt), std::move(fmap), std::move(source),
+                              std::move(backend_config));
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
-      .def("ffi.Module.load_from_file.maca", MACAModuleLoadFile)
       .def("ffi.Module.load_from_bytes.maca", MACAModuleLoadFromBytes)
       .def("ffi.Module.create.maca",
            [](ffi::Bytes data, ffi::String fmt, ffi::Map<ffi::String, FunctionInfo> fmap,
-              ffi::String maca_source) {
-             return MACAModuleCreate(std::move(data), std::move(fmt), std::move(fmap),
-                                     std::move(maca_source));
+              ffi::String maca_source, ffi::String backend_config) {
+             return MACAModuleCreateImpl(std::move(data), std::move(fmt), std::move(fmap),
+                                         std::move(maca_source), std::move(backend_config));
            });
 }
 }  // namespace runtime

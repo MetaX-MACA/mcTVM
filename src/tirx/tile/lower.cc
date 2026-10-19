@@ -23,6 +23,7 @@
  */
 
 #include <tvm/backend/cuda/attr.h>
+#include <tvm/backend/maca/attr.h>
 #include <tvm/ffi/reflection/accessor.h>
 #include <tvm/ir/function.h>
 #include <tvm/ir/op.h>
@@ -49,6 +50,7 @@
 #include <vector>
 
 #include "../../backend/cuda/tile/exec_analysis.h"
+#include "../../runtime/metadata.h"
 
 namespace tvm {
 namespace tirx {
@@ -243,10 +245,16 @@ class TileDispatcher : public StmtExprMutator {
     launch_params_.clear();
     cluster_bounds_.clear();
     variable_cluster_ = false;
-    native_launch_ = entry_node->attrs->dict.count(tvm::backend::cuda::attr::kLaunchFields);
+    cuda_launch_ = entry_node->attrs->dict.count(tvm::backend::cuda::attr::kLaunchFields);
+    maca_launch_ = entry_node->attrs->dict.count(tvm::backend::maca::attr::kLaunchFields);
+    native_launch_ = cuda_launch_ || maca_launch_;
     TVM_FFI_CHECK(is_first_block || !native_launch_, ValueError)
-        << "Nested CUDA device_entry regions are not supported";
-    if (native_launch_) PrepareCudaLaunchParams(entry_node);
+        << "Nested native device_entry regions are not supported";
+    if (cuda_launch_) {
+      PrepareCudaLaunchParams(entry_node);
+    } else if (maca_launch_) {
+      PrepareMacaLaunchParams(entry_node);
+    }
     auto saved_analysis = std::move(cuda_analysis_);
     if (target_->kind->name == "cuda") {
       cuda_analysis_ = std::make_unique<backend::cuda::ExecAnalysis>(
@@ -289,7 +297,7 @@ class TileDispatcher : public StmtExprMutator {
     alloc_tensors_.clear();
 
     Stmt res = body;
-    if (native_launch_) res = backend::cuda::LowerIndices(res, launch_params_);
+    if (cuda_launch_) res = backend::cuda::LowerIndices(res, launch_params_);
     if (native_launch_ || entry_node->attrs->dict.count("backend_config")) {
       res = RegionStmt(Op::Get("tirx.device_scope"), entry_node->args, {}, entry_node->attrs, res);
     }
@@ -572,7 +580,31 @@ class TileDispatcher : public StmtExprMutator {
     }
   }
 
+  void PrepareMacaLaunchParams(const RegionStmtNode* entry) {
+    TVM_FFI_CHECK(target_->kind->name == "maca", ValueError)
+        << "MACA LaunchConfig requires a MACA target";
+    auto fields = entry->attrs->dict.at(tvm::backend::maca::attr::kLaunchFields)
+                      .as_or_throw<ffi::Array<ffi::String>>();
+    TVM_FFI_ICHECK_EQ(fields.size(), entry->args.size());
+    for (size_t i = 0; i < fields.size(); ++i) {
+      std::string field(fields[i]);
+      if (field.rfind("blockIdx.", 0) != 0 && field.rfind("threadIdx.", 0) != 0) {
+        TVM_FFI_CHECK(field == tvm::runtime::launch_param::kUseDynamicSharedMemoryTag, ValueError)
+            << "Unsupported MACA launch parameter: " << field;
+        continue;
+      }
+      auto extent = analyzer_->Simplify(entry->args[i].as_or_throw<PrimExpr>());
+      launch_params_.insert(
+          {field, ffi::Tuple<PrimVar, PrimExpr>(PrimVar(field, PrimType::Int(32)), extent)});
+    }
+    TVM_FFI_CHECK(launch_params_.count("blockIdx.x") && launch_params_.count("threadIdx.x"),
+                  ValueError)
+        << "MACA LaunchConfig requires grid and block dimensions";
+  }
+
   bool native_launch_{false};
+  bool cuda_launch_{false};
+  bool maca_launch_{false};
   bool variable_cluster_{false};
   std::unordered_map<std::string, PrimExpr> cluster_bounds_;
   ffi::Map<Var, Range> var_range_map_;

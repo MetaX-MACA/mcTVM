@@ -374,10 +374,16 @@ def call_ffi_kernel(
     if launch is not None:
         if launch_params is not None:
             raise TypeError("call_ffi_kernel cannot mix launch and legacy launch_params")
-        from tvm.backend.cuda.launch._impl import pack_launch
+        if getattr(launch, "_config_type", None) == "MacaLaunchConfig":
+            from tvm.backend.maca.launch import pack_launch
 
-        names, values = pack_launch(launch)
-        attrs = CallFFIKernelAttr(launch_fields=names, num_kernel_args=len(args) - 1)
+            names, values = pack_launch(launch)
+            attrs = CallFFIKernelAttr(launch_params=names, num_kernel_args=len(args) - 1)
+        else:
+            from tvm.backend.cuda.launch._impl import pack_launch
+
+            names, values = pack_launch(launch)
+            attrs = CallFFIKernelAttr(launch_fields=names, num_kernel_args=len(args) - 1)
         args = [*args, *values]
     else:
         if launch_params is None:

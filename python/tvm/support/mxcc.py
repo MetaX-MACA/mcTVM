@@ -18,6 +18,7 @@
 
 from __future__ import absolute_import as _abs
 
+import json
 import os
 import re
 import subprocess
@@ -255,9 +256,20 @@ def find_maca_path():
 
 
 @tvm_ffi.register_global_func
-def tvm_callback_maca_compile(code, target):  # pylint: disable=unused-argument
-    """use mxcc to generate fatbin code for better optimization"""
-    dev_obj = compile_maca(code, target_format="mcbin", arch=target.mcpu)
+def tvm_callback_maca_compile(code, config_json):
+    """Compile MACA source using its serialized backend configuration."""
+    if config_json:
+        try:
+            config = json.loads(config_json)
+        except json.JSONDecodeError:
+            # Older fallback modules serialized only the mcpu string.
+            config = {"maca": {"arch": config_json}}
+    else:
+        config = {}
+    arch = config.get("maca", {}).get("arch")
+    if not arch:
+        arch = get_maca_arch()
+    dev_obj = compile_maca(code, target_format="mcbin", arch=arch)
     return dev_obj
 
 

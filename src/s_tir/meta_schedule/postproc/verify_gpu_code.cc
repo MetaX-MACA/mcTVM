@@ -148,7 +148,7 @@ class VerifyGPUCodeObj : public PostprocObj {
     };
     if (this->target_->kind->name == "maca") {
       this->target_constraints_.Set("max_local_memory_per_block",
-                                    Extract(this->target_, "max_local_memory_per_block"));
+                                    Extract(this->target_.value(), "max_local_memory_per_block"));
     }
     thread_warp_size_ = Extract(this->target_.value(), "thread_warp_size")->value.as<int>().value();
   }

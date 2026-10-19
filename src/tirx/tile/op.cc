@@ -153,6 +153,19 @@ struct TcMmaAttrs : public AttrsNode {
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.tensor.TcMmaAttrs", TcMmaAttrs, AttrsNode);
 };
 
+struct MacaMmaAttrs : public AttrsNode {
+  ffi::String scope;
+  ffi::Optional<ffi::String> precision;
+  static void RegisterReflection() {
+    namespace refl = ffi::reflection;
+    refl::ObjectDef<MacaMmaAttrs>()
+        .def_ro("scope", &MacaMmaAttrs::scope, refl::DefaultValue(ffi::String("warp")))
+        .def_ro("precision", &MacaMmaAttrs::precision,
+                refl::DefaultValue(ffi::Optional<ffi::String>(std::nullopt)));
+  }
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.tensor.MacaMmaAttrs", MacaMmaAttrs, AttrsNode);
+};
+
 struct MathAttrs : public AttrsNode {
   ffi::String scope;
   ffi::Optional<ffi::String> rounding_mode;
@@ -226,6 +239,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   TMAAttrs::RegisterReflection();
   TcCopyAttrs::RegisterReflection();
   TcMmaAttrs::RegisterReflection();
+  MacaMmaAttrs::RegisterReflection();
   MathAttrs::RegisterReflection();
   TrnAttrs::RegisterReflection();
   ffi::reflection::GlobalDef().def("tirx.ConfigureTensorInstruction", ConfigureTensorInstruction);

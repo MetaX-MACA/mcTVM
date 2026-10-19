@@ -93,9 +93,6 @@ if(USE_MACA)
   target_link_libraries(tvm_runtime_maca PUBLIC tvm_runtime ${_maca_libs})
   tvm_configure_target_library(tvm_runtime_maca RUNTIME_MODULE)
 
-  list(APPEND COMPILER_SRCS src/backend/maca/codegen/build_maca_on.cc)
-  list(APPEND TVM_LINKER_LIBS ${_maca_libs})
-
   if(USE_FLASHATTN)
     message(STATUS "Build with FlashAttn support")
     tvm_file_glob(GLOB FLASHATTN_RELAY_CONTRIB_SRC src/relay/backend/contrib/flashattn/*.cc)
@@ -104,8 +101,6 @@ if(USE_MACA)
     list(APPEND RUNTIME_SRCS ${CONTRIB_FLASHATTN_SRCS})
     list(APPEND TVM_RUNTIME_LINKER_LIBS ${MACA_FLASHATTN_LIBRARY})
   endif(USE_FLASHATTN)
-else(USE_MACA)
-  list(APPEND COMPILER_SRCS src/backend/maca/codegen/build_maca_off.cc)
 endif(USE_MACA)
 
 if(USE_MACA AND USE_MCBLAS)

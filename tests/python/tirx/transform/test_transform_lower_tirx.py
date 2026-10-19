@@ -22,6 +22,7 @@ import tvm_ffi
 
 import tvm
 import tvm.testing
+from tvm import tirx
 from tvm.backend.cuda.axis import laneid, warpid
 from tvm.backend.cuda.layout import wg_local_layout
 from tvm.script import tirx as T
@@ -53,7 +54,7 @@ def _int_triple(side, axis):
     return tuple(int(x) for x in side[axis])
 
 
-MACA_WARP_MASK = tvm.runtime.const((1 << 64) - 1, "uint64")
+MACA_WARP_MASK = tirx.const((1 << 64) - 1, "uint64")
 
 
 def _launch_thread_extents(func):

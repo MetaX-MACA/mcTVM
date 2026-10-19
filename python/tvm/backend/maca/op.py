@@ -20,6 +20,8 @@
 from __future__ import annotations
 
 from tvm import tirx
+from tvm.ir import Op
+from tvm.ir.op import _init_op_api
 from tvm.tirx.op import call_intrin
 
 tir = tirx
@@ -283,3 +285,11 @@ def maca_copy_16b(dst, src):
 def maca_copy_8b(dst, src):
     """Copy 8 bits from ``src`` to ``dst``."""
     return maca_copy_bytes(dst, src, 1)
+
+
+_init_op_api("tirx.maca", __name__)
+for _name in Op.list_op_names():
+    if _name.startswith("tirx.maca."):
+        _suffix = _name.removeprefix("tirx.maca.")
+        if "." not in _suffix:
+            globals().setdefault("maca_" + _suffix, globals()[_suffix])

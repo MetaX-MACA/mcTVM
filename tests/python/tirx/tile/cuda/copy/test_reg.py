@@ -636,7 +636,7 @@ def test_mov_handles_scalar_regions():
         ("vec_128b", "uint32", 4),
     ],
 )
-def test_copy_forced_vec_width_codegen(variant, dtype, n_elements, expected_st, expected_ld):
+def test_copy_forced_vec_width_codegen(variant, dtype, n_elements):
     @T.function
     def kernel(B: T.Tensor((n_elements,), dtype)) -> None:
         T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(1,)))
@@ -830,7 +830,7 @@ def _eval_const_layout_expr(expr, values):
 @pytest.mark.parametrize("case", ["wg", "wg_slice", "tcgen05"])
 def test_reg_synthetic_tile_matches_thread_base_plus_outer_delta(case):
     from tvm.backend.cuda.layout import wg_local_layout
-    from tvm.backend.cuda.tile.copy.vec_auto_reg import (
+    from tvm.backend.maca.tile.copy.vec_auto_reg import (
         _build_atoms,
         _build_s_apply_layout,
         _choose_vec_len,

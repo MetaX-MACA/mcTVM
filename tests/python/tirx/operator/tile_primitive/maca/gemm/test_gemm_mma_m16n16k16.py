@@ -38,7 +38,9 @@ import tvm.testing
 from tvm.script import tirx as T
 from tvm.script.tirx import tile as Tx
 from tvm.testing import env
-from tvm.tirx.layout import R, S, TileLayout, laneid
+from tvm.tirx.layout import Axis, R, S, TileLayout
+
+laneid = Axis.get("laneid")
 
 pytestmark = pytest.mark.skipif(
     not env.has_maca_arch("xcore1000"),
