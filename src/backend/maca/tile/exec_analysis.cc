@@ -201,8 +201,7 @@ struct ExecAnalysis::Impl {
     if (name == "tirx.maca.warp_in_warpgroup") return Index::kWaveInGroup;
     if (name == "tirx.maca.thread_in_warpgroup") return Index::kThreadInGroup;
     if (name == "tirx.maca.linear_thread_id") return Index::kThread;
-    if (name == "tirx.maca.thread_idx" &&
-        call->args[0].as_or_throw<StringImm>()->value == "x") {
+    if (name == "tirx.maca.thread_idx" && call->args[0].as_or_throw<StringImm>()->value == "x") {
       // threadIdx.x equals the linear index only for a one-dimensional block.
       for (char axis : {'y', 'z'}) {
         auto it = params.find(std::string("threadIdx.") + axis);
@@ -230,8 +229,8 @@ struct ExecAnalysis::Impl {
       return waves.Intersect(lo * kWavesPerGroup, hi * kWavesPerGroup);
     }
     if (index == Index::kWaveInGroup) {
-      if (waves.stride != 1 || waves.offset / 4 !=
-          (waves.offset + waves.extent - 1) / 4) return false;
+      if (waves.stride != 1 || waves.offset / 4 != (waves.offset + waves.extent - 1) / 4)
+        return false;
       int64_t base = waves.offset / 4 * 4;
       return waves.Intersect(base + std::max<int64_t>(lo, 0), base + std::min<int64_t>(hi, 4));
     }
@@ -239,8 +238,8 @@ struct ExecAnalysis::Impl {
     // when it lies in one wave or covers complete waves. Other cases stay conservative.
     int64_t base = 0;
     if (index == Index::kThreadInGroup) {
-      if (waves.stride != 1 || waves.offset / 4 !=
-          (waves.offset + waves.extent - 1) / 4) return false;
+      if (waves.stride != 1 || waves.offset / 4 != (waves.offset + waves.extent - 1) / 4)
+        return false;
       base = waves.offset / 4 * 4;
       lo = std::max<int64_t>(lo, 0);
       hi = std::min<int64_t>(hi, 256);
@@ -266,9 +265,8 @@ void ExecAnalysis::Bind(const Var& var, const PrimExpr& value) {
 
 int ExecAnalysis::PushPredicate(const PrimExpr& condition) {
   if (impl_->stack.empty()) return 0;
-  auto canonical = cuda::TryClassifyCanonical(condition, [&](const Var& var) {
-    return impl_->Resolve(var).has_value();
-  });
+  auto canonical = cuda::TryClassifyCanonical(
+      condition, [&](const Var& var) { return impl_->Resolve(var).has_value(); });
   if (!canonical) return 0;
   struct Constraint {
     int64_t lo = sym::ConstIntBound::kNegInf;
@@ -328,8 +326,8 @@ std::pair<SplitMap, SplitMap> ExecAnalysis::Split(const ExecScope& scope) const 
     if (waves.stride != 1) return {};
     if (first == 0 && waves.extent % kWavesPerGroup == 0) {
       intra.Set("wid_in_wg", AxisRange{kWavesPerGroup}.Encode());
-      inter.Set("wgid", AxisRange{waves.extent / kWavesPerGroup,
-                                  waves.offset / kWavesPerGroup}.Encode());
+      inter.Set("wgid",
+                AxisRange{waves.extent / kWavesPerGroup, waves.offset / kWavesPerGroup}.Encode());
     } else if (waves.extent <= kWavesPerGroup - first) {
       intra.Set("wid_in_wg", AxisRange{waves.extent, first}.Encode());
       inter.Set("wgid", AxisRange{1, waves.offset / kWavesPerGroup}.Encode());

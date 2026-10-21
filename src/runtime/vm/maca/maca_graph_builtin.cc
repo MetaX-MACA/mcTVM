@@ -22,8 +22,8 @@
  * \brief The MACA graph related builtin functions for Relax virtual machine.
  */
 
-#include <tvm/ffi/container/array.h>
 #include <tvm/ffi/base_details.h>
+#include <tvm/ffi/container/array.h>
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
@@ -228,8 +228,7 @@ class MACAGraphExtensionObj : public VMExtensionObj {
   }
 
   static constexpr const bool _type_mutable = true;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("vm.MACAGraphExtension", MACAGraphExtensionObj,
-                                    VMExtensionObj);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("vm.MACAGraphExtension", MACAGraphExtensionObj, VMExtensionObj);
 
  private:
   /*!

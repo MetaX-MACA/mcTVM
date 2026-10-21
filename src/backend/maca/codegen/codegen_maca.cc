@@ -26,8 +26,8 @@
 #include <tvm/backend/maca/attr.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
-#include <tvm/ir/transform.h>
 #include <tvm/ir/module.h>
+#include <tvm/ir/transform.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/s_tir/stmt.h>
 #include <tvm/sym/analyzer.h>
@@ -283,8 +283,8 @@ void CodeGenMACA::PrintFunctionSignature(const ffi::String& function_name, const
 void CodeGenMACA::PrintExtraAttrs(const Function&, std::ostream& os) {
   if (!in_kernel_launch_) return;
   sym::Analyzer analyzer;
-  PrimExpr threads = analyzer->Simplify(launch_dimensions_[0] * launch_dimensions_[1] *
-                                        launch_dimensions_[2]);
+  PrimExpr threads =
+      analyzer->Simplify(launch_dimensions_[0] * launch_dimensions_[1] * launch_dimensions_[2]);
   const auto* count = threads.as<IntImmNode>();
   TVM_FFI_CHECK(!min_blocks_per_sm_ || (count && count->value > 0), ValueError)
       << "min_blocks_per_sm requires static block dimensions";
@@ -587,8 +587,8 @@ void CodeGenMACA::Dispatch_(const ForNode* op) {
   // expression may introduce temporaries, and the pragma must immediately
   // precede the loop for the MACA compiler to apply it.
   std::string begin_str = PrintExpr(op->min);
-  PrimExpr end = prim::IsZero(op->min) ? op->extent
-                                      : sym::Analyzer()->Simplify(op->min + op->extent);
+  PrimExpr end =
+      prim::IsZero(op->min) ? op->extent : sym::Analyzer()->Simplify(op->min + op->extent);
   std::string end_str = PrintExpr(end);
   std::string step_str = op->step.has_value() ? PrintExpr(*op->step) : "";
   if (op->annotations.count(tirx::attr::kDisableUnroll)) {
@@ -1447,7 +1447,7 @@ void CodeGenMACA::Dispatch_(const CallNode* op, std::ostream& os) {
     const auto* var_node = arg.as<VarNode>();
     if (const auto* call = arg.as<CallNode>();
         call && call->op.as<Op>() && call->op.as<Op>().value()->name == "tirx.buffer_data" &&
-            call->args.size() == 1) {
+        call->args.size() == 1) {
       var_node = call->args[0].as<VarNode>();
       TVM_FFI_ICHECK(var_node && var_node->ty.as<tirx::TensorTypeNode>())
           << "print_buffer expects buffer_data to project a BufferVar";

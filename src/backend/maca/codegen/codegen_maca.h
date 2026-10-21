@@ -24,12 +24,12 @@
 #ifndef TVM_BACKEND_MACA_CODEGEN_CODEGEN_MACA_H_
 #define TVM_BACKEND_MACA_CODEGEN_CODEGEN_MACA_H_
 
-#include <tvm/ffi/error.h>
 #include <tvm/backend/maca/op_attr_types.h>
+#include <tvm/ffi/error.h>
+#include <tvm/ir/op.h>
 #include <tvm/ir/prim/expr.h>
 #include <tvm/s_tir/stmt.h>
 #include <tvm/target/codegen.h>
-#include <tvm/ir/op.h>
 
 #include <array>
 #include <optional>
@@ -123,8 +123,7 @@ class CodeGenMACA final : public CodeGenC {
   // Whether the current function is a __global__ kernel entry rather than a
   // __device__ subroutine.
   bool in_kernel_launch_{false};
-  std::array<PrimExpr, 3> launch_dimensions_{IntImm::Int32(1), IntImm::Int32(1),
-                                             IntImm::Int32(1)};
+  std::array<PrimExpr, 3> launch_dimensions_{IntImm::Int32(1), IntImm::Int32(1), IntImm::Int32(1)};
   std::optional<int64_t> min_blocks_per_sm_;
   // Codegen tags
   std::unordered_set<std::string> codegen_tags_;

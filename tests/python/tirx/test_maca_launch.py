@@ -82,9 +82,7 @@ def _launch_kernel(A: T.Tensor((64,), "int32")):
 
 @T.function
 def _dynamic_shared_kernel(A: T.Tensor((1,), "int32")):
-    T.func_attr(
-        {"global_symbol": "dynamic_shared_kernel", "target": T.target("maca", host="llvm")}
-    )
+    T.func_attr({"global_symbol": "dynamic_shared_kernel", "target": T.target("maca", host="llvm")})
     T.device_entry(launch=T.maca.LaunchConfig(grid=1, block=64))
     scratch = T.alloc_tensor(ty_args=[T.Tensor((16,), "int32", scope="shared.dyn")])
     thread_idx = T.maca.thread_idx("x")

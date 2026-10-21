@@ -24,7 +24,6 @@ import pytest
 
 import tvm
 import tvm.testing
-from tvm.backend.cuda.axis import tx
 from tvm.backend.cuda.layout import wg_local_layout
 from tvm.script import tirx as T
 from tvm.testing import env

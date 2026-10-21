@@ -27,10 +27,10 @@ import pytest
 
 import tvm
 import tvm.testing
+from tvm.backend.maca.tile.instructions import make_namespace
 from tvm.backend.maca.tile.permute_layout.wave64_halfwarp_xor_swizzle import (
     _choose_xor_k,
 )
-from tvm.backend.maca.tile.instructions import make_namespace
 from tvm.script import tirx as T
 from tvm.testing import env
 from tvm.tirx.layout import S, TileLayout

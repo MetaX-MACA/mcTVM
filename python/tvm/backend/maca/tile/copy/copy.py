@@ -18,9 +18,9 @@
 
 from math import prod
 
+from tvm.runtime import DataType
 from tvm.script import tirx as T
 from tvm.tirx import Function
-from tvm.runtime import DataType
 from tvm.tirx.tile import DispatchContext, fail
 from tvm.tirx.tile.instruction import TensorCall
 

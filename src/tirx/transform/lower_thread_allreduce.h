@@ -881,8 +881,7 @@ class ThreadAllreduceBuilder final : public DialectMutator {
       if (reduce_extent == 1) return false;
 
       // MACA shuffle width partitions a wave into aligned power-of-two subgroups.
-      bool is_subwave_reduction = reduce_extent <= warp_size_ &&
-                                  warp_size_ % reduce_extent == 0 &&
+      bool is_subwave_reduction = reduce_extent <= warp_size_ && warp_size_ % reduce_extent == 0 &&
                                   (reduce_extent & (reduce_extent - 1)) == 0;
       bool is_multiwave_reduction = max_num_threads_ != -1 &&
                                     max_num_threads_ <= warp_size_ * warp_size_ &&

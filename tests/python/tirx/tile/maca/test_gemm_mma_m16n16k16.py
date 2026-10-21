@@ -169,10 +169,18 @@ def _build_dtypes(a_dtype, b_dtype, c_dtype, d_dtype):
     def gemm():
         T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(WAVE_SIZE,)))
         _lane = T.maca.lane_id()
-        A = T.alloc_tensor(ty_args=[T.Tensor((MMA_M, MMA_K), a_dtype, scope="local", layout=A_FRAG)])
-        B = T.alloc_tensor(ty_args=[T.Tensor((MMA_K, MMA_N), b_dtype, scope="local", layout=B_FRAG)])
-        C = T.alloc_tensor(ty_args=[T.Tensor((MMA_M, MMA_N), c_dtype, scope="local", layout=D_FRAG)])
-        D = T.alloc_tensor(ty_args=[T.Tensor((MMA_M, MMA_N), d_dtype, scope="local", layout=D_FRAG)])
+        A = T.alloc_tensor(
+            ty_args=[T.Tensor((MMA_M, MMA_K), a_dtype, scope="local", layout=A_FRAG)]
+        )
+        B = T.alloc_tensor(
+            ty_args=[T.Tensor((MMA_K, MMA_N), b_dtype, scope="local", layout=B_FRAG)]
+        )
+        C = T.alloc_tensor(
+            ty_args=[T.Tensor((MMA_M, MMA_N), c_dtype, scope="local", layout=D_FRAG)]
+        )
+        D = T.alloc_tensor(
+            ty_args=[T.Tensor((MMA_M, MMA_N), d_dtype, scope="local", layout=D_FRAG)]
+        )
         _gemm(D, A, B, C, transpose_A=False, transpose_B=False, alpha=1.0, beta=0.0)
 
     return gemm
@@ -207,8 +215,12 @@ def _build_signature_gemm(family, precision=_DEFAULT_PRECISION):
     def gemm():
         T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(WAVE_SIZE,)))
         _lane = T.maca.lane_id()
-        A = T.alloc_tensor(ty_args=[T.Tensor((MMA_M, reduction), dtype, scope="local", layout=a_layout)])
-        B = T.alloc_tensor(ty_args=[T.Tensor((reduction, MMA_N), dtype, scope="local", layout=b_layout)])
+        A = T.alloc_tensor(
+            ty_args=[T.Tensor((MMA_M, reduction), dtype, scope="local", layout=a_layout)]
+        )
+        B = T.alloc_tensor(
+            ty_args=[T.Tensor((reduction, MMA_N), dtype, scope="local", layout=b_layout)]
+        )
         C = T.alloc_tensor(ty_args=[T.Tensor((MMA_M, MMA_N), acc, scope="local", layout=d_layout)])
         D = T.alloc_tensor(ty_args=[T.Tensor((MMA_M, MMA_N), acc, scope="local", layout=d_layout)])
         _gemm(

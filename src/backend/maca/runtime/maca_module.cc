@@ -36,8 +36,8 @@
 #include <string>
 #include <utility>
 
-#include "../../../runtime/metadata.h"
 #include "../../../runtime/launch_param.h"
+#include "../../../runtime/metadata.h"
 #include "../../../runtime/pack_args.h"
 #include "../../../runtime/thread_storage_scope.h"
 #include "maca_common.h"
@@ -233,8 +233,8 @@ static ffi::Module MACAModuleCreateImpl(ffi::Bytes data, ffi::String fmt,
     data = compile(maca_source, backend_config).cast<ffi::Bytes>();
     fmt = "mcbin";
   }
-  return MACAModuleCreate(std::move(data), std::move(fmt), std::move(fmap),
-                          std::move(maca_source), std::move(backend_config));
+  return MACAModuleCreate(std::move(data), std::move(fmt), std::move(fmap), std::move(maca_source),
+                          std::move(backend_config));
 }
 
 ffi::Module MACAModuleLoadFromBytes(const ffi::Bytes& bytes) {

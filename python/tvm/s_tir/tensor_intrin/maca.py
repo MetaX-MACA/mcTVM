@@ -217,9 +217,7 @@ def get_wmma_store_intrin(
             offset_factor=offset_factor,
             scope="wmma.accumulator",
         ),
-        C: T.Tensor(
-            (m_dim, n_dim), dtype, align=64, offset_factor=offset_factor, scope=scope
-        ),
+        C: T.Tensor((m_dim, n_dim), dtype, align=64, offset_factor=offset_factor, scope=scope),
     ) -> None:
         with Ts.sblock("root"):
             Ts.reads(A[0:m_dim, 0:n_dim])
@@ -317,7 +315,6 @@ def get_wmma_sync_intrin(
             scope="wmma.accumulator",
         ),
     ) -> None:
-
         with Ts.sblock("root"):
             Ts.reads(C[0:m_dim, 0:n_dim], A[0:m_dim, 0:k_dim], B[0:b_shape_0, 0:b_shape_1])
             Ts.writes(C[0:m_dim, 0:n_dim])
@@ -363,7 +360,6 @@ def get_wmma_sync_intrin(
             strides=[c1, c0],
         ),
     ) -> None:
-
         with Ts.sblock("root"):
             Ts.reads(C[0:m_dim, 0:n_dim], A[0:m_dim, 0:k_dim], B[0:b_shape_0, 0:b_shape_1])
             Ts.writes(C[0:m_dim, 0:n_dim])

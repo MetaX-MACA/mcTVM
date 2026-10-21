@@ -31,9 +31,9 @@
 #include <tvm/runtime/logging.h>
 #include <tvm/runtime/timer.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
-#include <algorithm>
 #include <iomanip>
 #include <sstream>
 
@@ -50,80 +50,80 @@ class MACADeviceAPI final : public DeviceAPI {
     ffi::Any rv;
     int value = 0;
     if (name == "exist") {
-        int count;
-        auto err = mcGetDeviceCount(&count);
-        return err == mcSuccess && device.device_id >= 0 && device.device_id < count;
+      int count;
+      auto err = mcGetDeviceCount(&count);
+      return err == mcSuccess && device.device_id >= 0 && device.device_id < count;
     }
     if (name == "max_threads_per_block") {
-        MACA_CALL(
-            mcDeviceGetAttribute(&value, mcDeviceAttributeMaxThreadsPerBlock, device.device_id));
-        return value;
+      MACA_CALL(
+          mcDeviceGetAttribute(&value, mcDeviceAttributeMaxThreadsPerBlock, device.device_id));
+      return value;
     }
     if (name == "warp_size") {
-        MACA_CALL(mcDeviceGetAttribute(&value, mcDeviceAttributeWarpSize, device.device_id));
-        return value;
+      MACA_CALL(mcDeviceGetAttribute(&value, mcDeviceAttributeWarpSize, device.device_id));
+      return value;
     }
     if (name == "max_shared_memory_per_block") {
-        MACA_CALL(mcDeviceGetAttribute(&value, mcDeviceAttributeMaxSharedMemoryPerBlock,
-                                       device.device_id));
-        return value;
+      MACA_CALL(
+          mcDeviceGetAttribute(&value, mcDeviceAttributeMaxSharedMemoryPerBlock, device.device_id));
+      return value;
     }
     if (name == "compute_version") {
-        std::ostringstream os;
-        MACA_CALL(mcDeviceGetAttribute(&value, mcDeviceAttributeComputeCapabilityMajor,
-                                       device.device_id));
-        os << value << ".";
-        MACA_CALL(mcDeviceGetAttribute(&value, mcDeviceAttributeComputeCapabilityMinor,
-                                       device.device_id));
-        os << std::setfill('0') << std::setw(2) << value;
-        return os.str();
+      std::ostringstream os;
+      MACA_CALL(
+          mcDeviceGetAttribute(&value, mcDeviceAttributeComputeCapabilityMajor, device.device_id));
+      os << value << ".";
+      MACA_CALL(
+          mcDeviceGetAttribute(&value, mcDeviceAttributeComputeCapabilityMinor, device.device_id));
+      os << std::setfill('0') << std::setw(2) << value;
+      return os.str();
     }
     if (name == "device_name") {
-        std::string name(256, 0);
-        MACA_CALL(mcDeviceGetName(&name[0], name.size(), device.device_id));
-        name.resize(strlen(name.c_str()));
-        return std::move(name);
+      std::string name(256, 0);
+      MACA_CALL(mcDeviceGetName(&name[0], name.size(), device.device_id));
+      name.resize(strlen(name.c_str()));
+      return std::move(name);
     }
     if (name == "max_clock_rate") {
-        MACA_CALL(mcDeviceGetAttribute(&value, mcDeviceAttributeClockRate, device.device_id));
-        return value;
+      MACA_CALL(mcDeviceGetAttribute(&value, mcDeviceAttributeClockRate, device.device_id));
+      return value;
     }
     if (name == "multi_processor_count") {
-        MACA_CALL(
-            mcDeviceGetAttribute(&value, mcDeviceAttributeMultiProcessorCount, device.device_id));
-        return value;
+      MACA_CALL(
+          mcDeviceGetAttribute(&value, mcDeviceAttributeMultiProcessorCount, device.device_id));
+      return value;
     }
     if (name == "max_thread_dimensions") {
-        int dims[3];
-        MACA_CALL(mcDeviceGetAttribute(&dims[0], mcDeviceAttributeMaxBlockDimX, device.device_id));
-        MACA_CALL(mcDeviceGetAttribute(&dims[1], mcDeviceAttributeMaxBlockDimY, device.device_id));
-        MACA_CALL(mcDeviceGetAttribute(&dims[2], mcDeviceAttributeMaxBlockDimZ, device.device_id));
+      int dims[3];
+      MACA_CALL(mcDeviceGetAttribute(&dims[0], mcDeviceAttributeMaxBlockDimX, device.device_id));
+      MACA_CALL(mcDeviceGetAttribute(&dims[1], mcDeviceAttributeMaxBlockDimY, device.device_id));
+      MACA_CALL(mcDeviceGetAttribute(&dims[2], mcDeviceAttributeMaxBlockDimZ, device.device_id));
 
-        std::stringstream ss;
-        ss << "[" << dims[0] << ", " << dims[1] << ", " << dims[2] << "]";
-        return ss.str();
+      std::stringstream ss;
+      ss << "[" << dims[0] << ", " << dims[1] << ", " << dims[2] << "]";
+      return ss.str();
     }
     if (name == "max_registers_per_block") {
-        MACA_CALL(
-            mcDeviceGetAttribute(&value, mcDeviceAttributeMaxRegistersPerBlock, device.device_id));
-        return value;
+      MACA_CALL(
+          mcDeviceGetAttribute(&value, mcDeviceAttributeMaxRegistersPerBlock, device.device_id));
+      return value;
     }
     if (name == "l2_cache_size_bytes") {
-        // Get size of device l2 cache size in bytes.
-        int l2_size;
-        MACA_CALL(mcDeviceGetAttribute(&l2_size, mcDeviceAttributeL2CacheSize, device.device_id));
-        return l2_size;
+      // Get size of device l2 cache size in bytes.
+      int l2_size;
+      MACA_CALL(mcDeviceGetAttribute(&l2_size, mcDeviceAttributeL2CacheSize, device.device_id));
+      return l2_size;
     }
     if (name == "total_global_memory") {
-        mcDeviceProp_t prop;
-        MACA_CALL(mcGetDeviceProperties(&prop, device.device_id));
-        int64_t total_global_memory = prop.totalGlobalMem;
-        return total_global_memory;
+      mcDeviceProp_t prop;
+      MACA_CALL(mcGetDeviceProperties(&prop, device.device_id));
+      int64_t total_global_memory = prop.totalGlobalMem;
+      return total_global_memory;
     }
     if (name == "available_global_memory") {
-        size_t free_mem, total_mem;
-        MACA_CALL(mcMemGetInfo(&free_mem, &total_mem));
-        return static_cast<int64_t>(free_mem);
+      size_t free_mem, total_mem;
+      MACA_CALL(mcMemGetInfo(&free_mem, &total_mem));
+      return static_cast<int64_t>(free_mem);
     }
     return rv;
   }
@@ -136,8 +136,9 @@ class MACADeviceAPI final : public DeviceAPI {
     struct Allocator {
       MACADeviceAPI* api;
       void AllocData(DLTensor* tensor) {
-        size_t alignment = std::max(static_cast<size_t>(kAllocAlignment),
-                                    static_cast<size_t>((tensor->dtype.bits / 8) * tensor->dtype.lanes));
+        size_t alignment =
+            std::max(static_cast<size_t>(kAllocAlignment),
+                     static_cast<size_t>((tensor->dtype.bits / 8) * tensor->dtype.lanes));
         tensor->data = api->AllocDataSpace(tensor->device, ffi::GetDataSize(*tensor), alignment,
                                            tensor->dtype);
       }
@@ -172,7 +173,6 @@ class MACADeviceAPI final : public DeviceAPI {
   }
 
  public:
-
  protected:
   void CopyDataFromTo(const void* from, size_t from_offset, void* to, size_t to_offset, size_t size,
                       Device dev_from, Device dev_to, DLDataType type_hint,
@@ -310,10 +310,9 @@ class MACATimerObj : public TimerObj {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("runtime.timer.maca",
-                        [](Device dev) {
-                          return Timer(ffi::UnsafeInit{}, ffi::make_object<MACATimerObj>());
-                        });
+  refl::GlobalDef().def("runtime.timer.maca", [](Device dev) {
+    return Timer(ffi::UnsafeInit{}, ffi::make_object<MACATimerObj>());
+  });
 }
 }  // namespace runtime
 }  // namespace tvm

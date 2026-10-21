@@ -45,9 +45,12 @@ def _detect_target_from_device(dev):
 
 def register_backend():
     """Register MACA-owned Python semantics."""
-    from . import exec_scope
-    from tvm.tirx.script.ir_builder import op as builder_op  # pylint: disable=import-outside-toplevel
     from tvm.target.detect_target import register_device_target_detector
+    from tvm.tirx.script.ir_builder import (
+        op as builder_op,  # pylint: disable=import-outside-toplevel
+    )
+
+    from . import exec_scope
 
     exec_scope.register()
     runtime_dir = Path(_LOADED_LIBS["tvm_runtime"]._name).resolve().parent
@@ -70,10 +73,10 @@ def register_backend():
 
 def script_namespaces(**_):
     """Return MACA-owned TVMScript namespaces."""
-    from .tile.instructions import make_namespace  # pylint: disable=import-outside-toplevel
     from .script import (  # pylint: disable=import-outside-toplevel
         MACANamespace,
     )
+    from .tile.instructions import make_namespace  # pylint: disable=import-outside-toplevel
 
     maca = MACANamespace()
     maca.tile = make_namespace()

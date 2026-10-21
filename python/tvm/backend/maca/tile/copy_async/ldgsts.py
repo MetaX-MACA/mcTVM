@@ -106,7 +106,9 @@ def lower_copy_async(call: TensorCall, sctx: DispatchContext) -> Function:
     if not _contiguous_aligned(src_region, vec_bits // 8) or not _contiguous_aligned(
         dst_region, vec_bits // 8
     ):
-        fail("MACA copy_async requires contiguous, naturally aligned source and destination regions")
+        fail(
+            "MACA copy_async requires contiguous, naturally aligned source and destination regions"
+        )
     vec_len = vec_bits // elem_bits
     if sctx.scope_kind not in ("thread", "warp", "warpgroup", "cta"):
         fail(f"MACA copy_async does not support {sctx.scope_kind!r} scope")

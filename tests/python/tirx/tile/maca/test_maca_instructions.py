@@ -20,9 +20,9 @@ import tvm
 from tvm.script import tirx as T
 from tvm.tirx import Function, decl_tensor
 from tvm.tirx.exec_scope import ExecScope
+from tvm.tirx.layout import S, TileLayout
 from tvm.tirx.tile import DispatchContext
 from tvm.tirx.tile.instruction import TensorCall
-from tvm.tirx.layout import S, TileLayout
 
 
 def _copy_call():

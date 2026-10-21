@@ -168,9 +168,7 @@ def test_lower_view_get():
                 A.data, ty_args=[T.Tensor((2,), "float16", scope="local", layout=None)]
             )
             for i in T.vectorized(2):
-                A_local[i] = T.Cast(
-                    "float16", in_buf_1[T.maca.thread_idx("x") % 64 * 2 + i]
-                )
+                A_local[i] = T.Cast("float16", in_buf_1[T.maca.thread_idx("x") % 64 * 2 + i])
             B_1 = T.decl_tensor(
                 A.data, ty_args=[T.Tensor((256,), "float16", scope="local", layout=None)]
             )
@@ -178,9 +176,7 @@ def test_lower_view_get():
                 A.data, ty_args=[T.Tensor((2,), "float16", scope="local", layout=None)]
             )
             for i in T.vectorized(2):
-                out_1[T.maca.thread_idx("x") % 64 * 2 + i] = T.Cast(
-                    "float32", A_local_1[i]
-                )
+                out_1[T.maca.thread_idx("x") % 64 * 2 + i] = T.Cast("float32", A_local_1[i])
 
     compare(before1, after1, LowerTIRx, "maca")
 
@@ -2005,7 +2001,8 @@ def _register_probe(name, backend="cuda"):
             f"tirx.{backend}.tile." + name,
             "copy",
             (Operand("dst", "region"), Operand("src", "region")),
-            scopes=(("cluster",) if backend == "cuda" else ()) + ("cta", "warpgroup", "warp", "thread"),
+            scopes=(("cluster",) if backend == "cuda" else ())
+            + ("cta", "warpgroup", "warp", "thread"),
             lower=lower,
         )
         factory = spec.register()

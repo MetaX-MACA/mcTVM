@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# ruff: noqa: F401
 """Test roundtrip of runtime modules"""
 # pylint: disable=missing-docstring
 
@@ -36,9 +35,7 @@ def test_csource_module():
 
 def test_maca_module_roundtrip_serializes_backend_config():
     create = tvm_ffi.get_global_func("ffi.Module.create.maca", allow_missing=True)
-    load_from_bytes = tvm_ffi.get_global_func(
-        "ffi.Module.load_from_bytes.maca", allow_missing=True
-    )
+    load_from_bytes = tvm_ffi.get_global_func("ffi.Module.load_from_bytes.maca", allow_missing=True)
     if create is None or load_from_bytes is None:
         pytest.skip("MACA runtime module is not linked")
 

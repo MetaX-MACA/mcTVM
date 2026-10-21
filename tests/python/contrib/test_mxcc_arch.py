@@ -116,9 +116,7 @@ def test_maca_compile_source_returns_compilation_result(monkeypatch):
     assert isinstance(result, CompilationResult)
     assert result.binary == b"artifact"
     assert result.target_format == "mcbin"
-    assert result.config == {
-        "maca": {"compiler": "mxcc", "arch": "xcore2000", "mxcc": ["-O2"]}
-    }
+    assert result.config == {"maca": {"compiler": "mxcc", "arch": "xcore2000", "mxcc": ["-O2"]}}
     assert calls == [("kernel source", "mcbin", "xcore2000", ["-O2"])]
 
 

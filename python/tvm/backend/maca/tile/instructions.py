@@ -68,7 +68,9 @@ def _value_at(value, indices, extents):
         starts = [r.min for r in value.region]
         source_indices = [
             start if extent == 1 else start + index
-            for start, extent, index in zip(starts, source_extents, indices[-len(starts) :], strict=True)
+            for start, extent, index in zip(
+                starts, source_extents, indices[-len(starts) :], strict=True
+            )
         ]
         return value.source[tuple(source_indices)]
     return value
@@ -147,9 +149,7 @@ def lower_elementwise(call: TensorCall, sctx: DispatchContext) -> Function:
 
 def _reduction_indices(output_flat, reduction_flat, src_start, src_extents, dst_extents, axes):
     output = _linear_indices(output_flat, [0] * len(dst_extents), dst_extents)
-    reduced = _linear_indices(
-        reduction_flat, [0] * len(axes), [src_extents[axis] for axis in axes]
-    )
+    reduced = _linear_indices(reduction_flat, [0] * len(axes), [src_extents[axis] for axis in axes])
     red_by_axis = dict(zip(axes, reduced, strict=True))
     return tuple(
         src_start[axis] + red_by_axis[axis]
@@ -174,7 +174,9 @@ def lower_reduce(call: TensorCall, sctx: DispatchContext) -> Function:
         axes_values = list(axes_expr.fields)
     else:
         axes_values = [axes_expr]
-    axes = tuple(sorted({int(getattr(axis, "value", axis)) % len(src_extents) for axis in axes_values}))
+    axes = tuple(
+        sorted({int(getattr(axis, "value", axis)) % len(src_extents) for axis in axes_values})
+    )
     if not axes:
         fail("MACA reduction requires at least one reduction axis")
     for axis in range(len(src_extents)):
@@ -306,7 +308,11 @@ def make_namespace():
         Instruction(
             "tirx.maca.tile.copy_async",
             "copy_async",
-            (Operand("dst", "region"), Operand("src", "region"), Operand("predicate", "scalar", -1)),
+            (
+                Operand("dst", "region"),
+                Operand("src", "region"),
+                Operand("predicate", "scalar", -1),
+            ),
             ("thread", "warp", "warpgroup", "cta"),
             schema="AsyncAttrs",
             options={"direct": False, "fill_mode": "", "prefetch_size": -1},
@@ -349,7 +355,8 @@ def make_namespace():
     ):
         specs.append(
             Instruction(
-                f"tirx.maca.tile.{name}", kind,
+                f"tirx.maca.tile.{name}",
+                kind,
                 (Operand("dst", "region"), Operand("lhs"), Operand("rhs")),
                 ("thread", "warp", "warpgroup", "cta"),
                 schema="MathAttrs",
@@ -371,7 +378,8 @@ def make_namespace():
     ):
         specs.append(
             Instruction(
-                f"tirx.maca.tile.{name}", kind,
+                f"tirx.maca.tile.{name}",
+                kind,
                 (Operand("dst", "region"), Operand("src")),
                 ("thread", "warp", "warpgroup", "cta"),
                 lower=lower_elementwise,

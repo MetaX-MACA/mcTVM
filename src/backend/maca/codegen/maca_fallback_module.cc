@@ -83,9 +83,9 @@ class MACAFallbackModuleNode : public ffi::ModuleObj {
 ffi::Module MACAFallbackModuleCreate(ffi::Bytes data, ffi::String fmt,
                                      ffi::Map<ffi::String, runtime::FunctionInfo> fmap,
                                      ffi::String maca_source, ffi::String backend_config) {
-  auto n = ffi::make_object<MACAFallbackModuleNode>(std::move(data), std::move(fmt),
-                                                   std::move(fmap), std::move(maca_source),
-                                                   std::move(backend_config));
+  auto n =
+      ffi::make_object<MACAFallbackModuleNode>(std::move(data), std::move(fmt), std::move(fmap),
+                                               std::move(maca_source), std::move(backend_config));
   return ffi::Module(n);
 }
 
