@@ -812,7 +812,7 @@ def test_cp_default_32x128b_instruction_sequence_unchanged():
 
 
 def _assert_compile_raises(kernel, fragment):
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
     with target:
         with pytest.raises(Exception, match=fragment):
             tvm.tirx.compile(tvm.IRModule({"main": kernel}), target=target, pipeline="tirx")

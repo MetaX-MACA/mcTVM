@@ -32,7 +32,6 @@ from tvm.backend.maca.tile.permute_layout.wave64_halfwarp_xor_swizzle import (
 )
 from tvm.backend.maca.tile.instructions import make_namespace
 from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import S, TileLayout
 from tvm.tirx.tile.instruction import SPECS
@@ -87,22 +86,28 @@ def test_shared_memory_in_place_alias_safety(dtype):
     post = TileLayout(S[shape : (1, 4)])  # transposed within the 128-block
 
     # fmt: off
-    @T.prim_func
-    def f(A: T.handle, B: T.handle):
-        A_buf = T.match_buffer(A, shape, dtype, layout=pre)
-        B_buf = T.match_buffer(B, shape, dtype, layout=post)
-        T.device_entry()
-        T.cta_id([1])
-        T.warp_id([1])
-        T.lane_id([64])
-        storage = T.alloc_buffer((128,), dtype, scope="shared")
-        src_view = T.decl_buffer(shape, dtype, data=storage.data, scope="shared", layout=pre)
-        dst_view = T.decl_buffer(shape, dtype, data=storage.data, scope="shared", layout=post)
-        Tx.cta.copy(src_view[:, :], A_buf[:, :])
+    @T.function
+    def f(
+        A: T.Tensor(shape, dtype, layout=pre),
+        B: T.Tensor(shape, dtype, layout=post),
+    ):
+        A_buf = A
+        B_buf = B
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(64,)))
+        storage = T.alloc_tensor(ty_args=[T.Tensor((128,), dtype, scope="shared")])
+        src_view = T.decl_tensor(
+            storage.data,
+            ty_args=[T.Tensor(shape, dtype, scope="shared", layout=pre, data=storage.data)],
+        )
+        dst_view = T.decl_tensor(
+            storage.data,
+            ty_args=[T.Tensor(shape, dtype, scope="shared", layout=post, data=storage.data)],
+        )
+        T.maca.tile.copy(src_view[:, :], A_buf[:, :], scope="cta")
         T.maca.cta_sync()
-        Tx.warp.permute_layout(dst_view[:, :], src_view[:, :])
+        T.maca.tile.permute_layout(dst_view[:, :], src_view[:, :], scope="warp")
         T.maca.cta_sync()
-        Tx.cta.copy(B_buf[:, :], dst_view[:, :])
+        T.maca.tile.copy(B_buf[:, :], dst_view[:, :], scope="cta")
         # fmt: on
 
     np.random.seed(0)
@@ -124,15 +129,15 @@ def test_supported_non_32_bit_elements(dtype):
     pre = TileLayout(S[shape : (32, 1)])
     post = TileLayout(S[shape : (1, 4)])
 
-    @T.prim_func
-    def f(A: T.handle, B: T.handle):
-        A_buf = T.match_buffer(A, shape, dtype, layout=pre)
-        B_buf = T.match_buffer(B, shape, dtype, layout=post)
-        T.device_entry()
-        T.cta_id([1])
-        T.warp_id([1])
-        T.lane_id([64])
-        Tx.warp.permute_layout(B_buf, A_buf)
+    @T.function
+    def f(
+        A: T.Tensor(shape, dtype, layout=pre),
+        B: T.Tensor(shape, dtype, layout=post),
+    ):
+        A_buf = A
+        B_buf = B
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(64,)))
+        T.maca.tile.permute_layout(B_buf, A_buf, scope="warp")
 
     np.random.seed(0)
     A_np = tvm.testing.generate_random_array(dtype, shape)
@@ -150,15 +155,15 @@ def test_arbitrary_volume_uses_generic_wave64_path(volume):
     shape = (volume,)
     layout = TileLayout(S[shape : (1,)])
 
-    @T.prim_func
-    def f(A: T.handle, B: T.handle):
-        A_buf = T.match_buffer(A, shape, "uint16", layout=layout)
-        B_buf = T.match_buffer(B, shape, "uint16", layout=layout)
-        T.device_entry()
-        T.cta_id([1])
-        T.warp_id([1])
-        T.lane_id([64])
-        Tx.warp.permute_layout(B_buf, A_buf)
+    @T.function
+    def f(
+        A: T.Tensor(shape, "uint16", layout=layout),
+        B: T.Tensor(shape, "uint16", layout=layout),
+    ):
+        A_buf = A
+        B_buf = B
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(64,)))
+        T.maca.tile.permute_layout(B_buf, A_buf, scope="warp")
 
     np.random.seed(volume)
     A_np = tvm.testing.generate_random_array("uint16", shape)
@@ -179,15 +184,15 @@ def test_reject_unsupported_maca_architecture():
     pre = TileLayout(S[shape : (32, 1)])
     post = TileLayout(S[shape : (1, 4)])
 
-    @T.prim_func
-    def f(A: T.handle, B: T.handle):
-        A_buf = T.match_buffer(A, shape, "uint32", layout=pre)
-        B_buf = T.match_buffer(B, shape, "uint32", layout=post)
-        T.device_entry()
-        T.cta_id([1])
-        T.warp_id([1])
-        T.lane_id([64])
-        Tx.warp.permute_layout(B_buf, A_buf)
+    @T.function
+    def f(
+        A: T.Tensor(shape, "uint32", layout=pre),
+        B: T.Tensor(shape, "uint32", layout=post),
+    ):
+        A_buf = A
+        B_buf = B
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(64,)))
+        T.maca.tile.permute_layout(B_buf, A_buf, scope="warp")
 
     target = tvm.target.Target({"kind": "maca", "mcpu": "xcore9999"})
     with target, pytest.raises(RuntimeError) as exc_info:
@@ -199,37 +204,24 @@ def test_choose_xor_k_rejects_out_of_contract_slots():
     assert _choose_xor_k([64, 32], [32, 1], [1, 64], 4, 64, 64) is None
 
 
-def _lower_forced_dispatch(dispatch, src_scope="global", dst_scope="global", dtype="uint32"):
+def _lower_permute_layout(src_scope="global", dst_scope="global", dtype="uint32"):
     shape = (4, 32)
     pre = TileLayout(S[shape : (32, 1)])
     post = TileLayout(S[shape : (1, 4)])
 
-    @T.prim_func
-    def f(A: T.handle, B: T.handle):
-        A_buf = T.match_buffer(A, shape, dtype, layout=pre)
-        B_buf = T.match_buffer(B, shape, dtype, layout=post)
-        T.device_entry()
-        T.cta_id([1])
-        T.warp_id([1])
-        T.lane_id([64])
-        if src_scope != "global":
-            src_storage = T.alloc_buffer((128,), dtype, scope=src_scope)
-            src = T.decl_buffer(shape, dtype, data=src_storage.data, scope=src_scope, layout=pre)
-        else:
-            src = A_buf
-        if dst_scope != "global":
-            dst_storage = T.alloc_buffer((128,), dtype, scope=dst_scope)
-            dst = T.decl_buffer(shape, dtype, data=dst_storage.data, scope=dst_scope, layout=post)
-        else:
-            dst = B_buf
-        Tx.warp.permute_layout(dst, src, dispatch=dispatch)
+    @T.function
+    def f(
+        A: T.Tensor(shape, dtype, scope=src_scope, layout=pre),
+        B: T.Tensor(shape, dtype, scope=dst_scope, layout=post),
+    ):
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(64,)))
+        T.maca.tile.permute_layout(B, A, scope="warp")
 
     target = tvm.target.Target({"kind": "maca", "mcpu": "xcore1000"})
     with target:
         return tvm.tirx.transform.LowerTIRx()(tvm.IRModule({"main": f}))
 
 
-@pytest.mark.parametrize("dispatch", [None, "wave64_xor", "wave64_generic"])
 @pytest.mark.parametrize(
     "src_scope, dst_scope",
     [
@@ -240,26 +232,19 @@ def _lower_forced_dispatch(dispatch, src_scope="global", dst_scope="global", dty
         ("local", "local"),
     ],
 )
-def test_reject_thread_private_storage(dispatch, src_scope, dst_scope):
+def test_reject_thread_private_storage(src_scope, dst_scope):
     with pytest.raises(RuntimeError, match="requires global or shared storage"):
-        _lower_forced_dispatch(dispatch, src_scope, dst_scope)
+        _lower_permute_layout(src_scope, dst_scope)
 
 
-@pytest.mark.parametrize("dispatch", [None, "wave64_generic"])
 @pytest.mark.parametrize("src_scope", ["global", "shared"])
 @pytest.mark.parametrize("dst_scope", ["global", "shared"])
-def test_supported_storage_scopes_lower(dispatch, src_scope, dst_scope):
-    _lower_forced_dispatch(dispatch, src_scope, dst_scope)
+def test_supported_storage_scopes_lower(src_scope, dst_scope):
+    _lower_permute_layout(src_scope, dst_scope)
 
 
 def test_xor_dispatch_requires_shared_shared_and_nonzero_schedule():
     assert _choose_xor_k([4, 32], [32, 1], [1, 4], 4, 4, 32) == 2
-    with pytest.raises(RuntimeError, match="shared/shared buffers"):
-        _lower_forced_dispatch("wave64_xor")
-    with pytest.raises(RuntimeError, match="shared/shared buffers"):
-        _lower_forced_dispatch("wave64_xor", "shared", "global")
-    with pytest.raises(RuntimeError, match="shared/shared buffers"):
-        _lower_forced_dispatch("wave64_xor", "global", "shared")
 
 
 @pytest.mark.gpu
@@ -269,26 +254,33 @@ def test_mixed_shared_global_fallback(shared_side):
     shape = (4, 32)
     pre = TileLayout(S[shape : (32, 1)])
     post = TileLayout(S[shape : (1, 4)])
+    shared_source = shared_side == "src"
 
-    @T.prim_func
-    def f(A: T.handle, B: T.handle):
-        A_buf = T.match_buffer(A, shape, "uint32", layout=pre)
-        B_buf = T.match_buffer(B, shape, "uint32", layout=post)
-        T.device_entry()
-        T.cta_id([1])
-        T.warp_id([1])
-        T.lane_id([64])
-        storage = T.alloc_buffer((128,), "uint32", scope="shared")
-        shared_src = T.decl_buffer(shape, "uint32", data=storage.data, scope="shared", layout=pre)
-        shared_dst = T.decl_buffer(shape, "uint32", data=storage.data, scope="shared", layout=post)
-        if shared_side == "src":
-            Tx.cta.copy(shared_src[:, :], A_buf[:, :])
+    @T.function
+    def f(
+        A: T.Tensor(shape, "uint32", layout=pre),
+        B: T.Tensor(shape, "uint32", layout=post),
+    ):
+        A_buf = A
+        B_buf = B
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(64,)))
+        storage = T.alloc_tensor(ty_args=[T.Tensor((128,), "uint32", scope="shared")])
+        shared_src = T.decl_tensor(
+            storage.data,
+            ty_args=[T.Tensor(shape, "uint32", data=storage.data, scope="shared", layout=pre)],
+        )
+        shared_dst = T.decl_tensor(
+            storage.data,
+            ty_args=[T.Tensor(shape, "uint32", data=storage.data, scope="shared", layout=post)],
+        )
+        if T.meta_var(shared_source):
+            T.maca.tile.copy(shared_src[:, :], A_buf[:, :], scope="cta")
             T.maca.cta_sync()
-            Tx.warp.permute_layout(B_buf, shared_src)
+            T.maca.tile.permute_layout(B_buf, shared_src, scope="warp")
         else:
-            Tx.warp.permute_layout(shared_dst, A_buf)
+            T.maca.tile.permute_layout(shared_dst, A_buf, scope="warp")
             T.maca.cta_sync()
-            Tx.cta.copy(B_buf[:, :], shared_dst[:, :])
+            T.maca.tile.copy(B_buf[:, :], shared_dst[:, :], scope="cta")
 
     A_np = tvm.testing.generate_random_array("uint32", shape)
     B_np = np.zeros_like(A_np)
@@ -306,22 +298,28 @@ def test_shared_shared_uncertified_schedule_uses_generic_fallback():
     post = TileLayout(S[shape : (1, 64)])
     assert _choose_xor_k([64, 32], [32, 1], [1, 64], 4, 32, 64) is None
 
-    @T.prim_func
-    def f(A: T.handle, B: T.handle):
-        A_buf = T.match_buffer(A, shape, "uint32", layout=pre)
-        B_buf = T.match_buffer(B, shape, "uint32", layout=post)
-        T.device_entry()
-        T.cta_id([1])
-        T.warp_id([1])
-        T.lane_id([64])
-        storage = T.alloc_buffer((2048,), "uint32", scope="shared")
-        src_view = T.decl_buffer(shape, "uint32", data=storage.data, scope="shared", layout=pre)
-        dst_view = T.decl_buffer(shape, "uint32", data=storage.data, scope="shared", layout=post)
-        Tx.cta.copy(src_view[:, :], A_buf[:, :])
+    @T.function
+    def f(
+        A: T.Tensor(shape, "uint32", layout=pre),
+        B: T.Tensor(shape, "uint32", layout=post),
+    ):
+        A_buf = A
+        B_buf = B
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(64,)))
+        storage = T.alloc_tensor(ty_args=[T.Tensor((2048,), "uint32", scope="shared")])
+        src_view = T.decl_tensor(
+            storage.data,
+            ty_args=[T.Tensor(shape, "uint32", data=storage.data, scope="shared", layout=pre)],
+        )
+        dst_view = T.decl_tensor(
+            storage.data,
+            ty_args=[T.Tensor(shape, "uint32", data=storage.data, scope="shared", layout=post)],
+        )
+        T.maca.tile.copy(src_view[:, :], A_buf[:, :], scope="cta")
         T.maca.cta_sync()
-        Tx.warp.permute_layout(dst_view, src_view)
+        T.maca.tile.permute_layout(dst_view, src_view, scope="warp")
         T.maca.cta_sync()
-        Tx.cta.copy(B_buf[:, :], dst_view[:, :])
+        T.maca.tile.copy(B_buf[:, :], dst_view[:, :], scope="cta")
 
     A_np = tvm.testing.generate_random_array("uint32", shape)
     B_np = np.zeros_like(A_np)
@@ -340,7 +338,7 @@ def test_shared_shared_uncertified_schedule_uses_generic_fallback():
 )
 def test_reject_vector_and_128_bit_scalar(dtype, message):
     with pytest.raises(RuntimeError, match=message):
-        _lower_forced_dispatch("wave64_generic", dtype=dtype)
+        _lower_permute_layout(dtype=dtype)
 
 
 if __name__ == "__main__":

@@ -3546,7 +3546,7 @@ def _build_explicit_block_scaled_split_n_kernel():
 
 
 def _compile_cuda_source(func):
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
     with target:
         mod = tvm.tirx.compile(
             tvm.IRModule({"main": func}),
@@ -3821,7 +3821,7 @@ def test_gemm_tcgen05_cta1_m64_accepts_packed_c_layout_ws():
     ``.ws`` datapath organization (PTX ISA 8.8 §9.7.16.10.5 Layout E,
     cta_group::1), so it is accepted with ``weight_stationary=True``."""
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
     with target:
         mod = tvm.tirx.compile(
             tvm.IRModule({"main": _build_cta1_m64_packed_c_kernel(weight_stationary=True)}),
@@ -4021,7 +4021,7 @@ def test_gemm_tcgen05_cta1_m64_ws_requires_layout_e_c():
     rejected: .ws writes the Layout-E fold, so an identity C would read the
     two banks from the wrong lanes (dual error)."""
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
     with target:
         with pytest.raises(Exception, match="Layout-E"):
             tvm.tirx.compile(
@@ -4117,7 +4117,7 @@ def test_gemm_tcgen05_cta1_m64_ws_requires_batched_a():
     flat A (lanes 0-63 only) cannot express — nor let the dispatch verify — the
     second-half occupancy. A must use the batched A[2, M, K] fold."""
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
     with target:
         with pytest.raises(Exception, match="both 64-lane halves"):
             tvm.tirx.compile(
@@ -4215,7 +4215,7 @@ def _build_m128_batched_a_kernel():
 def test_gemm_tcgen05_batched_a_rejects_unproven_datapath():
     """A batched A[2, M, K] fold outside Layout E / Layout B is rejected."""
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
     with target:
         with pytest.raises(Exception, match="only valid for Layout E"):
             tvm.tirx.compile(
@@ -4230,7 +4230,7 @@ def test_gemm_tcgen05_cta1_m64_accepts_batched_c_layout_ws():
     byte-identically to the packed C[M, 2, N//2] form: the two
     describe the same physical Layout-E tile."""
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
 
     def _compile(kernel):
         with target:
@@ -4258,7 +4258,7 @@ def test_gemm_tcgen05_cta1_m64_packed_c_infers_weight_stationary():
     inferred with no weight_stationary flag; and an explicit
     weight_stationary=False contradicts the layout and is rejected."""
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
     with target:
         # omitted flag -> .ws inferred, compiles to a .ws MMA
         mod = tvm.tirx.compile(

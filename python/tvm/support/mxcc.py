@@ -29,19 +29,19 @@ import tvm
 from tvm.support import utils
 
 
-def compile_maca(code, target_format="mcbin", arch="xcore1000", options=None, path_target=None):  # pylint: disable=unused-argument
-    """Compile maca code with MXCC from env.
+def compile_mxcc(code, target_format="mcbin", arch="xcore1000", options=None, path_target=None):  # pylint: disable=unused-argument
+    """Compile MACA source with MXCC.
 
     Parameters
     ----------
     code : str
-        The maca code.
+        The MACA source code.
 
     target_format : str
         The target format of mxcc compiler.
 
     arch : str
-        The maca architecture.
+        The MACA architecture.
 
     options : str or list of str
         The additional options.
@@ -51,8 +51,8 @@ def compile_maca(code, target_format="mcbin", arch="xcore1000", options=None, pa
 
     Return
     ------
-    mcbin : bytearray
-        The bytearray of fatbin
+    bytearray
+        The compiled device artifact.
     """
     temp = utils.tempdir()
     file_name = "tvm_kernels"
@@ -258,6 +258,9 @@ def find_maca_path():
 @tvm_ffi.register_global_func
 def tvm_callback_maca_compile(code, config_json):
     """Compile MACA source using its serialized backend configuration."""
+    from tvm.backend.config import copy_backend_config
+    from tvm.backend.maca.compiler import compile_source
+
     if config_json:
         try:
             config = json.loads(config_json)
@@ -266,11 +269,8 @@ def tvm_callback_maca_compile(code, config_json):
             config = {"maca": {"arch": config_json}}
     else:
         config = {}
-    arch = config.get("maca", {}).get("arch")
-    if not arch:
-        arch = get_maca_arch()
-    dev_obj = compile_maca(code, target_format="mcbin", arch=arch)
-    return dev_obj
+    result = compile_source(code, copy_backend_config(config))
+    return result.binary
 
 
 @tvm_ffi.register_global_func("tvm.support.mxcc.get_compute_version")

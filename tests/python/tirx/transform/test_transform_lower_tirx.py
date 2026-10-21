@@ -32,7 +32,7 @@ from tvm.tirx.function import Function
 from tvm.tirx.transform import LowerTIRx, StmtSimplify
 
 
-def compare(before, after, transform):
+def compare(before, after, transform, target="cuda"):
     """Compare lowered output against expected ``after`` IR."""
     if isinstance(before, Function):
         before = tvm.IRModule({"main": before})
@@ -40,7 +40,7 @@ def compare(before, after, transform):
         after = tvm.IRModule({"main": after})
     assert isinstance(before, tvm.IRModule)
     assert isinstance(after, tvm.IRModule)
-    with tvm.target.Target("maca"):
+    with tvm.target.Target(target):
         lowered = transform()(before)
         lowered.show()
         tvm.ir.assert_structural_equal(lowered, after, map_free_vars=False)
@@ -68,7 +68,8 @@ def _launch_thread_extents(func):
                 "cluster": "clusterCtaIdx",
                 "preferred_cluster": "preferredClusterCtaIdx",
             }
-            for field, value in zip(node.attrs["cuda.launch_fields"], node.args):
+            fields = node.attrs.get("maca.launch_fields", node.attrs.get("cuda.launch_fields"))
+            for field, value in zip(fields, node.args):
                 prefix, axis = str(field).split(".")
                 if prefix in prefixes:
                     extents[f"{prefixes[prefix]}.{axis}"] = int(value)
@@ -115,36 +116,36 @@ def test_unroll_loop_optional_annotations():
 def test_lower_view_get():
     @T.function(private=True)
     def before1(
-        in_buf: T.Tensor(64, "float32", layout="default"),
-        out: T.Tensor(64, "float32", layout="default"),
+        in_buf: T.Tensor(128, "float32", layout="default"),
+        out: T.Tensor(128, "float32", layout="default"),
     ) -> None:
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1, 1, 1), block=1 * 32))
-        bx, by, bz = (T.cuda.block_idx("x"), T.cuda.block_idx("y"), T.cuda.block_idx("z"))
-        lane_id = T.cuda.lane_id()
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1, 1, 1), block=1 * 64))
+        bx, by, bz = (T.maca.block_idx("x"), T.maca.block_idx("y"), T.maca.block_idx("z"))
+        lane_id = T.maca.lane_id()
         A = T.alloc_tensor(
             ty_args=[T.Tensor([2], "float16", scope="local", layout=T.TileLayout(T.S[2:1]))]
         )
-        B_layout = A.layout.tile(L_LANE, (32,), (2,))
-        B = A.view(64, layout=B_layout)
+        B_layout = A.layout.tile(L_LANE_MACA, (64,), (2,))
+        B = A.view(128, layout=B_layout)
         A_local = B.local(2)
         for i in T.vectorized(2):
             A_local[i] = T.float32(in_buf[lane_id * 2 + i])
-        B_1 = A.view(128, layout=B_layout)
+        B_1 = A.view(256, layout=B_layout)
         A_local_1 = B_1.local(2)
         for i in T.vectorized(2):
             out[lane_id * 2 + i] = T.float32(A_local_1[i])
 
     @T.function(private=True)
-    def after1(in_buf: T.Tensor((64,), layout=None), out: T.Tensor((64,), layout=None)):
-        out_1 = T.decl_tensor(out.data, ty_args=[T.Tensor((64,), layout=None, data=out.data)])
+    def after1(in_buf: T.Tensor((128,), layout=None), out: T.Tensor((128,), layout=None)):
+        out_1 = T.decl_tensor(out.data, ty_args=[T.Tensor((128,), layout=None, data=out.data)])
         in_buf_1 = T.decl_tensor(
-            in_buf.data, ty_args=[T.Tensor((64,), layout=None, data=in_buf.data)]
+            in_buf.data, ty_args=[T.Tensor((128,), layout=None, data=in_buf.data)]
         )
         with T.region(
             "tirx.device_scope",
-            [1, 1, 1, 32, 1, 1],
+            [1, 1, 1, 64, 1, 1],
             attrs={
-                "cuda.launch_fields": [
+                "maca.launch_fields": [
                     "grid.x",
                     "grid.y",
                     "grid.z",
@@ -152,72 +153,76 @@ def test_lower_view_get():
                     "block.y",
                     "block.z",
                 ],
-                "cuda.kernel_attrs": {},
+                "maca.kernel_attrs": {},
             },
         ):
             bx: T.let[T.int32] = 0
             by: T.let[T.int32] = 0
             bz: T.let[T.int32] = 0
-            lane_id: T.let[T.int32] = T.cuda.thread_idx("x") % 32
+            lane_id: T.let[T.int32] = T.maca.thread_idx("x") % 64
             A = T.alloc_local((2,), "float16", layout=None)
             B = T.decl_tensor(
-                A.data, ty_args=[T.Tensor((64,), "float16", scope="local", layout=None)]
+                A.data, ty_args=[T.Tensor((128,), "float16", scope="local", layout=None)]
             )
             A_local = T.decl_tensor(
                 A.data, ty_args=[T.Tensor((2,), "float16", scope="local", layout=None)]
             )
             for i in T.vectorized(2):
-                A_local[i] = T.Cast("float16", in_buf_1[T.cuda.thread_idx("x") * 2 + i])
+                A_local[i] = T.Cast(
+                    "float16", in_buf_1[T.maca.thread_idx("x") % 64 * 2 + i]
+                )
             B_1 = T.decl_tensor(
-                A.data, ty_args=[T.Tensor((64,), "float16", scope="local", layout=None)]
+                A.data, ty_args=[T.Tensor((256,), "float16", scope="local", layout=None)]
             )
             A_local_1 = T.decl_tensor(
                 A.data, ty_args=[T.Tensor((2,), "float16", scope="local", layout=None)]
             )
             for i in T.vectorized(2):
-                out_1[T.cuda.thread_idx("x") * 2 + i] = T.Cast("float32", A_local_1[i])
+                out_1[T.maca.thread_idx("x") % 64 * 2 + i] = T.Cast(
+                    "float32", A_local_1[i]
+                )
 
-    compare(before1, after1, LowerTIRx)
+    compare(before1, after1, LowerTIRx, "maca")
 
     @T.function(private=True)
     def before2(
-        in_buf: T.Tensor((16, 16), "float32", layout="default"),
-        out: T.Tensor((16, 16), "float32", layout="default"),
+        in_buf: T.Tensor((16, 32), "float32", layout="default"),
+        out: T.Tensor((16, 32), "float32", layout="default"),
     ) -> None:
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1, 1, 1), block=1 * 32))
-        bx, by, bz = (T.cuda.block_idx("x"), T.cuda.block_idx("y"), T.cuda.block_idx("z"))
-        lane_id = T.cuda.lane_id()
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1, 1, 1), block=1 * 64))
+        bx, by, bz = (T.maca.block_idx("x"), T.maca.block_idx("y"), T.maca.block_idx("z"))
+        lane_id = T.maca.lane_id()
         atom = T.TileLayout(T.S[(1, 2) : (2, 1)])
         tile = T.TileLayout(T.S[(2, 2) : (2, 1)])
-        warp_atom = atom.tile(L_LANE, (8, 4), (1, 2))
+        warp_atom = atom.tile(L_LANE_MACA, (8, 8), (1, 2))
         A = T.alloc_tensor(
             ty_args=[
                 T.Tensor([4, 2], "float32", scope="local", layout=atom.tile(tile, (2, 2), (1, 2)))
             ]
         )
-        B_layout = warp_atom.tile(tile, (2, 2), (8, 8))
-        B = A.view(16, 16, layout=B_layout)
-        A_local = B.local(2, 2)
+        B_layout = warp_atom.tile(tile, (2, 2), (8, 16))
+        B = A.view(16, 32, layout=B_layout)
+        A_local = B.local(2, 4)
         for i in T.unroll(2):
-            for j in T.vectorized(2):
+            for j in T.vectorized(4):
                 A_local[i, j] = in_buf[lane_id // 8 * 2 + i, lane_id % 8 * 2 + j]
-        B_1 = A.view(16, 16, layout=B_layout)
-        A_local_1 = B_1.local(2, 2)
+        B_1 = A.view(16, 32, layout=B_layout)
+        A_local_1 = B_1.local(2, 4)
         for i in T.unroll(2):
-            for j in T.vectorized(2):
+            for j in T.vectorized(4):
                 out[lane_id // 8 * 2 + i, lane_id % 8 * 2 + j] = A_local_1[i, j]
 
     @T.function(private=True)
-    def after2(in_buf: T.Tensor((16, 16), layout=None), out: T.Tensor((16, 16), layout=None)):
-        out_1 = T.decl_tensor(out.data, ty_args=[T.Tensor((256,), layout=None, data=out.data)])
+    def after2(in_buf: T.Tensor((16, 32), layout=None), out: T.Tensor((16, 32), layout=None)):
+        out_1 = T.decl_tensor(out.data, ty_args=[T.Tensor((512,), layout=None, data=out.data)])
         in_buf_1 = T.decl_tensor(
-            in_buf.data, ty_args=[T.Tensor((256,), layout=None, data=in_buf.data)]
+            in_buf.data, ty_args=[T.Tensor((512,), layout=None, data=in_buf.data)]
         )
         with T.region(
             "tirx.device_scope",
-            [1, 1, 1, 32, 1, 1],
+            [1, 1, 1, 64, 1, 1],
             attrs={
-                "cuda.launch_fields": [
+                "maca.launch_fields": [
                     "grid.x",
                     "grid.y",
                     "grid.z",
@@ -225,50 +230,53 @@ def test_lower_view_get():
                     "block.y",
                     "block.z",
                 ],
-                "cuda.kernel_attrs": {},
+                "maca.kernel_attrs": {},
             },
         ):
             bx: T.let[T.int32] = 0
             by: T.let[T.int32] = 0
             bz: T.let[T.int32] = 0
-            lane_id: T.let[T.int32] = T.cuda.thread_idx("x") % 32
+            lane_id: T.let[T.int32] = T.maca.thread_idx("x") % 64
             A = T.alloc_local((8,), layout=None)
-            B = T.decl_tensor(A.data, ty_args=[T.Tensor((256,), scope="local", layout=None)])
+            B = T.decl_tensor(A.data, ty_args=[T.Tensor((512,), scope="local", layout=None)])
             A_local = T.decl_tensor(A.data, ty_args=[T.Tensor((8,), scope="local", layout=None)])
-            for i in T.unroll(4):
-                for j in T.vectorized(2):
-                    A_local[i * 2 + j] = in_buf_1[
-                        i // 2 * 128
-                        + T.cuda.thread_idx("x") // 4 * 16
-                        + i % 2 * 8
+            for i in T.unroll(2):
+                for j in T.vectorized(4):
+                    A_local[i * 4 + j] = in_buf_1[
+                        T.maca.thread_idx("x") % 64 // 8 * 64
+                        + i * 32
+                        + T.maca.thread_idx("x") % 8 * 2
                         + j
-                        + T.cuda.thread_idx("x") % 4
                     ]
-            B_1 = T.decl_tensor(A.data, ty_args=[T.Tensor((256,), scope="local", layout=None)])
+            B_1 = T.decl_tensor(A.data, ty_args=[T.Tensor((512,), scope="local", layout=None)])
             A_local_1 = T.decl_tensor(A.data, ty_args=[T.Tensor((8,), scope="local", layout=None)])
-            for i in T.vectorized(2):
-                out_1[T.cuda.thread_idx("x") // 4 * 128 + T.cuda.thread_idx("x") % 4 * 18 + i] = (
-                    A_local_1[i]
-                )
+            for i in T.unroll(2):
+                for j in T.vectorized(4):
+                    out_1[
+                        T.maca.thread_idx("x") % 64 // 8 * 64
+                        + i * 32
+                        + T.maca.thread_idx("x") % 8 * 2
+                        + j
+                    ] = A_local_1[i * 4 + j]
 
-    compare(before2, after2, LowerTIRx)
+    compare(before2, after2, LowerTIRx, "maca")
 
     @T.function(private=True)
-    def before3_wgmma_layout(
-        in_buf: T.Tensor((128, 128), "float32", layout="default"),
-        out: T.Tensor((128, 128), "float32", layout="default"),
+    def before3_wave_layout(
+        in_buf: T.Tensor((256, 128), "float32", layout="default"),
+        out: T.Tensor((256, 128), "float32", layout="default"),
     ) -> None:
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1, 1, 1), block=2 * 128))
-        bx, by, bz = (T.cuda.block_idx("x"), T.cuda.block_idx("y"), T.cuda.block_idx("z"))
-        wg_id = T.cuda.warpgroup_id()
-        warp_id_in_wg = T.cuda.warp_in_warpgroup()
-        lane_id = T.cuda.lane_id()
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1, 1, 1), block=2 * 256))
+        bx, by, bz = (T.maca.block_idx("x"), T.maca.block_idx("y"), T.maca.block_idx("z"))
+        wg_id = T.maca.warpgroup_id()
+        warp_id_in_wg = T.maca.warp_in_warpgroup()
+        lane_id = T.maca.lane_id()
         atom = T.TileLayout(T.S[1, 2])
-        warp_atom = atom.tile(L_LANE, (8, 4), (1, 2))
+        warp_atom = atom.tile(L_LANE_MACA, (16, 4), (1, 2))
         tile = T.TileLayout(T.S[(2, 128 // 8) : (1, 2)])
-        warp_layout = warp_atom.tile(tile, (2, 128 // 8), (8, 8))
+        warp_layout = warp_atom.tile(tile, (2, 128 // 8), (16, 8))
         L_warp = T.TileLayout(T.S[8 : 1 @ warpid])
-        layout = warp_layout.tile(L_warp, (8, 1), (16, 128))
+        layout = warp_layout.tile(L_warp, (8, 1), (32, 128))
         acc = T.alloc_tensor(
             ty_args=[
                 T.Tensor(
@@ -276,38 +284,38 @@ def test_lower_view_get():
                 )
             ]
         )
-        A = acc.view(128, 128, layout=layout)
+        A = acc.view(256, 128, layout=layout)
         acc_local = A.local(16, 2, 2, layout=atom.tile(tile, (2, 128 // 8), (1, 2)))
         for i in T.serial(128 // 8):
             for j in T.unroll(2):
                 for vec in T.vectorized(2):
                     acc_local[i, j, vec] = in_buf[
-                        wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
+                        wg_id * 128 + warp_id_in_wg * 32 + j * 16 + lane_id // 4,
                         i * 8 + lane_id % 4 * 2 + vec,
                     ]
-        A_1 = acc.view(128, 128, layout=layout)
+        A_1 = acc.view(256, 128, layout=layout)
         acc_local_1 = A_1.local(64, layout=atom.tile(tile, (2, 128 // 8), (1, 2)))
         for i in T.serial(128 // 8):
             for j in T.unroll(2):
                 for vec in T.vectorized(2):
                     out[
-                        wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
+                        wg_id * 128 + warp_id_in_wg * 32 + j * 16 + lane_id // 4,
                         i * 8 + lane_id % 4 * 2 + vec,
                     ] = acc_local_1[i * 4 + j * 2 + vec]
 
     @T.function(private=True)
-    def after3_wgmma_layout(
-        in_buf: T.Tensor((128, 128), layout=None), out: T.Tensor((128, 128), layout=None)
+    def after3_wave_layout(
+        in_buf: T.Tensor((256, 128), layout=None), out: T.Tensor((256, 128), layout=None)
     ):
-        out_1 = T.decl_tensor(out.data, ty_args=[T.Tensor((16384,), layout=None, data=out.data)])
+        out_1 = T.decl_tensor(out.data, ty_args=[T.Tensor((32768,), layout=None, data=out.data)])
         in_buf_1 = T.decl_tensor(
-            in_buf.data, ty_args=[T.Tensor((16384,), layout=None, data=in_buf.data)]
+            in_buf.data, ty_args=[T.Tensor((32768,), layout=None, data=in_buf.data)]
         )
         with T.region(
             "tirx.device_scope",
-            [1, 1, 1, 256, 1, 1],
+            [1, 1, 1, 512, 1, 1],
             attrs={
-                "cuda.launch_fields": [
+                "maca.launch_fields": [
                     "grid.x",
                     "grid.y",
                     "grid.z",
@@ -315,20 +323,18 @@ def test_lower_view_get():
                     "block.y",
                     "block.z",
                 ],
-                "cuda.kernel_attrs": {},
+                "maca.kernel_attrs": {},
             },
         ):
-            warp_id_in_cta: T.let[T.int32] = T.gpu_warp_shuffle(
-                T.uint32(4294967295), T.cuda.thread_idx("x") // 32, 0, 32, 32
-            )
+            warp_id_in_cta: T.let[T.int32] = T.maca.thread_idx("x") // 64
             bx: T.let[T.int32] = 0
             by: T.let[T.int32] = 0
             bz: T.let[T.int32] = 0
             wg_id: T.let[T.int32] = warp_id_in_cta // 4
             warp_id_in_wg: T.let[T.int32] = warp_id_in_cta % 4
-            lane_id: T.let[T.int32] = T.cuda.thread_idx("x") % 32
+            lane_id: T.let[T.int32] = T.maca.thread_idx("x") % 64
             acc = T.alloc_local((64,), layout=None)
-            B = T.decl_tensor(acc.data, ty_args=[T.Tensor((16384,), scope="local", layout=None)])
+            B = T.decl_tensor(acc.data, ty_args=[T.Tensor((32768,), scope="local", layout=None)])
             acc_local = T.decl_tensor(
                 acc.data, ty_args=[T.Tensor((64,), scope="local", layout=None)]
             )
@@ -336,14 +342,14 @@ def test_lower_view_get():
                 for j in T.unroll(2):
                     for vec in T.vectorized(2):
                         acc_local[i % 8 * 8 + j * 4 + i // 8 * 2 + vec] = in_buf_1[
-                            warp_id_in_cta * 2048
-                            + j * 1024
-                            + T.cuda.thread_idx("x") % 32 // 4 * 128
+                            T.maca.thread_idx("x") // 64 * 4096
+                            + j * 2048
+                            + T.maca.thread_idx("x") % 64 // 4 * 128
                             + i * 8
-                            + T.cuda.thread_idx("x") % 4 * 2
+                            + T.maca.thread_idx("x") % 4 * 2
                             + vec
                         ]
-            B_1 = T.decl_tensor(acc.data, ty_args=[T.Tensor((16384,), scope="local", layout=None)])
+            B_1 = T.decl_tensor(acc.data, ty_args=[T.Tensor((32768,), scope="local", layout=None)])
             acc_local_1 = T.decl_tensor(
                 acc.data, ty_args=[T.Tensor((64,), scope="local", layout=None)]
             )
@@ -351,37 +357,37 @@ def test_lower_view_get():
                 for j in T.unroll(2):
                     for vec in T.vectorized(2):
                         out_1[
-                            warp_id_in_cta * 2048
-                            + j * 1024
-                            + T.cuda.thread_idx("x") % 32 // 4 * 128
+                            T.maca.thread_idx("x") // 64 * 4096
+                            + j * 2048
+                            + T.maca.thread_idx("x") % 64 // 4 * 128
                             + i * 8
-                            + T.cuda.thread_idx("x") % 4 * 2
+                            + T.maca.thread_idx("x") % 4 * 2
                             + vec
                         ] = acc_local_1[i % 8 * 8 + j * 4 + i // 8 * 2 + vec]
 
-    compare(before3_wgmma_layout, after3_wgmma_layout, LowerTIRx)
+    compare(before3_wave_layout, after3_wave_layout, LowerTIRx, "maca")
 
     @T.function(private=True)
     def before4_multi_view_get(
-        in_buf: T.Tensor(64, "float32", layout="default"),
-        out: T.Tensor(64, "float32", layout="default"),
+        in_buf: T.Tensor(128, "float32", layout="default"),
+        out: T.Tensor(128, "float32", layout="default"),
     ) -> None:
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1, 1, 1), block=1 * 32))
-        bx, by, bz = (T.cuda.block_idx("x"), T.cuda.block_idx("y"), T.cuda.block_idx("z"))
-        lane_id = T.cuda.lane_id()
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1, 1, 1), block=1 * 64))
+        bx, by, bz = (T.maca.block_idx("x"), T.maca.block_idx("y"), T.maca.block_idx("z"))
+        lane_id = T.maca.lane_id()
         A = T.alloc_tensor(
             ty_args=[T.Tensor([2], "float16", scope="local", layout=T.TileLayout(T.S[2:1]))]
         )
-        B_layout = A.layout.tile(L_LANE, (32,), (2,))
-        B = A.view(64, layout=B_layout)
-        B_1 = A.view(64, layout=B_layout)
+        B_layout = A.layout.tile(L_LANE_MACA, (64,), (2,))
+        B = A.view(128, layout=B_layout)
+        B_1 = A.view(128, layout=B_layout)
         A_local = B.local(2)
         A_local[0] = T.float32(in_buf[lane_id * 2])
         A_local_1 = B_1.local(2)
         A_local_1[1] = T.float32(in_buf[lane_id * 2 + 1])
         "\n                write A into out\n                "
-        B_2 = A.view(64, layout=B_layout)
-        B_3 = A.view(64, layout=B_layout)
+        B_2 = A.view(128, layout=B_layout)
+        B_3 = A.view(128, layout=B_layout)
         A_local_2 = B_2.local(2)
         out[lane_id * 2] = T.float32(A_local_2[0])
         A_local_3 = B_3.local(2)
@@ -389,17 +395,17 @@ def test_lower_view_get():
 
     @T.function(private=True)
     def after4_multi_view_get(
-        in_buf: T.Tensor((64,), layout=None), out: T.Tensor((64,), layout=None)
+        in_buf: T.Tensor((128,), layout=None), out: T.Tensor((128,), layout=None)
     ):
-        out_1 = T.decl_tensor(out.data, ty_args=[T.Tensor((64,), layout=None, data=out.data)])
+        out_1 = T.decl_tensor(out.data, ty_args=[T.Tensor((128,), layout=None, data=out.data)])
         in_buf_1 = T.decl_tensor(
-            in_buf.data, ty_args=[T.Tensor((64,), layout=None, data=in_buf.data)]
+            in_buf.data, ty_args=[T.Tensor((128,), layout=None, data=in_buf.data)]
         )
         with T.region(
             "tirx.device_scope",
-            [1, 1, 1, 32, 1, 1],
+            [1, 1, 1, 64, 1, 1],
             attrs={
-                "cuda.launch_fields": [
+                "maca.launch_fields": [
                     "grid.x",
                     "grid.y",
                     "grid.z",
@@ -407,44 +413,44 @@ def test_lower_view_get():
                     "block.y",
                     "block.z",
                 ],
-                "cuda.kernel_attrs": {},
+                "maca.kernel_attrs": {},
             },
         ):
             bx: T.let[T.int32] = 0
             by: T.let[T.int32] = 0
             bz: T.let[T.int32] = 0
-            lane_id: T.let[T.int32] = T.cuda.thread_idx("x") % 32
+            lane_id: T.let[T.int32] = T.maca.thread_idx("x") % 64
             A = T.alloc_local((2,), "float16", layout=None)
             B = T.decl_tensor(
-                A.data, ty_args=[T.Tensor((64,), "float16", scope="local", layout=None)]
+                A.data, ty_args=[T.Tensor((128,), "float16", scope="local", layout=None)]
             )
             B_1 = T.decl_tensor(
-                A.data, ty_args=[T.Tensor((64,), "float16", scope="local", layout=None)]
+                A.data, ty_args=[T.Tensor((128,), "float16", scope="local", layout=None)]
             )
             A_local = T.decl_tensor(
                 A.data, ty_args=[T.Tensor((2,), "float16", scope="local", layout=None)]
             )
-            A_local[0] = T.Cast("float16", in_buf_1[T.cuda.thread_idx("x") * 2])
+            A_local[0] = T.Cast("float16", in_buf_1[T.maca.thread_idx("x") % 64 * 2])
             A_local_1 = T.decl_tensor(
                 A.data, ty_args=[T.Tensor((2,), "float16", scope="local", layout=None)]
             )
-            A_local_1[1] = T.Cast("float16", in_buf_1[T.cuda.thread_idx("x") * 2 + 1])
+            A_local_1[1] = T.Cast("float16", in_buf_1[T.maca.thread_idx("x") % 64 * 2 + 1])
             B_2 = T.decl_tensor(
-                A.data, ty_args=[T.Tensor((64,), "float16", scope="local", layout=None)]
+                A.data, ty_args=[T.Tensor((128,), "float16", scope="local", layout=None)]
             )
             B_3 = T.decl_tensor(
-                A.data, ty_args=[T.Tensor((64,), "float16", scope="local", layout=None)]
+                A.data, ty_args=[T.Tensor((128,), "float16", scope="local", layout=None)]
             )
             A_local_2 = T.decl_tensor(
                 A.data, ty_args=[T.Tensor((2,), "float16", scope="local", layout=None)]
             )
-            out_1[T.cuda.thread_idx("x") * 2] = T.Cast("float32", A_local_2[0])
+            out_1[T.maca.thread_idx("x") % 64 * 2] = T.Cast("float32", A_local_2[0])
             A_local_3 = T.decl_tensor(
                 A.data, ty_args=[T.Tensor((2,), "float16", scope="local", layout=None)]
             )
-            out_1[T.cuda.thread_idx("x") * 2 + 1] = T.Cast("float32", A_local_3[1])
+            out_1[T.maca.thread_idx("x") % 64 * 2 + 1] = T.Cast("float32", A_local_3[1])
 
-    compare(before4_multi_view_get, after4_multi_view_get, LowerTIRx)
+    compare(before4_multi_view_get, after4_multi_view_get, LowerTIRx, "maca")
 
 
 def test_lower_scope_id():
@@ -596,9 +602,9 @@ def test_lower_scope_id():
 def test_lower_ordinary_cta_has_no_cluster_launch_tags():
     @T.function(private=True)
     def before() -> None:
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(32,)))
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(32,)))
 
-    with tvm.target.Target("cuda"):
+    with tvm.target.Target("maca"):
         after = LowerTIRx()(tvm.IRModule({"main": before}))["main"]
 
     launch_extents = _launch_thread_extents(after)
@@ -716,15 +722,15 @@ def test_lower_singleton_cluster_preserves_preferred_cluster_tags():
 def test_lower_scope_id2():
     @T.inline
     def func(warp_id, tx):
-        wg_id = T.cuda.warpgroup_id()
+        wg_id = T.maca.warpgroup_id()
         T.evaluate(wg_id + warp_id + tx)
 
     @T.function(private=True)
     def before():
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(3, 4, 5), block=(256,)))
-        bx, by, bz = (T.cuda.block_idx("x"), T.cuda.block_idx("y"), T.cuda.block_idx("z"))
-        warp_id = T.cuda.warp_id()
-        tx = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(3, 4, 5), block=(256,)))
+        bx, by, bz = (T.maca.block_idx("x"), T.maca.block_idx("y"), T.maca.block_idx("z"))
+        warp_id = T.maca.warp_id()
+        tx = T.maca.thread_idx("x")
         func(warp_id, tx)
 
     @T.function(private=True)
@@ -733,7 +739,7 @@ def test_lower_scope_id2():
             "tirx.device_scope",
             [3, 4, 5, 256, 1, 1],
             attrs={
-                "cuda.launch_fields": [
+                "maca.launch_fields": [
                     "grid.x",
                     "grid.y",
                     "grid.z",
@@ -741,21 +747,19 @@ def test_lower_scope_id2():
                     "block.y",
                     "block.z",
                 ],
-                "cuda.kernel_attrs": {},
+                "maca.kernel_attrs": {},
             },
         ):
-            warp_id_in_cta: T.let[T.int32] = T.gpu_warp_shuffle(
-                T.uint32(4294967295), T.cuda.thread_idx("x") // 32, 0, 32, 32
-            )
-            bx: T.let[T.int32] = T.cuda.block_idx("x")
-            by: T.let[T.int32] = T.cuda.block_idx("y")
-            bz: T.let[T.int32] = T.cuda.block_idx("z")
+            warp_id_in_cta: T.let[T.int32] = T.maca.thread_idx("x") // 64
+            bx: T.let[T.int32] = T.maca.block_idx("x")
+            by: T.let[T.int32] = T.maca.block_idx("y")
+            bz: T.let[T.int32] = T.maca.block_idx("z")
             warp_id: T.let[T.int32] = warp_id_in_cta
-            tx: T.let[T.int32] = T.cuda.thread_idx("x")
+            tx: T.let[T.int32] = T.maca.thread_idx("x")
             wg_id: T.let[T.int32] = warp_id_in_cta // 4
             T.evaluate(wg_id + warp_id + tx)
 
-    compare(before, after, LowerTIRx)
+    compare(before, after, LowerTIRx, "maca")
 
 
 @pytest.mark.skip(
@@ -814,10 +818,10 @@ def test_lower_scope_id3():
 def test_lower_layout():
     @T.function(private=True)
     def before(A: T.Tensor((128, 32), "float16", layout="default")) -> None:
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1, 1, 1), block=(128,)))
-        bx, by, bz = (T.cuda.block_idx("x"), T.cuda.block_idx("y"), T.cuda.block_idx("z"))
-        _lane = T.cuda.lane_id()
-        tid = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1, 1, 1), block=(128,)))
+        bx, by, bz = (T.maca.block_idx("x"), T.maca.block_idx("y"), T.maca.block_idx("z"))
+        _lane = T.maca.lane_id()
+        tid = T.maca.thread_idx("x")
         A_smem = T.alloc_tensor(
             ty_args=[
                 T.Tensor(
@@ -848,7 +852,7 @@ def test_lower_layout():
             "tirx.device_scope",
             [1, 1, 1, 128, 1, 1],
             attrs={
-                "cuda.launch_fields": [
+                "maca.launch_fields": [
                     "grid.x",
                     "grid.y",
                     "grid.z",
@@ -856,14 +860,14 @@ def test_lower_layout():
                     "block.y",
                     "block.z",
                 ],
-                "cuda.kernel_attrs": {},
+                "maca.kernel_attrs": {},
             },
         ):
             bx: T.let[T.int32] = 0
             by: T.let[T.int32] = 0
             bz: T.let[T.int32] = 0
-            _lane: T.let[T.int32] = T.cuda.thread_idx("x") % 32
-            tid: T.let[T.int32] = T.cuda.thread_idx("x")
+            _lane: T.let[T.int32] = T.maca.thread_idx("x") % 64
+            tid: T.let[T.int32] = T.maca.thread_idx("x")
             A_smem = T.alloc_shared((4096,), "float16", layout=None)
             thread_col = 4
             thread_row = 32
@@ -887,11 +891,11 @@ def test_lower_layout():
                                 + compose_m % 8,
                                 where={compose_q: compose_m // 8},
                             ),
-                            where={compose_m: tile * 1024 + T.cuda.thread_idx("x") * 8 + vec},
+                            where={compose_m: tile * 1024 + T.maca.thread_idx("x") * 8 + vec},
                         )
-                    ] = A_1[tile * 1024 + T.cuda.thread_idx("x") * 8 + vec]
+                    ] = A_1[tile * 1024 + T.maca.thread_idx("x") * 8 + vec]
 
-    compare(before, after, LowerTIRx)
+    compare(before, after, LowerTIRx, "maca")
 
 
 def test_lower_opcall_fail():
@@ -938,7 +942,7 @@ def test_lower_opcall_fail():
 def test_lower_decl_tensor_pointer():
     @T.function(private=True)
     def before():
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(128,)))
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(128,)))
         buf = T.alloc_tensor(ty_args=[T.Tensor([1024], "uint8", scope="shared.dyn")])
         A = T.decl_tensor(
             buf.data, ty_args=[T.Tensor([128], "float16", elem_offset=32, data=buf.data)]
@@ -951,7 +955,7 @@ def test_lower_decl_tensor_pointer():
             "tirx.device_scope",
             [1, 1, 1, 128, 1, 1],
             attrs={
-                "cuda.launch_fields": [
+                "maca.launch_fields": [
                     "grid.x",
                     "grid.y",
                     "grid.z",
@@ -959,7 +963,7 @@ def test_lower_decl_tensor_pointer():
                     "block.y",
                     "block.z",
                 ],
-                "cuda.kernel_attrs": {},
+                "maca.kernel_attrs": {},
             },
         ):
             buf = T.alloc_tensor(
@@ -973,14 +977,14 @@ def test_lower_decl_tensor_pointer():
             )
             T.address_of(A[64])
 
-    compare(before, after, LowerTIRx)
+    compare(before, after, LowerTIRx, "maca")
 
 
 def test_lower_separate_scope_id_def():
     @T.function(private=True)
     def before():
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(128,)))
-        tx = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(128,)))
+        tx = T.maca.thread_idx("x")
         if tx == 0:
             T.evaluate(tx)
 
@@ -990,7 +994,7 @@ def test_lower_separate_scope_id_def():
             "tirx.device_scope",
             [1, 1, 1, 128, 1, 1],
             attrs={
-                "cuda.launch_fields": [
+                "maca.launch_fields": [
                     "grid.x",
                     "grid.y",
                     "grid.z",
@@ -998,14 +1002,14 @@ def test_lower_separate_scope_id_def():
                     "block.y",
                     "block.z",
                 ],
-                "cuda.kernel_attrs": {},
+                "maca.kernel_attrs": {},
             },
         ):
-            tx: T.let[T.int32] = T.cuda.thread_idx("x")
+            tx: T.let[T.int32] = T.maca.thread_idx("x")
             if tx == 0:
                 T.evaluate(tx)
 
-    compare(before, after, LowerTIRx)
+    compare(before, after, LowerTIRx, "maca")
 
 
 def test_lower_uint32_scope_id_casts_at_bind():
@@ -1013,8 +1017,8 @@ def test_lower_uint32_scope_id_casts_at_bind():
 
     @T.function(private=True)
     def before():
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(128,)))
-        tx = T.cast(T.cuda.thread_idx("x"), "uint32")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(128,)))
+        tx = T.cast(T.maca.thread_idx("x"), "uint32")
         for k in T.serial(4, dtype="uint32"):
             T.evaluate(tx + k)
 
@@ -1024,7 +1028,7 @@ def test_lower_uint32_scope_id_casts_at_bind():
             "tirx.device_scope",
             [1, 1, 1, 128, 1, 1],
             attrs={
-                "cuda.launch_fields": [
+                "maca.launch_fields": [
                     "grid.x",
                     "grid.y",
                     "grid.z",
@@ -1032,14 +1036,14 @@ def test_lower_uint32_scope_id_casts_at_bind():
                     "block.y",
                     "block.z",
                 ],
-                "cuda.kernel_attrs": {},
+                "maca.kernel_attrs": {},
             },
         ):
-            tx: T.let[T.uint32] = T.Cast("uint32", T.cuda.thread_idx("x"))
+            tx: T.let[T.uint32] = T.Cast("uint32", T.maca.thread_idx("x"))
             for k in T.serial(T.uint32(4)):
                 T.evaluate(tx + k)
 
-    compare(before, after, LowerTIRx)
+    compare(before, after, LowerTIRx, "maca")
 
 
 def test_lower_exec_context_infers_plain_predicate_for_dispatch():
@@ -1048,7 +1052,7 @@ def test_lower_exec_context_infers_plain_predicate_for_dispatch():
     seen = []
     variant = "__probe_exec_context_plain_predicate__"
 
-    @_register_probe(variant)
+    @_register_probe(variant, "maca")
     def _probe(op_call, sctx):
         seen.append({"scope_kind": sctx.scope_kind, "inter": sctx.inter, "intra": sctx.intra})
 
@@ -1063,11 +1067,11 @@ def test_lower_exec_context_infers_plain_predicate_for_dispatch():
         A: T.Tensor((1,), "float32", scope="global", layout="default"),
         B: T.Tensor((1,), "float32", scope="global", layout="default"),
     ):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=4 * 32))
-        warp_id = T.cuda.warp_id()
-        lane_id = T.cuda.lane_id()
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=4 * 64))
+        warp_id = T.maca.warp_id()
+        lane_id = T.maca.lane_id()
         if (warp_id == 0) & (lane_id == 0):
-            getattr(T.cuda.tile, variant)(B[0:1], A[0:1])
+            getattr(T.maca.tile, variant)(B[0:1], A[0:1])
 
     with tvm.target.Target("maca"):
         LowerTIRx()(tvm.IRModule({"main": before}))
@@ -1080,11 +1084,11 @@ def test_lower_exec_context_infers_plain_predicate_for_dispatch():
     assert len(seen[0]["intra"]) == 0
 
 
-def test_lower_exec_context_tracks_let_aliases_and_hoists_warp_shuffle():
+def test_lower_exec_context_tracks_let_aliases_and_hoists_wave_id():
     seen = []
     variant = "__probe_let_alias_scope__"
 
-    @_register_probe(variant)
+    @_register_probe(variant, "maca")
     def _probe(op_call, sctx):
         seen.append(sctx.inter)
 
@@ -1099,23 +1103,24 @@ def test_lower_exec_context_tracks_let_aliases_and_hoists_warp_shuffle():
         A: T.Tensor((1,), "float32", layout="default"),
         B: T.Tensor((1,), "float32", layout="default"),
     ):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=128))
-        lane: T.let[T.int32] = T.cuda.lane_id()
+        T.device_entry(launch=T.maca.LaunchConfig(grid=1, block=128))
+        lane: T.let[T.int32] = T.maca.lane_id()
         alias_lane: T.let[T.int32] = lane
         if alias_lane == 0:
-            warp: T.let[T.int32] = T.cuda.warp_id()
+            warp: T.let[T.int32] = T.maca.warp_id()
             alias_warp: T.let[T.int32] = warp
             if alias_warp == 1:
-                getattr(T.cuda.tile, variant)(B[0:1], A[0:1])
+                getattr(T.maca.tile, variant)(B[0:1], A[0:1])
 
-    with tvm.target.Target("cuda"):
+    with tvm.target.Target("maca"):
         lowered = LowerTIRx()(tvm.IRModule({"main": before}))
 
     assert len(seen) == 1
     assert _int_pair(seen[0], "laneid") == (1, 0)
     assert _int_pair(seen[0], "warpid") == (1, 1)
     code = lowered.script()
-    assert code.index("gpu_warp_shuffle") < code.index("if ")
+    assert code.index("warp_id_in_cta:") < code.index("if ")
+    assert "gpu_warp_shuffle" not in code
 
 
 def test_lower_exec_context_respects_preferred_cluster_bounds():
@@ -1171,7 +1176,7 @@ def test_lower_exec_context_infers_warpgroup_range_predicate_for_dispatch():
     seen = []
     variant = "__probe_exec_context_warpgroup_range_predicate__"
 
-    @_register_probe(variant)
+    @_register_probe(variant, "maca")
     def _probe(op_call, sctx):
         seen.append({"scope_kind": sctx.scope_kind, "inter": sctx.inter, "intra": sctx.intra})
 
@@ -1186,15 +1191,15 @@ def test_lower_exec_context_infers_warpgroup_range_predicate_for_dispatch():
         A: T.Tensor((1,), "float32", scope="global", layout="default"),
         B: T.Tensor((1,), "float32", scope="global", layout="default"),
     ):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=2 * 128))
-        wg_id = T.cuda.warpgroup_id()
-        _lane = T.cuda.lane_id()
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=2 * 256))
+        wg_id = T.maca.warpgroup_id()
+        _lane = T.maca.lane_id()
         if wg_id == 0:
-            getattr(T.cuda.tile, variant)(B[0:1], A[0:1], scope="warpgroup")
+            getattr(T.maca.tile, variant)(B[0:1], A[0:1], scope="warpgroup")
         if (0 <= wg_id) & (wg_id < 1):
-            getattr(T.cuda.tile, variant)(B[0:1], A[0:1], scope="warpgroup")
+            getattr(T.maca.tile, variant)(B[0:1], A[0:1], scope="warpgroup")
         if (0 <= wg_id) & (wg_id < 1):
-            getattr(T.cuda.tile, variant)(B[0:1], A[0:1], scope="warpgroup")
+            getattr(T.maca.tile, variant)(B[0:1], A[0:1], scope="warpgroup")
 
     with tvm.target.Target("maca"):
         LowerTIRx()(tvm.IRModule({"main": before}))
@@ -1214,7 +1219,7 @@ def test_lower_exec_context_tracks_cta_thread_range_predicate_for_dispatch():
     seen = []
     variant = "__probe_exec_context_cta_thread_range_predicate__"
 
-    @_register_probe(variant)
+    @_register_probe(variant, "maca")
     def _probe(op_call, sctx):
         seen.append({"scope_kind": sctx.scope_kind, "inter": sctx.inter, "intra": sctx.intra})
 
@@ -1229,10 +1234,10 @@ def test_lower_exec_context_tracks_cta_thread_range_predicate_for_dispatch():
         A: T.Tensor((1,), "float32", scope="global", layout="default"),
         B: T.Tensor((1,), "float32", scope="global", layout="default"),
     ):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(256,)))
-        tid = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(256,)))
+        tid = T.maca.thread_idx("x")
         if (0 <= tid) & (tid < 128):
-            getattr(T.cuda.tile, variant)(B[0:1], A[0:1])
+            getattr(T.maca.tile, variant)(B[0:1], A[0:1])
 
     with tvm.target.Target("maca"):
         LowerTIRx()(tvm.IRModule({"main": before}))
@@ -1251,7 +1256,7 @@ def test_lower_exec_context_tracks_cta_thread_single_warp_range_predicate():
     seen = []
     variant = "__probe_exec_context_cta_thread_single_warp_range_predicate__"
 
-    @_register_probe(variant)
+    @_register_probe(variant, "maca")
     def _probe(op_call, sctx):
         seen.append({"scope_kind": sctx.scope_kind, "inter": sctx.inter, "intra": sctx.intra})
 
@@ -1266,18 +1271,18 @@ def test_lower_exec_context_tracks_cta_thread_single_warp_range_predicate():
         A: T.Tensor((1,), "float32", scope="global", layout="default"),
         B: T.Tensor((1,), "float32", scope="global", layout="default"),
     ):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(256,)))
-        tid = T.cuda.thread_idx("x")
-        if (34 <= tid) & (tid < 40):
-            getattr(T.cuda.tile, variant)(B[0:1], A[0:1])
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(256,)))
+        tid = T.maca.thread_idx("x")
+        if (66 <= tid) & (tid < 72):
+            getattr(T.maca.tile, variant)(B[0:1], A[0:1])
 
     with tvm.target.Target("maca"):
         LowerTIRx()(tvm.IRModule({"main": before}))
 
     assert len(seen) == 1
     assert seen[0]["scope_kind"] == "thread"
-    assert _int_pair(seen[0]["inter"], "laneid") == (6, 34)
-    assert _int_pair(seen[0]["inter"], "warpid") == (1, 0)
+    assert _int_pair(seen[0]["inter"], "laneid") == (6, 2)
+    assert _int_pair(seen[0]["inter"], "warpid") == (1, 1)
     assert _int_pair(seen[0]["inter"], "cta_id") == (1, 0)
     assert len(seen[0]["intra"]) == 0
 
@@ -1288,7 +1293,7 @@ def test_lower_exec_context_tracks_warpgroup_thread_range_predicate():
     seen = []
     variant = "__probe_exec_context_warpgroup_thread_range_predicate__"
 
-    @_register_probe(variant)
+    @_register_probe(variant, "maca")
     def _probe(op_call, sctx):
         seen.append({"scope_kind": sctx.scope_kind, "inter": sctx.inter, "intra": sctx.intra})
 
@@ -1303,12 +1308,12 @@ def test_lower_exec_context_tracks_warpgroup_thread_range_predicate():
         A: T.Tensor((1,), "float32", scope="global", layout="default"),
         B: T.Tensor((1,), "float32", scope="global", layout="default"),
     ):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=2 * 128))
-        wg_id = T.cuda.warpgroup_id()
-        tid_in_wg = T.cuda.thread_in_warpgroup()
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=2 * 256))
+        wg_id = T.maca.warpgroup_id()
+        tid_in_wg = T.maca.thread_in_warpgroup()
         if wg_id == 1:
-            if (32 <= tid_in_wg) & (tid_in_wg < 64):
-                getattr(T.cuda.tile, variant)(B[0:1], A[0:1], scope="warpgroup")
+            if (64 <= tid_in_wg) & (tid_in_wg < 128):
+                getattr(T.maca.tile, variant)(B[0:1], A[0:1], scope="warpgroup")
 
     with tvm.target.Target("maca"):
         LowerTIRx()(tvm.IRModule({"main": before}))
@@ -1317,8 +1322,8 @@ def test_lower_exec_context_tracks_warpgroup_thread_range_predicate():
     assert seen[0]["scope_kind"] == "warpgroup"
     assert _int_pair(seen[0]["inter"], "wgid") == (1, 1)
     assert _int_pair(seen[0]["inter"], "cta_id") == (1, 0)
-    assert _int_pair(seen[0]["intra"], "laneid") == (32, 32)
-    assert _int_pair(seen[0]["intra"], "wid_in_wg") == (1, 0)
+    assert _int_pair(seen[0]["intra"], "laneid") == (64, 0)
+    assert _int_pair(seen[0]["intra"], "wid_in_wg") == (1, 1)
 
 
 def test_lower_exec_context_tracks_dependent_conjunctive_predicate():
@@ -1327,7 +1332,7 @@ def test_lower_exec_context_tracks_dependent_conjunctive_predicate():
     seen = []
     variant = "__probe_exec_context_dependent_conjunctive_predicate__"
 
-    @_register_probe(variant)
+    @_register_probe(variant, "maca")
     def _probe(op_call, sctx):
         seen.append({"scope_kind": sctx.scope_kind, "inter": sctx.inter, "intra": sctx.intra})
 
@@ -1342,11 +1347,11 @@ def test_lower_exec_context_tracks_dependent_conjunctive_predicate():
         A: T.Tensor((1,), "float32", scope="global", layout="default"),
         B: T.Tensor((1,), "float32", scope="global", layout="default"),
     ):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=2 * 128))
-        wg_id = T.cuda.warpgroup_id()
-        tid_in_wg = T.cuda.thread_in_warpgroup()
-        if ((32 <= tid_in_wg) & (tid_in_wg < 64)) & (wg_id == 1):
-            getattr(T.cuda.tile, variant)(B[0:1], A[0:1], scope="warpgroup")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=2 * 256))
+        wg_id = T.maca.warpgroup_id()
+        tid_in_wg = T.maca.thread_in_warpgroup()
+        if ((64 <= tid_in_wg) & (tid_in_wg < 128)) & (wg_id == 1):
+            getattr(T.maca.tile, variant)(B[0:1], A[0:1], scope="warpgroup")
 
     with tvm.target.Target("maca"):
         LowerTIRx()(tvm.IRModule({"main": before}))
@@ -1355,16 +1360,16 @@ def test_lower_exec_context_tracks_dependent_conjunctive_predicate():
     assert seen[0]["scope_kind"] == "warpgroup"
     assert _int_pair(seen[0]["inter"], "wgid") == (1, 1)
     assert _int_pair(seen[0]["inter"], "cta_id") == (1, 0)
-    assert _int_pair(seen[0]["intra"], "laneid") == (32, 32)
-    assert _int_pair(seen[0]["intra"], "wid_in_wg") == (1, 0)
+    assert _int_pair(seen[0]["intra"], "laneid") == (64, 0)
+    assert _int_pair(seen[0]["intra"], "wid_in_wg") == (1, 1)
 
 
 def test_lower_exec_context_keeps_plain_predicate_condition():
     @T.function(private=True)
     def before(A: T.Tensor((1,), "float32", scope="global", layout="default")):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=2 * 128))
-        wg_id = T.cuda.warpgroup_id()
-        _lane = T.cuda.lane_id()
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=2 * 256))
+        wg_id = T.maca.warpgroup_id()
+        _lane = T.maca.lane_id()
         if wg_id == 0:
             T.evaluate(A[0])
 
@@ -1380,9 +1385,9 @@ def test_lower_exec_context_keeps_plain_predicate_condition():
 def test_lower_exec_context_keeps_plain_scope_predicate_condition():
     @T.function(private=True)
     def before(A: T.Tensor((1,), "float32", scope="global", layout="default")):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=2 * 128))
-        wg_id = T.cuda.warpgroup_id()
-        _lane = T.cuda.lane_id()
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=2 * 256))
+        wg_id = T.maca.warpgroup_id()
+        _lane = T.maca.lane_id()
         if wg_id == 0:
             A[0] = T.float32(1)
 
@@ -1398,10 +1403,10 @@ def test_lower_exec_context_keeps_plain_scope_predicate_condition():
 def test_simplify_uses_floor_div_scope_predicate_as_context_fact():
     @T.function(private=True)
     def before(A: T.Tensor((16,), "float32", scope="global", layout="default")):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=2 * 128))
-        wg_id = T.cuda.warpgroup_id()
-        warp_id = T.cuda.warp_in_warpgroup()
-        lane_id = T.cuda.lane_id()
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=2 * 256))
+        wg_id = T.maca.warpgroup_id()
+        warp_id = T.maca.warp_in_warpgroup()
+        lane_id = T.maca.lane_id()
         if wg_id == 0:
             A[warp_id] = T.float32(lane_id)
 
@@ -1410,10 +1415,10 @@ def test_simplify_uses_floor_div_scope_predicate_as_context_fact():
         simplified = StmtSimplify()(lowered)
 
     script = simplified.script(extra_config={"tirx.prefix": "T"})
-    assert "if warp_id_in_cta // 4 == 0:" in script
+    assert 'if T.maca.thread_idx("x") // 256 == 0:' in script
     assert "if 0 <= warp_id_in_cta" not in script
-    assert "A_1[warp_id_in_cta] = T.Cast" in script
-    assert "A_1[warp_id_in_cta % 4]" not in script
+    assert 'A_1[T.maca.thread_idx("x") // 64] = T.Cast' in script
+    assert "% 4]" not in script
 
 
 def test_lower_exec_context_selector_filter_for_elect_sync():
@@ -1782,7 +1787,7 @@ def test_lower_remaps_tensor_memory_address_metadata(offset):
 def test_lower_tensor_offset():
     @T.function(private=True)
     def before():
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(128,)))
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(128,)))
         A = T.alloc_tensor(ty_args=[T.Tensor([64, 64], "float16", scope="local")])
         A0 = T.decl_tensor(
             A.ptr_to([32, 32]),
@@ -1796,7 +1801,7 @@ def test_lower_tensor_offset():
             "tirx.device_scope",
             [1, 1, 1, 128, 1, 1],
             attrs={
-                "cuda.launch_fields": [
+                "maca.launch_fields": [
                     "grid.x",
                     "grid.y",
                     "grid.z",
@@ -1804,7 +1809,7 @@ def test_lower_tensor_offset():
                     "block.y",
                     "block.z",
                 ],
-                "cuda.kernel_attrs": {},
+                "maca.kernel_attrs": {},
             },
         ):
             A = T.alloc_local((4096,), "float16", layout=None)
@@ -1814,7 +1819,7 @@ def test_lower_tensor_offset():
             )
             T.address_of(A0[32])
 
-    compare(before, after, LowerTIRx)
+    compare(before, after, LowerTIRx, "maca")
 
 
 def test_lower_alloc_decl_tensor_outside_of_parser():
@@ -1887,7 +1892,7 @@ def test_lower_alloc_decl_tensor_outside_of_parser():
         G = 4
         G = G[0] + 4
 
-    compare(before, after, LowerTIRx)
+    compare(before, after, LowerTIRx, "maca")
 
 
 def test_alloc_tensor_with_thread_axis_layout():
@@ -1904,7 +1909,7 @@ def test_alloc_tensor_with_thread_axis_layout():
         )
         reg = reg_wg.local(4)
         for i in T.serial(4):
-            reg[i] = out[lane_id + warp_id * 64, i]
+            reg[i] = out[lane_id + warp_id * 32, i]
 
     @T.function(private=True)
     def after(out: T.Tensor((128, 4), layout=None)):
@@ -1959,10 +1964,10 @@ def test_warp_indices_require_complete_warps():
 def test_launch_configuration_does_not_require_index_uses():
     @T.function
     def kernel():
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=32, block=128))
+        T.device_entry(launch=T.maca.LaunchConfig(grid=32, block=128))
         T.evaluate(0)
 
-    with tvm.target.Target("cuda"):
+    with tvm.target.Target("maca"):
         lowered = LowerTIRx()(tvm.IRModule({"main": kernel}))["main"]
     assert _launch_thread_extents(lowered)["threadIdx.x"] == 128
     assert _launch_thread_extents(lowered)["blockIdx.x"] == 32
@@ -1991,20 +1996,20 @@ def test_lower_preferred_cluster():
     assert 'T.cuda.mov_sreg(32, "cluster_ctaid.y")' in after_mod.script()
 
 
-def _register_probe(name):
+def _register_probe(name, backend="cuda"):
     """Register a test instruction whose lowerer inspects its execution context."""
     from tvm.tirx.tile.instruction import Instruction, Operand
 
     def decorate(lower):
         spec = Instruction(
-            "tirx.cuda.tile." + name,
+            f"tirx.{backend}.tile." + name,
             "copy",
             (Operand("dst", "region"), Operand("src", "region")),
-            scopes=("cluster", "cta", "warpgroup", "warp", "thread"),
+            scopes=(("cluster",) if backend == "cuda" else ()) + ("cta", "warpgroup", "warp", "thread"),
             lower=lower,
         )
         factory = spec.register()
-        setattr(T.cuda.tile, name, factory)
+        setattr(getattr(T, backend).tile, name, factory)
         return lower
 
     return decorate

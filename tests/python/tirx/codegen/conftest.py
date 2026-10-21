@@ -27,7 +27,7 @@ from tvm.testing import env
 @pytest.fixture(autouse=True)
 def _source_codegen_without_cuda(monkeypatch):
     # CPU-only source checks must not depend on a CUDA compiler being installed.
-    if not env.has_cuda():
+    if not env.has_cuda() and not env.has_maca():
         monkeypatch.setenv("TVM_COMPILE_FORCE_FALLBACK", "1")
 
 

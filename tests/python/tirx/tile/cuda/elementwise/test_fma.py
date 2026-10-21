@@ -24,6 +24,7 @@ import pytest
 
 import tvm
 import tvm.testing
+from tvm.backend.cuda.axis import tx
 from tvm.backend.cuda.layout import wg_local_layout
 from tvm.script import tirx as T
 from tvm.testing import env
@@ -54,15 +55,15 @@ def test_fma_scalar_scalar():
 
     @T.function
     def test_func(A: T.Tensor((N,), dtype, layout=TileLayout(S[N]))) -> None:
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(N,)))
-        _bx = T.cuda.block_idx("x")
-        tx = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(N,)))
+        _bx = T.maca.block_idx("x")
+        tx = T.maca.thread_idx("x")
         buf = T.alloc_tensor(
             ty_args=[T.Tensor((1,), dtype, scope="local", layout=TileLayout(S[1]))]
         )
-        T.cuda.tile.ld(buf, A[tx : tx + 1])
-        T.cuda.tile.fma(buf, buf, T.float32(scale_val), T.float32(bias_val))
-        T.cuda.tile.st(A[tx : tx + 1], buf)
+        T.maca.tile.ld(buf, A[tx : tx + 1])
+        T.maca.tile.fma(buf, buf, T.float32(scale_val), T.float32(bias_val))
+        T.maca.tile.st(A[tx : tx + 1], buf)
 
     with target:
         A_np = np.random.rand(N).astype(dtype)
@@ -100,9 +101,9 @@ def test_fma_tensor_scale_scalar_bias():
         A: T.Tensor((N,), dtype, layout=TileLayout(S[N])),
         B: T.Tensor((N,), dtype, layout=TileLayout(S[N])),
     ) -> None:
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(1,)))
-        _bx = T.cuda.block_idx("x")
-        _tx = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(1,)))
+        _bx = T.maca.block_idx("x")
+        _tx = T.maca.thread_idx("x")
         acc = T.alloc_tensor(
             ty_args=[T.Tensor((N,), dtype, scope="local", layout=TileLayout(S[N]))]
         )
@@ -146,19 +147,19 @@ def test_mul_scalar_broadcast():
         A: T.Tensor((N,), dtype, layout=TileLayout(S[N])),
         Scale: T.Tensor((1,), dtype, layout=TileLayout(S[1])),
     ) -> None:
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(1,)))
-        _bx = T.cuda.block_idx("x")
-        _tx = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(1,)))
+        _bx = T.maca.block_idx("x")
+        _tx = T.maca.thread_idx("x")
         a_local = T.alloc_tensor(
             ty_args=[T.Tensor((N,), dtype, scope="local", layout=TileLayout(S[N]))]
         )
         s_local = T.alloc_tensor(
             ty_args=[T.Tensor((1,), dtype, scope="local", layout=TileLayout(S[1]))]
         )
-        T.cuda.tile.ld(a_local, A[0:N])
-        T.cuda.tile.ld(s_local, Scale[0:1])
-        T.cuda.tile.mul(a_local, a_local, s_local[0])
-        T.cuda.tile.st(A[0:N], a_local)
+        T.maca.tile.ld(a_local, A[0:N])
+        T.maca.tile.ld(s_local, Scale[0:1])
+        T.maca.tile.mul(a_local, a_local, s_local[0])
+        T.maca.tile.st(A[0:N], a_local)
 
     with target:
         A_np = np.random.rand(N).astype(dtype)
@@ -236,13 +237,13 @@ def test_fma_no_layout():
 
     @T.function
     def test_func(A: T.Tensor((N,), dtype, layout=TileLayout(S[N]))) -> None:
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(1,)))
-        _bx = T.cuda.block_idx("x")
-        _tx = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(1,)))
+        _bx = T.maca.block_idx("x")
+        _tx = T.maca.thread_idx("x")
         buf = T.alloc_local([N], dtype, layout="default")
         for i in T.serial(N):
             buf[i] = A[i]
-        T.cuda.tile.fma(buf[0:N], buf[0:N], T.float32(scale_val), T.float32(bias_val))
+        T.maca.tile.fma(buf[0:N], buf[0:N], T.float32(scale_val), T.float32(bias_val))
         for i in T.serial(N):
             A[i] = buf[i]
 
@@ -316,13 +317,13 @@ def test_sub_tensor_tensor_rounding():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_fma_warpgroup_wg_local_layout():
     rows, cols = 256, 8
     dtype = "float32"
     scale_val = 1.5
     bias_val = -0.25
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
 
     @T.function
     def test_func(
@@ -331,11 +332,17 @@ def test_fma_warpgroup_wg_local_layout():
     ) -> None:
         T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=1 * 128))
         _bx = T.cuda.block_idx("x")
-        wg_id = T.cuda.warpgroup_id()
         tid = T.cuda.thread_in_warpgroup()
 
         reg = T.alloc_tensor(
-            ty_args=[T.Tensor((rows, cols), dtype, scope="local", layout=wg_local_layout(cols))]
+            ty_args=[
+                T.Tensor(
+                    (rows, cols),
+                    dtype,
+                    scope="local",
+                    layout=wg_local_layout(cols),
+                )
+            ]
         )
         reg_row = reg.local(cols)
         for i in T.serial(cols):
@@ -353,7 +360,7 @@ def test_fma_warpgroup_wg_local_layout():
         mod = tvm.tirx.compile(mod, target=target, pipeline="tirx")
 
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A_dev = tvm.runtime.tensor(A_np, dev)
             B_dev = tvm.runtime.tensor(B_np, dev)
             mod(A_dev, B_dev)

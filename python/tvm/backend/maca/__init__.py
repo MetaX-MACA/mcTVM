@@ -23,6 +23,8 @@ from tvm_ffi.libinfo import load_lib_ctypes
 
 from tvm.base import _LOADED_LIBS
 
+from .backend_config import BackendConfig
+
 _LAZY_SUBMODULES = {"intrinsics", "launch", "op", "script", "tile"}
 
 
@@ -92,6 +94,7 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "BackendConfig",
     "intrinsics",
     "launch",
     "op",

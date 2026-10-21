@@ -24,7 +24,35 @@ from tvm.ir import Expr, PrimType
 from tvm.ir.prim import IntImm
 from tvm.script.ir_builder.stmt import _as_expr
 
-_DYNAMIC_SMEM_TAG = "tirx.use_dyn_shared_memory"
+
+@dataclass(frozen=True, kw_only=True)
+class KernelAttributes:
+    """Compile-time kernel attributes supported by the MACA backend."""
+
+    _config_type: ClassVar[str] = "MacaKernelAttributes"
+    min_blocks_per_sm: Any = None
+
+    def __post_init__(self):
+        if self.min_blocks_per_sm is None:
+            return
+        value = self.min_blocks_per_sm
+        if isinstance(value, bool) or not isinstance(value, Integral | IntImm):
+            raise TypeError("min_blocks_per_sm must be a compile-time integer")
+        if int(value) <= 0:
+            raise ValueError("min_blocks_per_sm must be positive")
+
+
+def pack_kernel_attrs(kernel_attrs: KernelAttributes | None, launch: "LaunchConfig"):
+    """Pack compile-time MACA kernel attributes for the device-entry region."""
+    if kernel_attrs is None:
+        return {}
+    if getattr(kernel_attrs, "_config_type", None) != "MacaKernelAttributes":
+        raise TypeError("kernel_attrs must be a MACA KernelAttributes")
+    if kernel_attrs.min_blocks_per_sm is None:
+        return {}
+    if any(not isinstance(dimension, Integral | IntImm) for dimension in launch.block):
+        raise ValueError("min_blocks_per_sm requires static block dimensions")
+    return {"min_blocks_per_sm": int(kernel_attrs.min_blocks_per_sm)}
 
 
 def _scalar(value: Any, name: str, *, allow_zero: bool = False):
@@ -94,19 +122,19 @@ class LaunchConfig:
 
 
 def pack_launch(config: LaunchConfig):
-    """Convert configuration to the existing MACA runtime launch-argument ABI."""
+    """Return launch field names and their ordinary IR value operands."""
     if getattr(config, "_config_type", None) != "MacaLaunchConfig":
         raise TypeError("launch must be a MACA LaunchConfig")
     fields, values = [], []
-    for name, dimensions in (("blockIdx", config.grid), ("threadIdx", config.block)):
+    for name, dimensions in (("grid", config.grid), ("block", config.block)):
         padded = dimensions + (1,) * (3 - len(dimensions))
         for axis, extent in zip("xyz", padded, strict=True):
             fields.append(f"{name}.{axis}")
             values.append(_as_expr(extent))
     if config.dynamic_smem_bytes is not None:
-        fields.append(_DYNAMIC_SMEM_TAG)
+        fields.append("dynamic_smem_bytes")
         values.append(_as_expr(config.dynamic_smem_bytes))
     return fields, values
 
 
-__all__ = ["LaunchConfig", "pack_launch"]
+__all__ = ["KernelAttributes", "LaunchConfig", "pack_kernel_attrs", "pack_launch"]

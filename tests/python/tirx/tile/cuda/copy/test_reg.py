@@ -15,11 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=missing-function-docstring
-"""Round-trip tests for the ``vec_auto`` register copy path.
+"""Round-trip tests for target-specific register copy paths.
 
 R = per-thread local (register). The dispatch handles round-trips between R
 and any non-R tensor (``shared*`` or ``global``); ``non_r_scope`` parametrize
-toggles which side is exercised.
+toggles which side is exercised.  The generic MACA cases use scalar lowering,
+while CUDA-only cases below retain the ``vec_auto`` coverage.
 
 Self-contained: each thread direct-stores its row into the non-R tensor (no
 G2S / G2L dispatch needed because each thread writes its own address), the
@@ -61,7 +62,11 @@ def _build_roundtrip_kernel(scope, n_threads, k, dtype, non_r_scope):
     """
     shape = (n_threads, k)
     full_slices = (slice(0, n_threads), slice(0, k))
-    r_layout = _r_layout(scope, shape)
+    # MACA's scalar copy path distributes a logical region by execution scope;
+    # keep the local buffer itself trivial so direct initialization and output
+    # reads remain valid for every scope.  The gapped-layout case below covers
+    # non-trivial register storage separately.
+    r_layout = TileLayout(S[shape])
 
     if non_r_scope == "shared":
         s_layout = TileLayout(S[shape])
@@ -231,13 +236,11 @@ def _expected(shape, dtype):
 @pytest.mark.parametrize(
     "scope,n_threads,k",
     [
-        ("warpgroup", 256, 16),
-        ("warpgroup", 256, 32),
-        ("warpgroup", 256, 8),
-        ("warp", 64, 8),
-        ("warp", 64, 16),
-        ("cta", 256, 8),
-        ("cta", 256, 16),
+        # Keep the local allocation below MACA's per-thread private-memory
+        # limit while still covering a two-wave block for warpgroup/cta.
+        ("warpgroup", 128, 4),
+        ("warp", 128, 4),
+        ("cta", 128, 4),
     ],
 )
 @pytest.mark.parametrize("dtype", ["float16", "float32", "uint8"])
@@ -269,7 +272,7 @@ def test_reg_roundtrip(scope, n_threads, k, dtype, non_r_scope):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 def test_reg_roundtrip_gapped_permuted_storage():
     """Forced reg dispatch addresses sparse register layouts by physical offset."""
     shape = (32, 2, 2)
@@ -290,20 +293,21 @@ def test_reg_roundtrip_gapped_permuted_storage():
         T.cuda.tile.st(B, reg, scope='warp')
         # fmt: on
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         compiled = tvm.tirx.compile(
             tvm.IRModule({"main": kernel}), target=target, pipeline="tirx"
         )
     source = compiled.mod.imports[0].inspect_source()
-    assert "tvm_builtin_copy_32b" in source
+    assert "tvm_builtin_ptx_ld" in source
+    assert "tvm_builtin_ptx_st" in source
 
     rng = np.random.default_rng(0)
     A_np = rng.random(shape, dtype=np.float32)
     B_np = np.zeros(shape, dtype=np.float32)
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         A = tvm.runtime.tensor(A_np, dev)
         B = tvm.runtime.tensor(B_np, dev)
         compiled(A, B)
@@ -334,7 +338,7 @@ def test_reg_roundtrip_gapped_permuted_storage():
     ],
 )
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 @pytest.mark.parametrize(
     "dtype", ["int8", "float8_e4m3fn", "float8_e5m2", "float16", "bfloat16", "float32"]
 )
@@ -356,7 +360,7 @@ def test_copy_g2l_l2g_vec_load(task, dtype):
         T.cuda.tile.st(B[r_gmem], A_local[r_lmem])
 
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": copy_sync})
         mod = tvm.tirx.compile(mod, target=target, pipeline="tirx")
@@ -368,11 +372,11 @@ def test_copy_g2l_l2g_vec_load(task, dtype):
         B_ref[r_gmem] = A_np[r_gmem]
 
         def run_and_check():
-            dev = tvm.maca(0)
+            dev = tvm.cuda(0)
             A = tvm.runtime.tensor(A_np, dev)
             B = tvm.runtime.tensor(B_np, dev)
             mod(A, B)
-            np.testing.assert_allclose(B_ref.astype("float32"), B.numpy().astype("float32"))
+            np.testing.assert_allclose(B_ref, B.numpy())
 
         tvm.testing.run_with_gpu_lock(run_and_check)
 
@@ -408,6 +412,7 @@ def _plain_strided_reg_copy(src: T.Tensor((1024,), "int32", layout="default")) -
                 T.evaluate(dst[i, j])
 
 
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_vec_auto_reg_honors_cache_nc():
     target = tvm.target.Target("cuda")
 
@@ -432,8 +437,7 @@ def test_vec_auto_reg_honors_cache_nc():
     assert "ld.global.nc.v4.u32" not in plain_src, "no cache hint must NOT be nc"
 
 
-@pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_reg_copy_linear_shared_hoists_thread_base():
     """A linear R→S copy must keep its per-thread base outside the hot loop."""
     from tvm.backend.cuda.layout import wg_local_layout
@@ -499,11 +503,11 @@ def test_reg_copy_linear_shared_hoists_thread_base():
     assert "st.shared.v4.u32" in src
 
 
-@pytest.mark.gpu
+@pytest.mark.skipif(not env.has_cuda(), reason="need cuda")
 def test_reg_copy_wg_local_to_swizzled_shared_uses_structured_compose_apply():
     """Regression: R→S copy where R has a ``wg_local_layout`` (thread iter
-    ``1 @ tid_in_wg``) must pick MACA's widest 128-bit copy and lower its
-    synthetic TileLayout through structured ComposeLayout apply.
+    ``1 @ tid_in_wg``) must pick the widest vec PTX ``st.shared.v4`` and lower
+    its synthetic TileLayout through structured ComposeLayout apply.
 
     Two distinct properties are covered:
 
@@ -520,7 +524,7 @@ def test_reg_copy_wg_local_to_swizzled_shared_uses_structured_compose_apply():
     from tvm.backend.cuda.layout import wg_local_layout
     from tvm.tirx.layout import ComposeLayout
 
-    N_THREADS, EPI_N = 256, 64
+    N_THREADS, EPI_N = 128, 64
     g_shape = (N_THREADS, EPI_N)
     g_layout = TileLayout(S[g_shape])
     # 128b swizzle on the SMEM side (per_element=3 ⇒ 8 fp16 atom width).
@@ -531,8 +535,8 @@ def test_reg_copy_wg_local_to_swizzled_shared_uses_structured_compose_apply():
         A: T.Tensor(g_shape, "float16", layout=g_layout),
         B: T.Tensor(g_shape, "float16", layout=g_layout),
     ) -> None:
-        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(N_THREADS,)))
-        tid = T.maca.thread_in_warpgroup()
+        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(N_THREADS,)))
+        tid = T.cuda.thread_in_warpgroup()
         reg = T.alloc_tensor(
             ty_args=[T.Tensor(g_shape, "float16", scope="local", layout=wg_local_layout(EPI_N))]
         )
@@ -545,31 +549,36 @@ def test_reg_copy_wg_local_to_swizzled_shared_uses_structured_compose_apply():
         reg_local = reg.local(EPI_N)
         for i in T.serial(EPI_N):
             reg_local[i] = A[tid, i]
-        T.maca.tile.st(smem, reg, scope="warpgroup")
-        T.maca.cta_sync()
+        T.cuda.tile.st(smem, reg, scope="warpgroup")
+        T.cuda.cta_sync()
         for i in T.serial(EPI_N):
             B[tid, i] = smem[tid, i]
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": kernel})
         ex = tvm.tirx.compile(mod, target=target, pipeline="tirx")
         src = ex.mod.imports[0].inspect_source()
 
     # (1) Widest variant: 8 fp16 elements per call (16 bytes → v4.u32 st).
-    assert "tvm_builtin_copy_128b" in src, (
-        "expected the widest MACA copy helper; vector-width selection fell back"
+    assert 'asm volatile("st.' in src, (
+        "expected PTX st in generated CUDA, alignment check fell back to a narrower variant"
+    )
+    assert "st.shared.v4" in src, "expected 128b vector store (st.shared.v4.u32)"
+    assert "tvm_builtin_copy_" not in src, (
+        "copy_xxb helpers appeared — reg dispatch should use PTX ld/st only"
     )
     # (2) Structured address fingerprint: tid contributes one atom-aligned
     # add, while the bounded outer coordinate is XORed with the phase.
     s_off_lines = [
         line for line in src.splitlines() if line.strip().startswith("int s_off") and " = " in line
     ]
-    assert len(s_ptr_lines) == 1
-    assert "s_off[0]" in s_ptr_lines[0]
-    s_off_lines = [line for line in src.splitlines() if "s_off[0] =" in line]
     assert len(s_off_lines) == 1
-    assert "^" in s_off_lines[0] and "f * 8" in s_off_lines[0]
+    assert "^" in s_off_lines[0]
+    assert "* 64" in s_off_lines[0] and "f * 8" in s_off_lines[0]
+    assert "/" not in s_off_lines[0] and "%" not in s_off_lines[0], (
+        "structured hot-loop offset must not contain full quotient/mod decomposition"
+    )
 
 
 @pytest.mark.gpu
@@ -609,11 +618,11 @@ def test_ptx_st_from_src_f32_vector_preserves_values():
 def test_mov_handles_scalar_regions():
     @T.function
     def kernel(B: T.Tensor((1,), "float32")) -> None:
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(1,)))
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(1,)))
         src = T.alloc_local((1,), "float32", layout="default")
         dst = T.alloc_local((4,), "float32", layout="default")
         src[0] = T.cast(7, "float32")
-        T.cuda.tile.mov(dst[2:3], src[:])
+        T.maca.tile.mov(dst[2:3], src[:])
         B[0] = dst[2]
 
     target = tvm.target.Target("maca")
@@ -622,7 +631,7 @@ def test_mov_handles_scalar_regions():
         ex = tvm.tirx.compile(mod, target=target, pipeline="tirx")
         src = ex.mod.imports[0].inspect_source()
 
-    assert "dst[2] = src[0];" in src
+    assert "dst_ptr[2] = src_ptr[0];" in src
 
 
 @pytest.mark.gpu
@@ -716,7 +725,7 @@ def test_copy_forced_vec_dynamic_swizzled_shared_uses_vector_ptx():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_maca(), reason="need maca")
+@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
 def test_copy_explicit_vec_auto_uses_auto_family():
     @T.function
     def kernel(B: T.Tensor((4,), "float32")) -> None:
@@ -730,37 +739,38 @@ def test_copy_explicit_vec_auto_uses_auto_family():
         )
         for i in range(4):
             reg[i] = T.cast(i + 1, "float32")
-        T.maca.tile.st(smem[:], reg[:])
-        T.maca.cta_sync()
-        T.maca.tile.ld(out[:], smem[:])
+        T.cuda.tile.st(smem[:], reg[:])
+        T.cuda.cta_sync()
+        T.cuda.tile.ld(out[:], smem[:])
         for i in range(4):
             B[i] = out[i]
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": kernel})
         ex = tvm.tirx.compile(mod, target=target, pipeline="tirx")
         src = ex.mod.imports[0].inspect_source()
 
-    assert "copy/fallback" not in src
-    assert "tvm_builtin_copy_128b" in src
+    assert "tvm_builtin_copy_" not in src
+    assert "st.shared.v4.u32" in src
+    assert "ld.shared.v4.u32" in src
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not env.has_cuda_compute(9), reason="need cuda compute >= 9.0")
+@pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_copy_forced_vec_rejects_size_mismatch():
     @T.function
     def kernel(B: T.Tensor((4,), "float32")) -> None:
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(1,)))
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(1,)))
         smem = T.alloc_tensor(ty_args=[T.Tensor((4,), "float32", scope="shared", layout="default")])
         reg = T.alloc_local((4,), "float32", layout="default")
-        T.cuda.tile.st(smem[:], reg[:], vec_bits=64)
+        T.maca.tile.st(smem[:], reg[:], vec_bits=64)
         B[0] = T.cast(0, "float32")
 
     target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
-        with pytest.raises(RuntimeError, match="src region does not contain exactly 2 elements"):
+        with pytest.raises(RuntimeError, match="one exact-width transaction per thread"):
             tvm.tirx.compile(mod, target=target, pipeline="tirx")
 
 
@@ -781,7 +791,7 @@ def test_copy_forced_vec_rejects_non_thread_scope():
     target = tvm.target.Target("maca")
     with target:
         mod = tvm.IRModule({"main": kernel})
-        with pytest.raises(RuntimeError, match="expected thread exec_scope"):
+        with pytest.raises(RuntimeError, match="one exact-width transaction per thread"):
             tvm.tirx.compile(mod, target=target, pipeline="tirx")
 
 
@@ -830,7 +840,7 @@ def _eval_const_layout_expr(expr, values):
 @pytest.mark.parametrize("case", ["wg", "wg_slice", "tcgen05"])
 def test_reg_synthetic_tile_matches_thread_base_plus_outer_delta(case):
     from tvm.backend.cuda.layout import wg_local_layout
-    from tvm.backend.maca.tile.copy.vec_auto_reg import (
+    from tvm.backend.cuda.tile.copy.vec_auto_reg import (
         _build_atoms,
         _build_s_apply_layout,
         _choose_vec_len,
@@ -847,14 +857,13 @@ def test_reg_synthetic_tile_matches_thread_base_plus_outer_delta(case):
     from tvm.tirx.tile import DispatchContext
 
     if case in ("wg", "wg_slice"):
-        shape = [256, 64]
-        region = [(0, 256), (0, 64) if case == "wg" else (8, 40)]
+        shape = [128, 64]
+        region = [(0, 128), (0, 64) if case == "wg" else (8, 40)]
         r_layout = wg_local_layout(64)
         s_layout = ComposeLayout(3, 3, 3, TileLayout(S[(512,)]))
         elem_bits = 16
-        expected_thread_extents = [256]
+        expected_thread_extents = [128]
     else:
-        pytest.skip("MACA does not support TCGEN05")
         from tvm.backend.cuda.layout import tcgen05_atom_layout
         from tvm.tirx.cuda.tile.tma_utils import mma_shared_layout
 
@@ -865,7 +874,7 @@ def test_reg_synthetic_tile_matches_thread_base_plus_outer_delta(case):
         elem_bits = 32
         expected_thread_extents = [4, 8, 4]
 
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         r_p, s_p, s_seps, r_perm = align_layouts_raw(
             r_layout.slice(shape, region), s_layout.slice(shape, region), region
@@ -902,7 +911,7 @@ def test_reg_synthetic_tile_matches_thread_base_plus_outer_delta(case):
     )
     placeholder = next(iter(placeholders.values()))
     analyzer = Analyzer()
-    for tid in range(256):
+    for tid in range(128):
         value_map = {placeholder: tvm.tirx.IntImm("int32", tid)}
         for f in range(int(apply_shape[-1])):
             ds, _dr = _outer_const_offsets(outer, f)
@@ -980,7 +989,7 @@ def _build_tcgen05_d_epilogue_deposit():
 
 
 def _compile_tcgen05_d_epilogue_deposit():
-    target = tvm.target.Target("maca")
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": _build_tcgen05_d_epilogue_deposit()})
         return tvm.tirx.compile(mod, target=target, pipeline="tirx")
@@ -993,7 +1002,7 @@ def test_reg_copy_tcgen05_d_epilogue_deposit_layout_pairing():
     ``d_reg``: ``(64,64)`` fp32 ``tcgen05_atom_layout("16x256b", ...)``.
     ``smem_cd_mma``: ``(64,64)`` fp32 ``mma_shared_layout(..., swizzle=128B)``.
     """
-    from tvm.backend.maca.tile.copy.vec_auto_reg import (
+    from tvm.backend.cuda.tile.copy.vec_auto_reg import (
         _split_thread_loop,
         align_layouts_raw,
     )
@@ -1003,12 +1012,12 @@ def test_reg_copy_tcgen05_d_epilogue_deposit_layout_pairing():
     m, n, reg_layout, smem_layout = _tcgen05_d_epilogue_layouts()
     region = [(0, m), (0, n)]
     sctx = DispatchContext(
-        tvm.target.Target("maca"), ExecScope("maca", "warpgroup"), {}, {}, scope_kind="warpgroup"
+        tvm.target.Target("cuda"), ExecScope("cuda", "warpgroup"), {}, {}, scope_kind="warpgroup"
     )
     with sctx.target:
-        r_p, s_p, s_seps, r_perm = align_layouts_raw(
-            reg_layout, [m, n], region, smem_layout, [m, n], region
-        )
+        r_sliced = reg_layout.slice([m, n], region)
+        s_sliced = smem_layout.slice([m, n], region)
+        r_p, s_p, s_seps, r_perm = align_layouts_raw(r_sliced, s_sliced, region)
 
     r_iters, s_groups = _split_thread_loop(r_perm, s_p, s_seps)
     r_iters_bug, s_groups_bug = _split_thread_loop(r_p, s_p, s_seps)
@@ -1133,7 +1142,7 @@ def test_reg_copy_tcgen05_d_epilogue_deposit_gpu():
     b_np = np.zeros((m, n), dtype=np.float32)
 
     def run_and_check():
-        dev = tvm.maca(0)
+        dev = tvm.cuda(0)
         a = tvm.runtime.tensor(a_np, dev)
         b = tvm.runtime.tensor(b_np, dev)
         mod(a, b)

@@ -56,7 +56,7 @@ def test_cta_sum_4_warps():
         warp_id = T.maca.warp_id()
         lane_id = T.maca.lane_id()
         tid = T.maca.thread_idx('x')
-        scratch = T.alloc_tensor(ty_args=[T.Tensor((NUM_WARPS,), "float32", scope="shared")])
+        scratch = T.alloc_tensor(ty_args=[T.Tensor((NUM_WAVES,), "float32", scope="shared")])
         val: T.f32 = T.float32(tid + 1)
         val = T.maca.cta_sum(val, NUM_WAVES, scratch.ptr_to([0]))
         out[tid] = val
@@ -84,7 +84,7 @@ def test_cta_sum_8_warps():
         warp_id = T.maca.warp_id()
         lane_id = T.maca.lane_id()
         tid = T.maca.thread_idx('x')
-        scratch = T.alloc_tensor(ty_args=[T.Tensor((NUM_WARPS,), "float32", scope="shared")])
+        scratch = T.alloc_tensor(ty_args=[T.Tensor((NUM_WAVES,), "float32", scope="shared")])
         val: T.f32 = T.float32(tid + 1)
         val = T.maca.cta_sum(val, NUM_WAVES, scratch.ptr_to([0]))
         out[tid] = val
@@ -111,7 +111,7 @@ def test_cta_max_4_warps():
         warp_id = T.maca.warp_id()
         lane_id = T.maca.lane_id()
         tid = T.maca.thread_idx('x')
-        scratch = T.alloc_tensor(ty_args=[T.Tensor((NUM_WARPS,), "float32", scope="shared")])
+        scratch = T.alloc_tensor(ty_args=[T.Tensor((NUM_WAVES,), "float32", scope="shared")])
         val: T.f32 = T.float32(tid + 1)
         val = T.maca.cta_max(val, NUM_WAVES, scratch.ptr_to([0]))
         out[tid] = val
@@ -137,7 +137,7 @@ def test_cta_min_4_warps():
         warp_id = T.maca.warp_id()
         lane_id = T.maca.lane_id()
         tid = T.maca.thread_idx('x')
-        scratch = T.alloc_tensor(ty_args=[T.Tensor((NUM_WARPS,), "float32", scope="shared")])
+        scratch = T.alloc_tensor(ty_args=[T.Tensor((NUM_WAVES,), "float32", scope="shared")])
         val: T.f32 = T.float32(tid + 1)
         val = T.maca.cta_min(val, NUM_WAVES, scratch.ptr_to([0]))
         out[tid] = val
@@ -163,7 +163,7 @@ def test_cta_sum_1_warp():
         warp_id = T.maca.warp_id()
         lane_id = T.maca.lane_id()
         tid = T.maca.thread_idx('x')
-        scratch = T.alloc_tensor(ty_args=[T.Tensor((NUM_WARPS,), "float32", scope="shared")])
+        scratch = T.alloc_tensor(ty_args=[T.Tensor((NUM_WAVES,), "float32", scope="shared")])
         val: T.f32 = T.float32(tid + 1)
         val = T.maca.cta_sum(val, NUM_WAVES, scratch.ptr_to([0]))
         out[tid] = val

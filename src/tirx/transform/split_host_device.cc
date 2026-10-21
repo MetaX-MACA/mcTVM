@@ -57,6 +57,24 @@ namespace tirx {
 namespace {
 static ffi::Array<Var> RegionNoBodyParams(const CallNode*) { return {}; }
 
+// MACA exposes named configuration fields in IR and keeps the existing runtime ABI.
+ffi::Array<ffi::String> MacaRuntimeLaunchTags(const ffi::Array<ffi::String>& fields) {
+  ffi::Array<ffi::String> tags;
+  for (const auto& value : fields) {
+    std::string field(value);
+    if (field.rfind("grid.", 0) == 0) {
+      tags.push_back("blockIdx." + field.substr(5));
+    } else if (field.rfind("block.", 0) == 0) {
+      tags.push_back("threadIdx." + field.substr(6));
+    } else {
+      TVM_FFI_CHECK(field == "dynamic_smem_bytes", ValueError)
+          << "Unsupported MACA launch parameter: " << field;
+      tags.push_back(tvm::runtime::launch_param::kUseDynamicSharedMemoryTag);
+    }
+  }
+  return tags;
+}
+
 void ValidateDeviceScopeRegion(const RegionStmtNode* region) {
   TVM_FFI_CHECK(region->result_vars.empty(), ValueError)
       << region->op->name << " expects no results";
@@ -381,10 +399,8 @@ class DeviceInfoCollector : public StmtExprVisitor {
       return collector->info_;
     }
 
-    // A MACA native launch carries its ordered runtime ABI tags separately
-    // from the CUDA launch-field schema.  Visit the body so dynamic shared
-    // memory requirements are still inferred, then retain the explicit MACA
-    // tags as the function's launch metadata.
+    // Infer shared-memory requirements and translate MACA configuration fields
+    // to the ordered launch tags consumed by its runtime.
     if (auto requested =
             func->GetAttr<ffi::Array<ffi::String>>(tvm::backend::maca::attr::kLaunchFields)) {
       collector->Visit(func->body);
@@ -396,7 +412,7 @@ class DeviceInfoCollector : public StmtExprVisitor {
                "its size; use LaunchConfig.dynamic_smem_bytes or SMEMPool.commit().";
         collector->dyn_shmem_size = collector->inferred_shmem_size_;
       }
-      collector->info_.launch_params = requested.value();
+      collector->info_.launch_params = MacaRuntimeLaunchTags(requested.value());
       collector->info_.global_symbol =
           func->GetAttr<ffi::String>(tvm::attr::kGlobalSymbol).value_or(gvar->name_hint);
       collector->info_.dynamic_smem_requirement = collector->dyn_shmem_size;
@@ -700,7 +716,22 @@ Stmt MakeMacaKernelLaunch(const GlobalVar& symbol, Function* func, ffi::Array<Ex
                           const RegionStmtNode* region) {
   auto fields = region->attrs->dict.at(tvm::backend::maca::attr::kLaunchFields)
                     .as_or_throw<ffi::Array<ffi::String>>();
+  auto kernel_attrs = region->attrs->dict.at(tvm::backend::maca::attr::kKernelAttrs)
+                          .as_or_throw<ffi::Map<ffi::String, int64_t>>();
   ffi::Array<Expr> values = region->args;
+  ffi::Array<PrimExpr> dimensions;
+  for (char axis : {'x', 'y', 'z'}) {
+    PrimExpr dimension = IntImm::Int32(1);
+    for (size_t i = 0; i < fields.size(); ++i) {
+      if (fields[i] == std::string("block.") + axis) {
+        sym::Analyzer analyzer;
+        PrimExpr value = analyzer->Simplify(values[i].as_or_throw<PrimExpr>());
+        // Zero denotes a dynamic dimension; do not emit static launch bounds for it.
+        dimension = value.as<IntImmNode>() ? value : IntImm::Int32(0);
+      }
+    }
+    dimensions.push_back(dimension);
+  }
   auto info = DeviceInfoCollector::Collect(symbol, *func, true);
   ffi::Array<Stmt> host_stmts;
   if (auto required = info.dynamic_smem_requirement) {
@@ -708,7 +739,7 @@ Stmt MakeMacaKernelLaunch(const GlobalVar& symbol, Function* func, ffi::Array<Ex
     auto bytes = analyzer->Simplify(required.value());
     int index = -1;
     for (size_t i = 0; i < fields.size(); ++i) {
-      if (fields[i] == tvm::runtime::launch_param::kUseDynamicSharedMemoryTag) {
+      if (fields[i] == "dynamic_smem_bytes") {
         index = static_cast<int>(i);
         break;
       }
@@ -716,7 +747,7 @@ Stmt MakeMacaKernelLaunch(const GlobalVar& symbol, Function* func, ffi::Array<Ex
     if (index < 0) {
       TVM_FFI_CHECK(!prim::IsZero(bytes), ValueError)
           << "A shared.dyn placeholder requires LaunchConfig.dynamic_smem_bytes";
-      fields.push_back(tvm::runtime::launch_param::kUseDynamicSharedMemoryTag);
+      fields.push_back("dynamic_smem_bytes");
       values.push_back(bytes);
     } else {
       auto available = values[index].as_or_throw<PrimExpr>();
@@ -731,16 +762,17 @@ Stmt MakeMacaKernelLaunch(const GlobalVar& symbol, Function* func, ffi::Array<Ex
     }
   }
 
-  // MACA's runtime consumes the same ordered legacy launch tags as the CUDA
-  // runtime wrapper.  Keep the tags on the kernel function because MACA does
-  // not use the CUDA-only launch-field metadata.
+  // Keep named configuration fields distinct from MACA's runtime ABI tags.
+  auto launch_tags = MacaRuntimeLaunchTags(fields);
   *func =
       WithAttrs(std::move(*func), {{tvm::attr::kCallingConv, tvm::CallingConv::kDeviceKernelLaunch},
                                    {tvm::attr::kGlobalSymbol, symbol->name_hint},
                                    {tvm::backend::maca::attr::kLaunchFields, fields},
-                                   {tvm::tirx::attr::kKernelLaunchParams, fields}});
+                                   {tvm::backend::maca::attr::kLaunchDimensions, dimensions},
+                                   {tvm::backend::maca::attr::kKernelAttrs, kernel_attrs},
+                                   {tvm::tirx::attr::kKernelLaunchParams, launch_tags}});
   auto attrs = ffi::make_object<CallFFIKernelAttr>();
-  attrs->launch_params = fields;
+  attrs->launch_params = launch_tags;
   attrs->num_kernel_args = args.size();
   ffi::Array<Expr> call_args{StringImm(symbol->name_hint)};
   call_args.insert(call_args.end(), args.begin(), args.end());

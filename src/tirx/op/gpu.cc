@@ -235,7 +235,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
           sig::arg<IntExpr>("index", "The index."), sig::arg("buffer_ptr", "The buffer pointer."),
           sig::arg<IntExpr>("stride", "The stride."), sig::arg("layout", "The layout."))
       .set_attr<TCallEffectKind>(tvm::op_attr::kCallEffectKind,
-                                 static_cast<int64_t>(CallEffectKind::kReadState));
+                                 static_cast<int64_t>(CallEffectKind::kOpaque));
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {

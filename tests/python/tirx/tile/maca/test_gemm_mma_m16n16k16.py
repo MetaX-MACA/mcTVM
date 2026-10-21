@@ -36,7 +36,6 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tirx as T
-from tvm.script.tirx import tile as Tx
 from tvm.testing import env
 from tvm.tirx.layout import Axis, R, S, TileLayout
 
@@ -105,6 +104,10 @@ def _transpose_frag(layout, shape):
     return grouped.permute_by_groups(seps, [1, 0])
 
 
+def _gemm(D, A, B, C, **kwargs):
+    return T.maca.tile.gemm(D, A, B, C, scope="warp", **kwargs)
+
+
 # Transposed input orientations of the same single tile: A as [K, M], B as
 # [N, K]. The dispatch swaps axes per the transpose flags; the .row.col mma is
 # unchanged.
@@ -146,17 +149,15 @@ def _build_tiled(Mt, Nt, Kt, kinst, *, alpha=1.0, beta=0.0, dtype="float16"):
     Dl, Al, Bl = _frag(Mt, Nt, Kt, kinst)
     M, N, K = MMA_M * Mt, MMA_N * Nt, MMA_K * Kt
 
-    @T.prim_func
+    @T.function
     def gemm():
-        T.device_entry()
-        _cta = T.cta_id([1])
-        _wave = T.warp_id([1])
-        _lane = T.lane_id([WAVE_SIZE])
-        A = T.alloc_buffer((M, K), dtype, scope="local", layout=Al)
-        B = T.alloc_buffer((K, N), dtype, scope="local", layout=Bl)
-        C = T.alloc_buffer((M, N), "float32", scope="local", layout=Dl)
-        D = T.alloc_buffer((M, N), "float32", scope="local", layout=Dl)
-        Tx.warp.gemm(D, A, B, C, transpose_A=False, transpose_B=False, alpha=alpha, beta=beta)
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(WAVE_SIZE,)))
+        _lane = T.maca.lane_id()
+        A = T.alloc_tensor(ty_args=[T.Tensor((M, K), dtype, scope="local", layout=Al)])
+        B = T.alloc_tensor(ty_args=[T.Tensor((K, N), dtype, scope="local", layout=Bl)])
+        C = T.alloc_tensor(ty_args=[T.Tensor((M, N), "float32", scope="local", layout=Dl)])
+        D = T.alloc_tensor(ty_args=[T.Tensor((M, N), "float32", scope="local", layout=Dl)])
+        _gemm(D, A, B, C, transpose_A=False, transpose_B=False, alpha=alpha, beta=beta)
 
     return gemm
 
@@ -164,17 +165,15 @@ def _build_tiled(Mt, Nt, Kt, kinst, *, alpha=1.0, beta=0.0, dtype="float16"):
 def _build_dtypes(a_dtype, b_dtype, c_dtype, d_dtype):
     """Build a single tile with explicit operand dtypes for decline checks."""
 
-    @T.prim_func
+    @T.function
     def gemm():
-        T.device_entry()
-        _cta = T.cta_id([1])
-        _wave = T.warp_id([1])
-        _lane = T.lane_id([WAVE_SIZE])
-        A = T.alloc_buffer((MMA_M, MMA_K), a_dtype, scope="local", layout=A_FRAG)
-        B = T.alloc_buffer((MMA_K, MMA_N), b_dtype, scope="local", layout=B_FRAG)
-        C = T.alloc_buffer((MMA_M, MMA_N), c_dtype, scope="local", layout=D_FRAG)
-        D = T.alloc_buffer((MMA_M, MMA_N), d_dtype, scope="local", layout=D_FRAG)
-        Tx.warp.gemm(D, A, B, C, transpose_A=False, transpose_B=False, alpha=1.0, beta=0.0)
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(WAVE_SIZE,)))
+        _lane = T.maca.lane_id()
+        A = T.alloc_tensor(ty_args=[T.Tensor((MMA_M, MMA_K), a_dtype, scope="local", layout=A_FRAG)])
+        B = T.alloc_tensor(ty_args=[T.Tensor((MMA_K, MMA_N), b_dtype, scope="local", layout=B_FRAG)])
+        C = T.alloc_tensor(ty_args=[T.Tensor((MMA_M, MMA_N), c_dtype, scope="local", layout=D_FRAG)])
+        D = T.alloc_tensor(ty_args=[T.Tensor((MMA_M, MMA_N), d_dtype, scope="local", layout=D_FRAG)])
+        _gemm(D, A, B, C, transpose_A=False, transpose_B=False, alpha=1.0, beta=0.0)
 
     return gemm
 
@@ -204,17 +203,15 @@ def _build_signature_gemm(family, precision=_DEFAULT_PRECISION):
     if precision is _DEFAULT_PRECISION:
         precision = "tf32" if family == "tf32_f32" else None
 
-    @T.prim_func
+    @T.function
     def gemm():
-        T.device_entry()
-        _cta = T.cta_id([1])
-        _wave = T.warp_id([1])
-        _lane = T.lane_id([WAVE_SIZE])
-        A = T.alloc_buffer((MMA_M, reduction), dtype, scope="local", layout=a_layout)
-        B = T.alloc_buffer((reduction, MMA_N), dtype, scope="local", layout=b_layout)
-        C = T.alloc_buffer((MMA_M, MMA_N), acc, scope="local", layout=d_layout)
-        D = T.alloc_buffer((MMA_M, MMA_N), acc, scope="local", layout=d_layout)
-        Tx.warp.gemm(
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(WAVE_SIZE,)))
+        _lane = T.maca.lane_id()
+        A = T.alloc_tensor(ty_args=[T.Tensor((MMA_M, reduction), dtype, scope="local", layout=a_layout)])
+        B = T.alloc_tensor(ty_args=[T.Tensor((reduction, MMA_N), dtype, scope="local", layout=b_layout)])
+        C = T.alloc_tensor(ty_args=[T.Tensor((MMA_M, MMA_N), acc, scope="local", layout=d_layout)])
+        D = T.alloc_tensor(ty_args=[T.Tensor((MMA_M, MMA_N), acc, scope="local", layout=d_layout)])
+        _gemm(
             D,
             A,
             B,
@@ -288,18 +285,16 @@ def _build_aligned_region_slice(transpose_A, transpose_B, *, dtype="float16"):
     A_shape = (K, M) if transpose_A else (M, K)
     B_shape = (N, K) if transpose_B else (K, N)
 
-    @T.prim_func
+    @T.function
     def gemm():
-        T.device_entry()
-        _cta = T.cta_id([1])
-        _wave = T.warp_id([1])
-        _lane = T.lane_id([WAVE_SIZE])
-        A = T.alloc_buffer(A_shape, dtype, scope="local", layout=Al)
-        B = T.alloc_buffer(B_shape, dtype, scope="local", layout=Bl)
-        C = T.alloc_buffer((M, N), "float32", scope="local", layout=Dl)
-        D = T.alloc_buffer((M, N), "float32", scope="local", layout=Dl)
-        if transpose_A and transpose_B:
-            Tx.warp.gemm(
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(WAVE_SIZE,)))
+        _lane = T.maca.lane_id()
+        A = T.alloc_tensor(ty_args=[T.Tensor(A_shape, dtype, scope="local", layout=Al)])
+        B = T.alloc_tensor(ty_args=[T.Tensor(B_shape, dtype, scope="local", layout=Bl)])
+        C = T.alloc_tensor(ty_args=[T.Tensor((M, N), "float32", scope="local", layout=Dl)])
+        D = T.alloc_tensor(ty_args=[T.Tensor((M, N), "float32", scope="local", layout=Dl)])
+        if T.constexpr(transpose_A and transpose_B):
+            _gemm(
                 D[16:32, 16:32],
                 A[32:48, 16:32],
                 B[16:32, 32:48],
@@ -309,8 +304,8 @@ def _build_aligned_region_slice(transpose_A, transpose_B, *, dtype="float16"):
                 alpha=1.0,
                 beta=0.0,
             )
-        elif transpose_A:
-            Tx.warp.gemm(
+        elif T.constexpr(transpose_A):
+            _gemm(
                 D[16:32, 16:32],
                 A[32:48, 16:32],
                 B[32:48, 16:32],
@@ -320,8 +315,8 @@ def _build_aligned_region_slice(transpose_A, transpose_B, *, dtype="float16"):
                 alpha=1.0,
                 beta=0.0,
             )
-        elif transpose_B:
-            Tx.warp.gemm(
+        elif T.constexpr(transpose_B):
+            _gemm(
                 D[16:32, 16:32],
                 A[16:32, 32:48],
                 B[16:32, 32:48],
@@ -332,7 +327,7 @@ def _build_aligned_region_slice(transpose_A, transpose_B, *, dtype="float16"):
                 beta=0.0,
             )
         else:
-            Tx.warp.gemm(
+            _gemm(
                 D[16:32, 16:32],
                 A[16:32, 32:48],
                 B[32:48, 16:32],
@@ -381,43 +376,42 @@ def _build_family_numeric(family, tiles, beta, transpose, region=False, repeat=F
     host_dtype = dtype
     precision = "tf32" if family == "tf32_f32" else None
 
-    @T.prim_func
-    def gemm(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle, D_ptr: T.handle):
-        A_g = T.match_buffer(A_ptr, ashape, host_dtype)
-        B_g = T.match_buffer(B_ptr, bshape, host_dtype)
-        C_g = T.match_buffer(C_ptr, (M, N), acc)
-        D_g = T.match_buffer(D_ptr, (M, N), acc)
-        T.device_entry()
-        _cta = T.cta_id([1])
-        _wave = T.warp_id([1])
-        lane = T.lane_id([64])
-        A_f = T.alloc_buffer(ashape, dtype, scope="local", layout=Al)
-        B_f = T.alloc_buffer(bshape, dtype, scope="local", layout=Bl)
-        D_f = T.alloc_buffer((M, N), acc, scope="local", layout=Dl)
+    @T.function
+    def gemm(
+        A_g: T.Tensor(ashape, host_dtype),
+        B_g: T.Tensor(bshape, host_dtype),
+        C_g: T.Tensor((M, N), acc),
+        D_g: T.Tensor((M, N), acc),
+    ):
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(WAVE_SIZE,)))
+        lane = T.maca.lane_id()
+        A_f = T.alloc_tensor(ty_args=[T.Tensor(ashape, dtype, scope="local", layout=Al)])
+        B_f = T.alloc_tensor(ty_args=[T.Tensor(bshape, dtype, scope="local", layout=Bl)])
+        D_f = T.alloc_tensor(ty_args=[T.Tensor((M, N), acc, scope="local", layout=Dl)])
         A_l = A_f.local(pm, pk, slots)
         B_l = B_f.local(pk, pn, slots)
         D_l = D_f.local(pm, pn, dslots)
         for mi, ki, p in T.grid(pm, pk, slots):
-            k_group = 3 - lane // am if ak == 8 else lane // am
-            if ta:
+            k_group = 3 - lane // am if T.constexpr(ak == 8) else lane // am
+            if T.constexpr(ta):
                 A_l[mi, ki, p] = A_g[ki * ak + slots * k_group + p, mi * am + lane % am]
             else:
                 A_l[mi, ki, p] = A_g[mi * am + lane % am, ki * ak + slots * k_group + p]
         for ki, ni, p in T.grid(pk, pn, slots):
-            k_group = 3 - lane // an if ak == 8 else lane // an
-            if tb:
+            k_group = 3 - lane // an if T.constexpr(ak == 8) else lane // an
+            if T.constexpr(tb):
                 B_l[ki, ni, p] = B_g[ni * an + lane % an, ki * ak + slots * k_group + p]
             else:
                 B_l[ki, ni, p] = B_g[ki * ak + slots * k_group + p, ni * an + lane % an]
         for mi, ni, p in T.grid(pm, pn, dslots):
-            if acc == "float64":
+            if T.constexpr(acc == "float64"):
                 D_l[mi, ni, p] = C_g[mi * am + (lane // an) + 4 * p, ni * an + lane % an]
             else:
                 D_l[mi, ni, p] = C_g[mi * am + dslots * (lane // an) + p, ni * an + lane % an]
         for iteration in T.unroll(2 if repeat else 1):
-            if ta:
-                if tb:
-                    Tx.warp.gemm(
+            if T.constexpr(ta):
+                if T.constexpr(tb):
+                    _gemm(
                         D_f[m0:M, n0:N],
                         A_f[k0:K, m0:M],
                         B_f[n0:N, k0:K],
@@ -428,7 +422,7 @@ def _build_family_numeric(family, tiles, beta, transpose, region=False, repeat=F
                         precision=precision,
                     )
                 else:
-                    Tx.warp.gemm(
+                    _gemm(
                         D_f[m0:M, n0:N],
                         A_f[k0:K, m0:M],
                         B_f[k0:K, n0:N],
@@ -439,8 +433,8 @@ def _build_family_numeric(family, tiles, beta, transpose, region=False, repeat=F
                         precision=precision,
                     )
             else:
-                if tb:
-                    Tx.warp.gemm(
+                if T.constexpr(tb):
+                    _gemm(
                         D_f[m0:M, n0:N],
                         A_f[m0:M, k0:K],
                         B_f[n0:N, k0:K],
@@ -451,7 +445,7 @@ def _build_family_numeric(family, tiles, beta, transpose, region=False, repeat=F
                         precision=precision,
                     )
                 else:
-                    Tx.warp.gemm(
+                    _gemm(
                         D_f[m0:M, n0:N],
                         A_f[m0:M, k0:K],
                         B_f[k0:K, n0:N],
@@ -462,7 +456,7 @@ def _build_family_numeric(family, tiles, beta, transpose, region=False, repeat=F
                         precision=precision,
                     )
         for mi, ni, p in T.grid(pm, pn, dslots):
-            if acc == "float64":
+            if T.constexpr(acc == "float64"):
                 D_g[mi * am + (lane // an) + 4 * p, ni * an + lane % an] = D_l[mi, ni, p]
             else:
                 D_g[mi * am + dslots * (lane // an) + p, ni * an + lane % an] = D_l[mi, ni, p]
@@ -598,24 +592,32 @@ def _build_contract_case(case):
     extent = {"empty": 0, "bounds": 64, "overlap": 32}.get(case, 16)
     c_start = 16 if case in ("overlap", "disjoint") else 0
 
-    @T.prim_func
+    @T.function
     def gemm():
-        T.device_entry()
-        _cta = T.cta_id([1])
-        _wave = T.warp_id([1])
-        _lane = T.lane_id([WAVE_SIZE])
-        D = T.alloc_buffer((48, 16), "float32", scope="local", layout=dl)
-        A_storage = T.alloc_buffer((48, 16), "float16", scope=a_scope, layout=a_layout)
-        B_storage = T.alloc_buffer((16, 16), "float16", scope="local", layout=B_FRAG)
-        if case == "alias_a":
-            A = T.decl_buffer((48, 16), "float16", data=D.data, scope="local", layout=al)
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(WAVE_SIZE,)))
+        _lane = T.maca.lane_id()
+        D = T.alloc_tensor(ty_args=[T.Tensor((48, 16), "float32", scope="local", layout=dl)])
+        A_storage = T.alloc_tensor(
+            ty_args=[T.Tensor((48, 16), "float16", scope=a_scope, layout=a_layout)]
+        )
+        B_storage = T.alloc_tensor(
+            ty_args=[T.Tensor((16, 16), "float16", scope="local", layout=B_FRAG)]
+        )
+        if T.constexpr(case == "alias_a"):
+            A = T.decl_tensor(
+                D.data,
+                ty_args=[T.Tensor((48, 16), "float16", data=D.data, scope="local", layout=al)],
+            )
         else:
             A = A_storage
-        if case == "alias_b":
-            B = T.decl_buffer((16, 16), "float16", data=D.data, scope="local", layout=B_FRAG)
+        if T.constexpr(case == "alias_b"):
+            B = T.decl_tensor(
+                D.data,
+                ty_args=[T.Tensor((16, 16), "float16", data=D.data, scope="local", layout=B_FRAG)],
+            )
         else:
             B = B_storage
-        Tx.warp.gemm(
+        _gemm(
             D[start : start + extent, 0:16],
             A[0:extent, 0:16],
             B,

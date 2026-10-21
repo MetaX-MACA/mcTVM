@@ -161,31 +161,33 @@ def test_copy_ldgsts_predicate_zero_fill_codegen():
     """ldgsts forwards the predicate to MACA's zero-fill BSM intrinsic."""
 
     @T.function
-    def copy_async(A: T.Tensor((32, 16), "uint8", layout=TileLayout(S[32, 16]))) -> None:
+    def copy_async(
+        A: T.Tensor((32, 16), "uint8", layout=TileLayout(S[32, 16])),
+        B: T.Tensor((32, 16), "uint8", layout=TileLayout(S[32, 16])),
+    ) -> None:
         T.device_entry(launch=T.maca.LaunchConfig(grid=1, block=(32,)))
         tid = T.maca.thread_idx("x")
         A_smem = T.alloc_tensor(
             ty_args=[T.Tensor((32, 16), "uint8", scope="shared", layout=TileLayout(S[32, 16]))]
         )
 
-        T.maca.tile.cp_async(
-            A_smem[tid, :],
-            A[tid, :],
-            direct=True,
-            prefetch_size=128,
+        T.maca.tile.copy_async(
+            A_smem[:, :],
+            A[:, :],
             predicate=tid < 16,
             fill_mode="zero",
+            scope="cta",
         )
         T.maca.async_wait_gvmcnt(0)
         T.maca.barrier_inst()
         T.maca.cta_sync()
-        Tx.cta.copy(B[:, :], A_smem[:, :])
+        T.maca.tile.copy(B[:, :], A_smem[:, :], scope="cta")
 
     target = tvm.target.Target("maca")
     with target:
         mod = tvm.tirx.compile(tvm.IRModule({"main": copy_async}), target=target, pipeline="tirx")
     src = mod.mod.imports[0].inspect_source()
-    assert "__builtin_mxc_ldg_b64_bsm_predicator" in src
+    assert "__builtin_mxc_ldg_b128_bsm_predicator" in src
     assert "predicate" in src
     assert "s_ptr_ptr" not in src
     assert "g_ptr_ptr" not in src

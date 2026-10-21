@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from tvm.backend.maca import op as _maca_op
+from tvm.backend.maca.launch import KernelAttributes as KernelAttributes
 from tvm.backend.maca.launch import LaunchConfig as LaunchConfig
 from tvm.ir import Op as _Op
 from tvm.tirx import is_tensor_var
@@ -31,6 +32,7 @@ class MACANamespace:
     """The MACA intrinsics submodule."""
 
     LaunchConfig = LaunchConfig
+    KernelAttributes = KernelAttributes
 
     def __init__(self):
         self.func_call = _maca_op.maca_func_call

@@ -31,6 +31,8 @@
 #include <tvm/target/codegen.h>
 #include <tvm/ir/op.h>
 
+#include <array>
+#include <optional>
 #include <queue>
 #include <string>
 #include <unordered_map>
@@ -54,6 +56,7 @@ class CodeGenMACA final : public CodeGenC {
   // override behavior
   void PrintFunctionSignature(const ffi::String& function_name, const Function& func,
                               std::ostream& os) final;
+  void InitFuncState(const Function& func) final;
   void PrintStorageSync(const CallNode* op) final;
   void PrintStorageScope(const std::string& scope, std::ostream& os) final;  // NOLINT(*)
   using CodeGenC::PrintType;
@@ -78,10 +81,12 @@ class CodeGenMACA final : public CodeGenC {
   void Dispatch_(const CallNode* op, std::ostream& os) final;
   void Dispatch_(const prim::CastNode* op, std::ostream& os) final;
   void Dispatch_(const EvaluateNode* op) final;
+  void Dispatch_(const BindNode* op) final;
   void Dispatch_(const ReturnNode* op) final;
   void Dispatch_(const ForNode* op) final;
 
  protected:
+  void PrintExtraAttrs(const Function& f, std::ostream& os) final;  // NOLINT(*)
   void PrintCallExtern(Type ret_type, ffi::String global_symbol, const ffi::Array<Expr>& args,
                        bool skip_first_arg, std::ostream& os) final;  // NOLINT(*)
 
@@ -118,6 +123,9 @@ class CodeGenMACA final : public CodeGenC {
   // Whether the current function is a __global__ kernel entry rather than a
   // __device__ subroutine.
   bool in_kernel_launch_{false};
+  std::array<PrimExpr, 3> launch_dimensions_{IntImm::Int32(1), IntImm::Int32(1),
+                                             IntImm::Int32(1)};
+  std::optional<int64_t> min_blocks_per_sm_;
   // Codegen tags
   std::unordered_set<std::string> codegen_tags_;
   // Op attribute map

@@ -22,6 +22,7 @@ from dataclasses import dataclass
 
 import tvm_ffi
 
+from tvm.ir import StringImm
 from tvm.script import tirx as T
 from tvm.sym.analyzer import Analyzer
 from tvm.tirx import Function
@@ -328,8 +329,10 @@ def _transpose_layout(layout: TileLayout, shape: tuple[int, int]) -> TileLayout:
 
 
 def _match_layout(name, actual, expected):
-    if not isinstance(actual, TileLayout) or len(actual.replica) != 0:
+    if not isinstance(actual, TileLayout):
         fail(f"MMA requires a nonreplicated TileLayout for {name}")
+    if len(actual.replica) != 0:
+        fail(f"MMA does not support replicated {name} layouts")
     if not tvm_ffi.structural_equal(actual.canonicalize(), expected.canonicalize()):
         fail(f"MMA received an unsupported {name} fragment layout")
 
@@ -530,10 +533,17 @@ def lower_gemm(op_call: TensorCall, sctx: DispatchContext) -> Function:
     if mcpu != "xcore1000":
         fail(f"MACA mcpu {mcpu!r} is not one of ('xcore1000',)")
     precision = op_call.options.get("precision")
+    if isinstance(precision, StringImm):
+        precision = precision.value
+    a = op_call.args[1].source
+    if precision is None and a.dtype == "float32":
+        lane_offset = a.layout.offset.get(laneid)
+        if lane_offset is not None and int(lane_offset) == 48:
+            fail("TF32 MMA requires precision='tf32'")
     atom = (16, 16, 8) if precision == "tf32" else (16, 16, 16)
     if precision not in (None, "tf32"):
         fail(f"unsupported GEMM precision {precision!r}")
-    if not precision and op_call.args[1].source.dtype == "float32":
+    if not precision and a.dtype in ("float32", "float64"):
         atom = (16, 16, 4)
     return _lower_mma(op_call, sctx, atom)
 

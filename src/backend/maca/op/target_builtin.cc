@@ -68,7 +68,8 @@ void RegisterDeviceIntrinsics() {
         .set_attr<FInferType>(tvm::op_attr::kInferType,
                               FInferType::FromNative<&InferTypeMacaAxis>());
   }
-  for (const char* name : {"linear_thread_id", "warp_id", "lane_id"}) {
+  for (const char* name : {"linear_thread_id", "warp_id", "lane_id", "warpgroup_id",
+                           "warp_in_warpgroup", "thread_in_warpgroup"}) {
     RegisterDeviceIntrinsic(OpDef(std::string("tirx.maca.") + name), CallEffectKind::kPure)
         .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::Int(32));
   }

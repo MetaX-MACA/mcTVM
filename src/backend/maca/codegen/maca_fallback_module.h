@@ -45,7 +45,19 @@ ffi::Module MACAFallbackModuleCreate(ffi::Bytes data, ffi::String fmt,
 inline ffi::String MACABackendConfig(const Target& target) {
   namespace json = tvm::ffi::json;
   json::Object maca_config;
-  maca_config.Set("arch", target->GetAttr<ffi::String>("mcpu").value_or(ffi::String()));
+  auto backend_config = target->GetAttr<ffi::Map<ffi::String, ffi::Any>>("backend_config");
+  if (backend_config.has_value()) {
+    auto maca = backend_config.value().Get("maca");
+    if (maca.has_value()) {
+      auto maca_settings = maca.value().cast<ffi::Map<ffi::String, ffi::Any>>();
+      for (const auto& [key, value] : maca_settings) {
+        maca_config.Set(key, value);
+      }
+    }
+  }
+  if (!maca_config.count("arch")) {
+    maca_config.Set("arch", target->GetAttr<ffi::String>("mcpu").value_or(ffi::String()));
+  }
   json::Object config;
   config.Set("maca", std::move(maca_config));
   return ffi::String(json::Stringify(config));

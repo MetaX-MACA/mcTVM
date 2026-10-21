@@ -29,10 +29,12 @@ def copy_backend_config(config=None):
         raise TypeError("backend_config must be a mapping of backend names to configurations")
     result = {}
     for name, value in config.items():
-        if name != "cuda":
+        if name == "cuda":
+            from .cuda.backend_config import validate_backend_config
+        elif name == "maca":
+            from .maca.backend_config import validate_backend_config
+        else:
             raise ValueError(f"backend_config does not yet support backend {name!r}")
-        from .cuda.backend_config import validate_backend_config
-
         result[name] = validate_backend_config(value)
     return result
 
@@ -111,5 +113,8 @@ def add_backend_config_argument(parser):
         type=argparse_backend_config,
         default=None,
         metavar="JSON",
-        help='Backend settings, e.g. \'{"cuda":{"compiler":"nvcc","nvcc":["--ftz=false"]}}\'',
+        help=(
+            'Backend settings, e.g. \'{"cuda":{"compiler":"nvcc"},'
+            '"maca":{"compiler":"mxcc","mxcc":["-O2"]}}\''
+        ),
     )

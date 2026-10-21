@@ -80,7 +80,8 @@ def lower_copy_async(call: TensorCall, sctx: DispatchContext) -> Function:
     fill_mode = call.options.get("fill_mode", "")
     if fill_mode not in ("", "zero"):
         fail("MACA BSM copy_async supports only empty fill_mode or 'zero'")
-    if fill_mode == "zero" and int(predicate.value if hasattr(predicate, "value") else predicate) < 0:
+    predicate_value = predicate.value if hasattr(predicate, "value") else predicate
+    if fill_mode == "zero" and isinstance(predicate_value, int) and predicate_value < 0:
         fail("zero-fill copy_async requires a predicate operand")
 
     extents = [int(r.extent) for r in src_region.region]

@@ -43,13 +43,13 @@ def _build_and_run(func, n=64):
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_warp_sum_full():
-    """Full warp sum (width=32): each lane gets the sum of all 32 values."""
+    """Full warp sum (width=64): each lane gets the sum of all 64 values."""
 
     # fmt: off
     @T.function
-    def func(out: T.Tensor((32,), 'float32')):
+    def func(out: T.Tensor((64,), 'float32')):
 
-        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 32))
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 64))
         cta_id = T.maca.block_idx('x')
         warp_id = T.maca.warp_id()
         lane = T.maca.lane_id()
@@ -59,7 +59,7 @@ def test_warp_sum_full():
         # fmt: on
 
     result, mod = _build_and_run(func)
-    expected = np.float32(64 * 65 / 2)  # sum(1..32)
+    expected = np.float32(64 * 65 / 2)  # sum(1..64)
     np.testing.assert_allclose(result, np.full(64, expected))
     assert "maca_warp_reduce_sum_64" in mod.mod.imports[0].inspect_source()
 
@@ -67,13 +67,13 @@ def test_warp_sum_full():
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_warp_sum_partial_8():
-    """Partial warp sum (width=8): 4 groups of 8 lanes, each group sums independently."""
+    """Partial warp sum (width=8): 8 groups of 8 lanes, each group sums independently."""
 
     # fmt: off
     @T.function
-    def func(out: T.Tensor((32,), 'float32')):
+    def func(out: T.Tensor((64,), 'float32')):
 
-        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 32))
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 64))
         cta_id = T.maca.block_idx('x')
         warp_id = T.maca.warp_id()
         lane = T.maca.lane_id()
@@ -101,9 +101,9 @@ def test_warp_max_partial_4():
 
     # fmt: off
     @T.function
-    def func(out: T.Tensor((32,), 'float32')):
+    def func(out: T.Tensor((64,), 'float32')):
 
-        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 32))
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 64))
         cta_id = T.maca.block_idx('x')
         warp_id = T.maca.warp_id()
         lane = T.maca.lane_id()
@@ -127,9 +127,9 @@ def test_warp_min_full():
 
     # fmt: off
     @T.function
-    def func(out: T.Tensor((32,), 'float32')):
+    def func(out: T.Tensor((64,), 'float32')):
 
-        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 32))
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 64))
         cta_id = T.maca.block_idx('x')
         warp_id = T.maca.warp_id()
         lane = T.maca.lane_id()
@@ -145,13 +145,13 @@ def test_warp_min_full():
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_warp_sum_partial_2():
-    """Smallest partial warp sum (width=2): 16 pairs of adjacent lanes."""
+    """Smallest partial warp sum (width=2): 32 pairs of adjacent lanes."""
 
     # fmt: off
     @T.function
-    def func(out: T.Tensor((32,), 'float32')):
+    def func(out: T.Tensor((64,), 'float32')):
 
-        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 32))
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 64))
         cta_id = T.maca.block_idx('x')
         warp_id = T.maca.warp_id()
         lane = T.maca.lane_id()
@@ -172,15 +172,15 @@ def test_warp_sum_partial_2():
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.parametrize("width", [2, 4, 8, 16, 32])
+@pytest.mark.parametrize("width", [2, 4, 8, 16, 32, 64])
 def test_warp_sum_all_widths(width):
-    """Parametric test: warp_sum with every valid width."""
+    """Parametric test: warp_sum with every valid MACA warp width."""
 
     # fmt: off
     @T.function
-    def func(out: T.Tensor((32,), 'float32')):
+    def func(out: T.Tensor((64,), 'float32')):
 
-        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 32))
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 64))
         cta_id = T.maca.block_idx('x')
         warp_id = T.maca.warp_id()
         lane = T.maca.lane_id()

@@ -123,9 +123,10 @@ class TritonKernel(BaseKernel):
             for kernel_param, arg in zip(self.func.params, all_kernel_args)
             if not kernel_param.is_constexpr
         ]
+        scratch_args = all_kernel_args[len(kernel_args) :]
         kernel_arg_types = []
         for arg in kernel_args:
-            if isinstance(arg.ty, PointerType):
+            if isinstance(arg.ty, PtrType):
                 kernel_arg_types.append("handle")
             else:
                 assert is_prim_expr(arg)
@@ -148,7 +149,7 @@ class TritonKernel(BaseKernel):
             triton_kernel.name,
             fmt="mcfatbin",
         )
-        return triton_kernel.name, kernel_module, kernel_args + [0, 0] + launch_args
+        return triton_kernel.name, kernel_module, kernel_args + scratch_args + launch_args
 
     def _generate_triton_kernel(
         self, func, *args, **kwargs

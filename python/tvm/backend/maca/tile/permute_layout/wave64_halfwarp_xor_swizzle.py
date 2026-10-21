@@ -263,8 +263,10 @@ def analyze_common(op_call, sctx):
         return None, f"non-static laneid active range {active_range}"
     if lane_range not in ((WAVE_SIZE, 0), (WAVE_SIZE, 0, 1)):
         return None, f"Wave64 permute_layout requires contiguous laneid [0, 64), got {active_range}"
-    if "threadIdx.y" in sctx.launch_params or "threadIdx.z" in sctx.launch_params:
-        return None, "multi-dim threadIdx is not supported"
+    for axis in ("y", "z"):
+        launch_dim = sctx.launch_params.get(f"threadIdx.{axis}")
+        if launch_dim is not None and _as_int(launch_dim[1]) != 1:
+            return None, "multi-dim threadIdx is not supported"
 
     src_buf, src_st, src_ext, dst_buf, dst_st, dst_ext = _gather(op_call)
 

@@ -201,7 +201,7 @@ def test_multi_group_reduction_consumed_through_alias():
     class Before:
         @Ts.function(private=True)
         def main(A: T.Tensor((4, 128), "float32"), B: T.Tensor((4,), "float32")):
-            T.func_attr({"target": T.target("cuda", host="llvm")})
+            T.func_attr({"target": T.target("maca", host="llvm")})
             threadIdx_y = T.launch_thread("threadIdx.y", 4)
             cross_thread_B = T.alloc_tensor(ty_args=[T.Tensor((1,), scope="local")])
             threadIdx_x = T.launch_thread("threadIdx.x", 128)
@@ -239,7 +239,7 @@ def test_multi_group_reduction_with_alias_declared_after_allreduce():
     class Before:
         @Ts.function(private=True)
         def main(A: T.Tensor((4, 128), "float32"), B: T.Tensor((4,), "float32")):
-            T.func_attr({"target": T.target("cuda", host="llvm")})
+            T.func_attr({"target": T.target("maca", host="llvm")})
             threadIdx_y = T.launch_thread("threadIdx.y", 4)
             cross_thread_B = T.alloc_tensor(ty_args=[T.Tensor((1,), scope="local")])
             threadIdx_x = T.launch_thread("threadIdx.x", 128)

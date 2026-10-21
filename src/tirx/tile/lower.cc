@@ -43,6 +43,7 @@
 #include <tvm/tirx/tile/exec_scope.h>
 #include <tvm/tirx/transform.h>
 
+#include <algorithm>
 #include <limits>
 #include <optional>
 #include <unordered_map>
@@ -50,6 +51,7 @@
 #include <vector>
 
 #include "../../backend/cuda/tile/exec_analysis.h"
+#include "../../backend/maca/tile/exec_analysis.h"
 #include "../../runtime/metadata.h"
 
 namespace tvm {
@@ -256,9 +258,12 @@ class TileDispatcher : public StmtExprMutator {
       PrepareMacaLaunchParams(entry_node);
     }
     auto saved_analysis = std::move(cuda_analysis_);
+    auto saved_maca_analysis = std::move(maca_analysis_);
     if (target_->kind->name == "cuda") {
       cuda_analysis_ = std::make_unique<backend::cuda::ExecAnalysis>(
           launch_params_, cluster_bounds_, variable_cluster_);
+    } else if (target_->kind->name == "maca") {
+      maca_analysis_ = std::make_unique<backend::maca::ExecAnalysis>(launch_params_);
     }
 
     auto body_result = Mutate(body_to_visit, InplaceMode::kDisallow);
@@ -267,6 +272,7 @@ class TileDispatcher : public StmtExprMutator {
 
     auto pop_exec_contexts = [&]() {
       cuda_analysis_ = std::move(saved_analysis);
+      maca_analysis_ = std::move(saved_maca_analysis);
       target_ = saved_target;
     };
 
@@ -298,6 +304,7 @@ class TileDispatcher : public StmtExprMutator {
 
     Stmt res = body;
     if (cuda_launch_) res = backend::cuda::LowerIndices(res, launch_params_);
+    if (maca_launch_) res = backend::maca::LowerIndices(res, launch_params_);
     if (native_launch_ || entry_node->attrs->dict.count("backend_config")) {
       res = RegionStmt(Op::Get("tirx.device_scope"), entry_node->args, {}, entry_node->attrs, res);
     }
@@ -359,6 +366,7 @@ class TileDispatcher : public StmtExprMutator {
     TVM_FFI_ICHECK(bind);
     if (auto value = bind->value.as<PrimExpr>()) {
       if (cuda_analysis_) cuda_analysis_->Bind(bind->var, value.value());
+      if (maca_analysis_) maca_analysis_->Bind(bind->var, value.value());
       // Bind is flat: the definition is visible to subsequent statements in
       // its enclosing scope.  Under SSA, an inner-scope Var cannot be
       // referenced after leaving that scope or rebound elsewhere, so stale
@@ -465,12 +473,14 @@ class TileDispatcher : public StmtExprMutator {
 
   UnchangedOr<Stmt> Mutate_(const IfNode* op, InplaceMode inplace_mode) final {
     int pushed_ctx = cuda_analysis_ ? cuda_analysis_->PushPredicate(op->condition) : 0;
+    int pushed_maca_ctx = maca_analysis_ ? maca_analysis_->PushPredicate(op->condition) : 0;
     PrimExpr new_cond =
         cuda_analysis_ ? cuda_analysis_->RewritePredicate(op->condition) : op->condition;
     auto then_case_result = Mutate(op->then_case, inplace_mode);
     bool then_case_unchanged = then_case_result.UnchangedOrSameAs(op->then_case);
     Stmt then_case = std::move(then_case_result).ValueOrUnchanged(op->then_case);
     if (cuda_analysis_) cuda_analysis_->Pop(pushed_ctx);
+    if (maca_analysis_) maca_analysis_->Pop(pushed_maca_ctx);
     ffi::Optional<SeqStmt> else_case;
     if (op->else_case.has_value()) {
       else_case =
@@ -507,7 +517,16 @@ class TileDispatcher : public StmtExprMutator {
       auto split = cuda_analysis_->Split(scope);
       inter_map = std::move(split.first);
       intra_map = std::move(split.second);
+    } else if (maca_analysis_) {
+      auto split = maca_analysis_->Split(scope);
+      inter_map = std::move(split.first);
+      intra_map = std::move(split.second);
     }
+    ffi::Map<Var, Var> storage_roots;
+    for (const auto& [tensor, root] : tensor_root_) {
+      storage_roots.Set(tensor, root);
+    }
+    shared_state_.Set("buffer_storage_roots", storage_roots);
     tile::DispatchContext sctx(target_, scope, launch_params_, var_range_map_,
                                /*alloc_only=*/false, /*callbacks=*/{}, shared_state_, inter_map,
                                intra_map, scope_kind);
@@ -588,14 +607,17 @@ class TileDispatcher : public StmtExprMutator {
     TVM_FFI_ICHECK_EQ(fields.size(), entry->args.size());
     for (size_t i = 0; i < fields.size(); ++i) {
       std::string field(fields[i]);
-      if (field.rfind("blockIdx.", 0) != 0 && field.rfind("threadIdx.", 0) != 0) {
-        TVM_FFI_CHECK(field == tvm::runtime::launch_param::kUseDynamicSharedMemoryTag, ValueError)
+      std::string tag;
+      if (field.rfind("grid.", 0) == 0) tag = "blockIdx." + field.substr(5);
+      if (field.rfind("block.", 0) == 0) tag = "threadIdx." + field.substr(6);
+      if (tag.empty()) {
+        TVM_FFI_CHECK(field == "dynamic_smem_bytes", ValueError)
             << "Unsupported MACA launch parameter: " << field;
         continue;
       }
       auto extent = analyzer_->Simplify(entry->args[i].as_or_throw<PrimExpr>());
       launch_params_.insert(
-          {field, ffi::Tuple<PrimVar, PrimExpr>(PrimVar(field, PrimType::Int(32)), extent)});
+          {tag, ffi::Tuple<PrimVar, PrimExpr>(PrimVar(tag, PrimType::Int(32)), extent)});
     }
     TVM_FFI_CHECK(launch_params_.count("blockIdx.x") && launch_params_.count("threadIdx.x"),
                   ValueError)
@@ -611,6 +633,7 @@ class TileDispatcher : public StmtExprMutator {
   sym::Analyzer analyzer_;
   Target target_;
   std::unique_ptr<backend::cuda::ExecAnalysis> cuda_analysis_;
+  std::unique_ptr<backend::maca::ExecAnalysis> maca_analysis_;
   std::unordered_map<ffi::String, ffi::Tuple<PrimVar, PrimExpr>> launch_params_;
   std::vector<Bind> alloc_tensors_;
   std::vector<Stmt> device_init_stmts_;

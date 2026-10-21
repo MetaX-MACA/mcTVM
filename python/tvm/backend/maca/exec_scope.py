@@ -20,7 +20,7 @@
 from tvm.tirx.exec_scope import ExecScope as _ExecScope
 from tvm.tirx.exec_scope import register_exec_scope
 
-SCOPES = ("kernel", "cta", "warp", "thread")
+SCOPES = ("kernel", "cta", "warpgroup", "warp", "thread")
 
 
 def register():

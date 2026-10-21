@@ -47,7 +47,9 @@ FP8_MACA_XFAIL_REASON = "TODO(maca): [fp8] fp16 to fp8 conversion results in pre
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_fp8_conversions(input, promoted_dtype):
-    if "float16" in promoted_dtype:
+    if promoted_dtype == "float16" or (
+        promoted_dtype == "float32" and input[0] in {"float8_e4m3fn", "float8_e5m2"}
+    ):
         pytest.xfail(FP8_MACA_XFAIL_REASON)
     dtype, nv_dtype = input
 

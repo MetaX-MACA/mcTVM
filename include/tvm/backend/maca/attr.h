@@ -22,6 +22,8 @@
 
 namespace tvm::backend::maca::attr {
 inline constexpr const char* kLaunchFields = "maca.launch_fields";
+inline constexpr const char* kLaunchDimensions = "maca.launch_dimensions";
+inline constexpr const char* kKernelAttrs = "maca.kernel_attrs";
 }  // namespace tvm::backend::maca::attr
 
 #endif  // TVM_BACKEND_MACA_ATTR_H_

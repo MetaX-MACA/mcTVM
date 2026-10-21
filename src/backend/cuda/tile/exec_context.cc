@@ -38,7 +38,7 @@ using namespace tvm::tirx;
 
 namespace {
 
-constexpr int kWarpSize = 64;
+constexpr int kWarpSize = 32;
 
 PrimExpr I64(int64_t value) { return IntImm::Int64(value); }
 

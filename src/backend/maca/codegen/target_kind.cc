@@ -78,6 +78,7 @@ void RegisterTargetKind() {
 
   TargetKindDef("maca")
       .set_default_device_type(kDLMACA)
+      .def_option<ffi::Map<ffi::String, ffi::Any>>("backend_config")
       .def_option<ffi::String>("mcpu")
       .def_option<ffi::String>("mtriple")
       .def_option<ffi::Array<ffi::String>>("mattr")

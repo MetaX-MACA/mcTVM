@@ -149,7 +149,7 @@ def test_constructor_multi_term_offset():
 
 def test_wg_local_layout_helper():
     layout = wg_local_layout(16)
-    expected = TileLayout(S[(256, 16) : (1 @ tid_in_wg, 1)])
+    expected = TileLayout(S[(128, 16) : (1 @ tid_in_wg, 1)])
     assert_structural_equal(layout.canonicalize(), expected.canonicalize())
 
     layout_rows = wg_local_layout(8, rows=64)

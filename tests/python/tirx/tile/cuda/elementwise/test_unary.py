@@ -1860,7 +1860,7 @@ def test_cast_validate_extent_mismatch_rejected():
         for i in T.serial(8):
             B[warp_id, j_1, k_1, i] = reg_dst[i]
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
     with target:
         mod = tvm.IRModule({"main": kernel})
         # The mismatched dst also fails the scope-level check (thread axes don't
@@ -2011,7 +2011,7 @@ _SL_ROWS, _SL_COLS = 128, 8
 
 
 def _sl_compile(fn):
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
     with target:
         tvm.tirx.compile(tvm.IRModule({"main": fn}), target=target, pipeline="tirx")
 

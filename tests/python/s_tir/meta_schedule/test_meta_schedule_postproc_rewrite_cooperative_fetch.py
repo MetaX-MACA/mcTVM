@@ -121,7 +121,7 @@ class WarpExecutionAfterRewrite:
             for i0_1_i1_1_fused in T.parallel(0, 16, annotations={"thread_binding": "vthread.x"}):
                 for i0_2_i1_2_fused in T.parallel(0, 8, annotations={"thread_binding": "threadIdx.y"}):
                     for i2_0 in T.serial(0, 1):
-                        for ax0_ax1_fused_0 in T.serial(0, 1024):
+                        for ax0_ax1_fused_0 in T.serial(0, 512):
                             for ax0_ax1_fused_1 in T.parallel(0, 8, annotations={"thread_binding": "threadIdx.y"}):
                                 for ax0_ax1_fused_2 in T.parallel(0, 64, annotations={"thread_binding": "threadIdx.x"}):
                                     with Ts.sblock("A_shared"):
@@ -146,7 +146,7 @@ class WarpExecutionAfterRewrite:
                                         Ts.reads([A[v0, v1]])
                                         Ts.writes([A_shared[v0, v1]])
                                         A_shared[v0, v1] = A[v0, v1]
-                        for ax0_ax1_fused_0 in T.serial(0, 32):
+                        for ax0_ax1_fused_0 in T.serial(0, 16):
                             for ax0_ax1_fused_1 in T.parallel(0, 8, annotations={"thread_binding": "threadIdx.y"}):
                                 for ax0_ax1_fused_2 in T.parallel(0, 64, annotations={"thread_binding": "threadIdx.x"}):
                                     for ax0_ax1_fused_3 in T.vectorized(0, 2):

@@ -357,6 +357,7 @@ tvm_file_glob(GLOB CODEGEN_SRCS
   src/backend/maca/codegen/maca_fallback_module.cc
   src/backend/maca/codegen/target_kind.cc
   src/backend/maca/op/*.cc
+  src/backend/maca/tile/*.cc
   src/backend/metal/codegen/*.cc
   src/backend/metal/op/*.cc
   src/backend/opencl/codegen/*.cc

@@ -106,7 +106,7 @@ def test_tir_triton_integration():
     if version.parse(triton.__version__) >= version.parse("3.5.0"):
         scratch_args.append(tvm.tirx.reinterpret("handle", tvm.tirx.IntImm("uint64", 0)))
 
-    # The thread extent is 256 because the kernel is compiled with num_warps=8.
+    # MACA uses 64-thread warps, so num_warps=8 gives a thread extent of 512.
     m = T.dynamic("m")
 
     @I.ir_module
@@ -123,7 +123,7 @@ def test_tir_triton_integration():
                     output.data,
                     m,
                     *scratch_args,
-                    256,
+                    512,
                     (m + T.int64(64) - T.int64(1)) // T.int64(64),
                 )
 

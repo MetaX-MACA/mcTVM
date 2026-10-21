@@ -23,7 +23,6 @@ import pytest
 import tvm
 import tvm.support.mxcc
 import tvm.testing
-from tvm.backend.config import merge_backend_configs
 from tvm.script import ir as I
 from tvm.script import tirx as T
 from tvm.support.mxcc import have_bf16, have_fp16, have_int8
@@ -237,7 +236,8 @@ def test_cuda_host_bundle_tensor_map_parameter(tmp_path, monkeypatch, *, backend
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-def test_cuda_vectorize_add(*, backend_config):
+@pytest.mark.parametrize("maca_backend_config", [{"maca": {"compiler": "mxcc"}}])
+def test_cuda_vectorize_add(maca_backend_config):
     num_thread = 8
 
     def check_cuda(dtype, n, lanes):
@@ -261,7 +261,9 @@ def test_cuda_vectorize_add(*, backend_config):
                         if i_0 * num_thread + i_1 < n:
                             B[i_0 * num_thread + i_1] = A[i_0 * num_thread + i_1] + one
 
-        fun = tvm.tirx.compile(Module, target={"kind": "maca", "backend_config": backend_config})
+        fun = tvm.tirx.compile(
+            Module, target={"kind": "maca", "backend_config": maca_backend_config}
+        )
 
         def run_and_check():
             dev = tvm.maca(0)
@@ -1292,9 +1294,9 @@ def test_device_host_call_same_func(*, backend_config):
     # 1. If we set host to llvm, it will raise an error of
     #    "Return should be transformed to return zero before LLVM code generation."
     #    Need to revisit this.
-    # 2. We set a dummy mcpu value for testing purpose,
-    #    in order to avoid checking a function is host or device based on the "cpu" substring.
-    target = tvm.target.Target({"kind": "maca", "mcpu": "dummy_mcpu"}, host="c")
+    # Use a valid MACA architecture that does not contain "cpu", so target
+    # classification is independent of the function's host/device call sites.
+    target = tvm.target.Target({"kind": "maca", "mcpu": "xcore1000"}, host="c")
     lib = tvm.tirx.compile(
         Module, target={**tvm.target.Target(target).export(), "backend_config": backend_config}
     )
@@ -1316,6 +1318,7 @@ def test_device_host_call_same_func(*, backend_config):
     tvm.testing.run_with_gpu_lock(run_and_check)
 
 
+@pytest.mark.parametrize("backend_config", [{"maca": {"compiler": "mxcc"}}], ids=["mxcc"])
 def test_thread_return(monkeypatch, *, backend_config):
     if not env.has_cuda():
         monkeypatch.setenv("TVM_COMPILE_FORCE_FALLBACK", "1")
@@ -1334,9 +1337,8 @@ def test_thread_return(monkeypatch, *, backend_config):
         Module,
         target={
             "kind": "maca",
-            "backend_config": merge_backend_configs(
-                backend_config, {"cuda": {"mcpu": "xcore1000"}}
-            ),
+            "mcpu": "xcore1000",
+            "backend_config": backend_config,
         },
     )
     cuda_code = lib.mod.imports[0].inspect_source()

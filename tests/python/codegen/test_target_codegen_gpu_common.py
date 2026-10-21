@@ -30,10 +30,10 @@ VECTOR_N = 8
 
 
 def _compile_maca_unary(op, symbol):
-    @T.prim_func
-    def kernel(A: T.Buffer((VECTOR_N,), "float32"), B: T.Buffer((VECTOR_N,), "float32")):
+    @T.function
+    def kernel(A: T.Tensor((VECTOR_N,), "float32"), B: T.Tensor((VECTOR_N,), "float32")):
         T.func_attr({"global_symbol": symbol, "tirx.noalias": True})
-        for i in T.thread_binding(VECTOR_N, thread="threadIdx.x"):
+        with T.launch_thread("threadIdx.x", VECTOR_N) as i:
             B[i] = op(A[i])
 
     target = tvm.target.Target("maca")

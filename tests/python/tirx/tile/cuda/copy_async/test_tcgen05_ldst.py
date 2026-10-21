@@ -640,7 +640,7 @@ def test_layout_F_rejects_incompatible_atoms(atom_kind, frag_rows):
                 frag_view[:, :], tmem[0:local_extent_rows, 0:local_cols], scope="warpgroup"
             )
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
     with target:
         mod = tvm.IRModule({"main": kernel})
         with pytest.raises((ValueError, RuntimeError), match="datapath"):
@@ -666,7 +666,7 @@ def test_layout_B_rejects_16xnb_fragment():
         frag_view = frag.view(64, n_cols, layout=wrong_layout)
         T.cuda.tile.tcgen05.ld(frag_view[:, :], tmem[:, :], scope="warpgroup")
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
     with target:
         with pytest.raises((ValueError, RuntimeError), match="datapath B"):
             tvm.tirx.compile(tvm.IRModule({"main": kernel}), target=target, pipeline="tirx")
@@ -695,7 +695,7 @@ def test_layout_B_rejects_partial_column_copy():
         frag = T.alloc_tcgen05_ldst_frag("32x32b", (64, n_cols), "float32")
         T.cuda.tile.tcgen05.ld(frag[:, : n_cols // 2], tmem[:, : n_cols // 2], scope="warpgroup")
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
     with target:
         with pytest.raises((ValueError, RuntimeError), match=r"full \(64, N\)"):
             tvm.tirx.compile(tvm.IRModule({"main": kernel}), target=target, pipeline="tirx")
@@ -1303,7 +1303,7 @@ def test_tcgen05_ldst_constant_tmem_address_is_uint32():
             T.cuda.tile.tcgen05.st(tmem[:, :], frag[:, :], scope="warpgroup")
             T.ptx.tcgen05.wait__st.sync.aligned()
 
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target({"kind": "cuda", "arch": "sm_100a"})
     with target:
         mod = tvm.IRModule({"main": kernel})
         mod = tvm.tirx.compile(mod, target=target, pipeline="tirx")

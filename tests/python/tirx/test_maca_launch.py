@@ -20,7 +20,7 @@ import pytest
 import tvm_ffi
 
 import tvm
-from tvm.backend.maca.launch import LaunchConfig, pack_launch
+from tvm.backend.maca.launch import KernelAttributes, LaunchConfig, pack_kernel_attrs, pack_launch
 from tvm.script import tirx as T
 
 
@@ -42,19 +42,33 @@ def test_invalid_maca_launch_config(kwargs):
         LaunchConfig(**({"grid": 8, "block": 128} | kwargs))
 
 
-def test_maca_launch_config_packs_runtime_tags():
+def test_maca_launch_config_packs_fields():
     config = T.maca.LaunchConfig(grid=(2, 3), block=(64, 2), dynamic_smem_bytes=0)
     fields, values = pack_launch(config)
     assert fields == [
-        "blockIdx.x",
-        "blockIdx.y",
-        "blockIdx.z",
-        "threadIdx.x",
-        "threadIdx.y",
-        "threadIdx.z",
-        "tirx.use_dyn_shared_memory",
+        "grid.x",
+        "grid.y",
+        "grid.z",
+        "block.x",
+        "block.y",
+        "block.z",
+        "dynamic_smem_bytes",
     ]
     assert [int(value) for value in values] == [2, 3, 1, 64, 2, 1, 0]
+
+
+def test_maca_kernel_attributes_validate_and_pack_min_blocks():
+    launch = LaunchConfig(grid=4, block=(64, 2))
+    attrs = KernelAttributes(min_blocks_per_sm=2)
+    assert pack_kernel_attrs(attrs, launch) == {"min_blocks_per_sm": 2}
+    assert pack_kernel_attrs(None, launch) == {}
+    dynamic_launch = LaunchConfig(grid=4, block=tvm.tirx.Var("block_size", "int32"))
+    with pytest.raises(ValueError, match="static block dimensions"):
+        pack_kernel_attrs(attrs, dynamic_launch)
+    with pytest.raises(ValueError, match="positive"):
+        KernelAttributes(min_blocks_per_sm=0)
+    with pytest.raises(TypeError, match="compile-time integer"):
+        KernelAttributes(min_blocks_per_sm=1.5)
 
 
 @T.function
@@ -114,7 +128,29 @@ def test_maca_launch_config_survives_lower_and_split():
         "threadIdx.z",
     ]
     assert list(kernels[0].attrs["tirx.kernel_launch_params"]) == expected
-    assert list(kernels[0].attrs["maca.launch_fields"]) == expected
+    assert list(kernels[0].attrs["maca.launch_fields"]) == [
+        "grid.x",
+        "grid.y",
+        "grid.z",
+        "block.x",
+        "block.y",
+        "block.z",
+    ]
+    assert [int(value) for value in kernels[0].attrs["maca.launch_dimensions"]] == [64, 1, 1]
+
+    calls = []
+    tvm_ffi.structural_walk(
+        mod["main"],
+        lambda node: (
+            calls.append(node)
+            if isinstance(node, tvm.ir.Call)
+            and getattr(node.op, "name", "") == "tirx.call_ffi_kernel"
+            else None
+        ),
+    )
+    assert len(calls) == 1
+    assert list(calls[0].attrs.launch_params) == expected
+    assert [int(value) for value in calls[0].args[-6:]] == [2, 1, 1, 64, 1, 1]
 
 
 def test_maca_launch_infers_dynamic_shared_memory_size():
@@ -130,6 +166,7 @@ def test_maca_launch_infers_dynamic_shared_memory_size():
     )
     params = list(kernel.attrs["tirx.kernel_launch_params"])
     assert params[-1] == "tirx.use_dyn_shared_memory"
+    assert kernel.attrs["maca.launch_fields"][-1] == "dynamic_smem_bytes"
 
     calls = []
     tvm_ffi.structural_walk(

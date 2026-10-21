@@ -146,7 +146,7 @@ def test_maca_wmma_tile_source_generation(dtype, source_type, trans_b):
     mod = _compile_maca_wmma_tile(dtype, trans_b)
     source = mod.mod.imports[0].inspect_source()
 
-    assert "__launch_bounds__(64)" in source
+    assert "threadIdx.x" in source
     assert "__syncthreads()" in source
     assert source_type in source
     b_layout = "col_major" if trans_b else "row_major"

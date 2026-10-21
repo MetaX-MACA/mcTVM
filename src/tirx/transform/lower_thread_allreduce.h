@@ -384,8 +384,9 @@ class ThreadAllreduceBuilder final : public DialectMutator {
     PrimExpr zero_index = IntImm(reduce_index.ty(), 0);
     if (IsWarpReduction(dtypes, group_extent, reduce_extent, contiguous_reduce_extent)) {
       std::vector<PrimExpr> reduce_results;
-      PrimExpr mask =
-          Call(PrimType::UInt(32), tirx::gpu_warp_activemask_op(), {}).as_or_throw<PrimExpr>();
+      PrimExpr mask = Call(PrimType::UInt(target_->kind->name == "maca" ? 64 : 32),
+                           tirx::gpu_warp_activemask_op(), {})
+                          .as_or_throw<PrimExpr>();
 
       if (reduce_extent <= warp_size_) {
         std::tie(reduce_results, new_alloc_bufs) =
@@ -401,8 +402,9 @@ class ThreadAllreduceBuilder final : public DialectMutator {
                               ->source.as_or_throw<tvm::tirx::TensorVar>();
           PrimExpr val = MakeTensorLoad(buf, {zero_index});
           TVM_FFI_ICHECK_EQ(val.ty(), dtypes[i]);
+          int shuffle_width = target_->kind->name == "maca" ? reduce_extent : warp_size_;
           PrimExpr splat = WarpShuffle(tirx::gpu_warp_shuffle_op(), new_alloc_bufs.back(), val,
-                                       reduce_extent * group_index);
+                                       reduce_extent * group_index, shuffle_width);
           seq.push_back(TensorStore(buf, {zero_index}, splat));
         }
       } else {
@@ -617,7 +619,11 @@ class ThreadAllreduceBuilder final : public DialectMutator {
         //
         // The former may cause dead lock as there is a divergent
         // branch with a warp sync call inside.
-        PrimExpr other = WarpShuffle(tirx::gpu_warp_shuffle_down_op(), mask_tensor, val, offset);
+        int shuffle_width = target_->kind->name == "maca" && reduce_extent < warp_size_
+                                ? reduce_extent
+                                : warp_size_;
+        PrimExpr other =
+            WarpShuffle(tirx::gpu_warp_shuffle_down_op(), mask_tensor, val, offset, shuffle_width);
         TensorVar local_buf = local_bufs[i];
         Stmt s = TensorStore(local_buf, zero_indices, other);
         seq->push_back(s);
@@ -810,7 +816,7 @@ class ThreadAllreduceBuilder final : public DialectMutator {
 
   // Emit warp shuffle  calls.
   PrimExpr WarpShuffle(const Op& op, ffi::Optional<TensorVar> mask_tensor, PrimExpr val,
-                       PrimExpr delta_or_lane) {
+                       PrimExpr delta_or_lane, int shuffle_width = -1) {
     ffi::Array<PrimExpr> indices = {0};
     PrimExpr mask{ffi::UnsafeInit{}};
     if (need_warp_shuffle_mask_ && mask_tensor.has_value()) {
@@ -818,8 +824,9 @@ class ThreadAllreduceBuilder final : public DialectMutator {
     } else {
       mask = IntImm::Int32(0);
     }
-    PrimExpr width = IntImm::Int32(warp_size_);
-    ffi::Array<PrimExpr> args{mask, val, delta_or_lane, width, width};
+    PrimExpr width = IntImm::Int32(shuffle_width == -1 ? warp_size_ : shuffle_width);
+    PrimExpr warp_size = IntImm::Int32(warp_size_);
+    ffi::Array<PrimExpr> args{mask, val, delta_or_lane, width, warp_size};
     return Call(val.ty(), op, args).as_or_throw<PrimExpr>();
   }
 
@@ -830,7 +837,8 @@ class ThreadAllreduceBuilder final : public DialectMutator {
   bool IsWarpReduction(const std::vector<PrimType>& dtypes, int group_extent, int reduce_extent,
                        int contiguous_reduce_extent) {
     if ((target_->kind->name != "cuda") && (target_->kind->name != "rocm") &&
-        (target_->kind->name != "metal") && (target_->kind->name != "webgpu")) {
+        (target_->kind->name != "metal") && (target_->kind->name != "webgpu") &&
+        (target_->kind->name != "maca")) {
       return false;
     }
 
@@ -869,6 +877,17 @@ class ThreadAllreduceBuilder final : public DialectMutator {
     // whether reduce_extent and group_extent are valid for warp reduction.
     if (target_->kind->name == "rocm") {
       return reduce_extent == warp_size_;
+    } else if (target_->kind->name == "maca") {
+      if (reduce_extent == 1) return false;
+
+      // MACA shuffle width partitions a wave into aligned power-of-two subgroups.
+      bool is_subwave_reduction = reduce_extent <= warp_size_ &&
+                                  warp_size_ % reduce_extent == 0 &&
+                                  (reduce_extent & (reduce_extent - 1)) == 0;
+      bool is_multiwave_reduction = max_num_threads_ != -1 &&
+                                    max_num_threads_ <= warp_size_ * warp_size_ &&
+                                    reduce_extent % warp_size_ == 0;
+      return is_subwave_reduction || is_multiwave_reduction;
     } else {
       if (reduce_extent == 1) {
         return false;  // no need to warp reduce

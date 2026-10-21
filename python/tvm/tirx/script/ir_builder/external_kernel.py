@@ -19,6 +19,7 @@
 
 import json
 import logging
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ from tvm import libinfo, tirx
 from tvm.backend.config import backend_config_json, merge_backend_configs
 from tvm.ir import Expr, PtrType, const, is_prim_expr
 from tvm.runtime import Module
+from tvm.support import mxcc
 
 
 class BaseKernel:  # pylint: disable=too-few-public-methods
@@ -254,7 +256,7 @@ class SourceKernel(BaseKernel):  # pylint: disable=too-few-public-methods
         runtime_args = [arg if isinstance(arg, Expr) else const(arg) for arg in args]
         kernel_arg_types = []
         for arg in runtime_args:
-            if isinstance(arg.ty, PointerType):
+            if isinstance(arg.ty, PtrType):
                 kernel_arg_types.append("handle")
             else:
                 assert is_prim_expr(arg)
@@ -276,7 +278,7 @@ class SourceKernel(BaseKernel):  # pylint: disable=too-few-public-methods
             target_format = "mcbin"
             output_path = f"{temp_dir}/{kernel_name}.{target_format}"
 
-            mxcc.compile_maca(
+            mxcc.compile_mxcc(
                 source_code,
                 target_format=target_format,
                 options=compile_options,

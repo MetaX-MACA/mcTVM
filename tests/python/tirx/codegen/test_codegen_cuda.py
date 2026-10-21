@@ -221,9 +221,9 @@ def test_vector_pointer_preserves_packed_offset(monkeypatch):
 def test_tirx_launch_bounds_omits_min_blocks_without_persistent_schedule():
     @T.function
     def main(A: T.Tensor((4,), "int32")):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(4,), block=(128,)))
-        bx = T.cuda.block_idx("x")
-        tx = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(4,), block=(128,)))
+        bx = T.maca.block_idx("x")
+        tx = T.maca.thread_idx("x")
         if tx == 0:
             A[bx] = A[bx] + 1
 
@@ -236,17 +236,17 @@ def test_tirx_launch_bounds_min_blocks_sets_one_block_per_sm():
     @T.function
     def main(A: T.Tensor((4,), "int32")):
         T.device_entry(
-            launch=T.cuda.LaunchConfig(grid=(4,), block=(128,)),
-            kernel_attrs=T.cuda.KernelAttributes(min_blocks_per_sm=1),
+            launch=T.maca.LaunchConfig(grid=(4,), block=(128,)),
+            kernel_attrs=T.maca.KernelAttributes(min_blocks_per_sm=1),
         )
-        bx = T.cuda.block_idx("x")
-        tx = T.cuda.thread_idx("x")
+        bx = T.maca.block_idx("x")
+        tx = T.maca.thread_idx("x")
         if tx == 0:
             A[bx] = A[bx] + 1
 
     src, _ = _get_source(main, "maca")
     assert 'extern "C" __global__ void __launch_bounds__(128, 1) main_kernel' in src
-    assert "tirx.cuda.launch_bounds_min_blocks_per_sm" not in src
+    assert "tirx.maca.launch_bounds_min_blocks_per_sm" not in src
 
 
 def test_single_thread_block_preserves_explicit_launch_bounds():
@@ -345,25 +345,28 @@ def test_tirx_required_block_size_emits_launch_bounds_when_requested():
 def test_tirx_cuda_kernel_return_zero_codegen_is_void_early_return():
     @T.function
     def main(A: T.Tensor((4,), "int32")):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(4,), block=(32,)))
-        bx = T.cuda.block_idx("x")
-        tx = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(4,), block=(32,)))
+        bx = T.maca.block_idx("x")
+        tx = T.maca.thread_idx("x")
         if bx >= 3:
             return 0
         if tx == 0:
             A[bx] = A[bx] + 1
 
     src, _ = _get_source(main, "maca")
-    assert re.search(r"if \(\(\(int\)blockIdx\.x\) == 3\)", src)
-    assert "return;" in src
+    assert re.search(
+        r"if \((?:[^\n]*blockIdx\.x[^\n]*(?:>=|==)\s*3|[^\n]*3\s*<=\s*[^\n]*blockIdx\.x)"
+        r"[^\n]*\)\s*\{\s*return;",
+        src,
+    ), src
     assert "return 0;" not in src
 
 
 def test_serial_pragma_unroll_codegen():
     @T.function
     def main(A: T.Tensor((4,), "int32")):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
-        tx = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=1, block=(32,)))
+        tx = T.maca.thread_idx("x")
         if tx == 0:
             for i in T.serial(4, unroll=True):
                 if i == 2:
@@ -379,8 +382,8 @@ def test_serial_pragma_unroll_codegen():
 def test_serial_pragma_unroll_count_codegen():
     @T.function
     def main(A: T.Tensor((4,), "int32")):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
-        tx = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=1, block=(32,)))
+        tx = T.maca.thread_idx("x")
         if tx == 0:
             for i in T.serial(4, unroll=2):
                 A[i] = A[i] + 1
@@ -392,8 +395,8 @@ def test_serial_pragma_unroll_count_codegen():
 def test_serial_disable_unroll_pragma_immediately_precedes_dynamic_for():
     @T.function
     def main(A: T.Tensor((4,), "int32")):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=1, block=(32,)))
-        tx = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=1, block=(32,)))
+        tx = T.maca.thread_idx("x")
         if tx == 0:
             begin: T.let = T.if_then_else(A[0] > 0, A[1], A[2])
             end: T.let = T.if_then_else(A[0] > 1, A[2], A[3])
@@ -441,9 +444,9 @@ def test_cuda_handle_uint64_reinterpret_codegen():
 def test_cuda_atomic_add():
     @T.function
     def main(A: T.Tensor((1,), "int32"), B: T.Tensor((1,), "float32")):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(32,)))
-        cta_id = T.cuda.block_idx("x")
-        tx = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(32,)))
+        cta_id = T.maca.block_idx("x")
+        tx = T.maca.thread_idx("x")
         if tx == 0:
             T.maca.atomic_add(A.data, T.int32(1))
             T.maca.atomic_add(B.data, T.float32(1.0))
@@ -854,9 +857,9 @@ def test_tma_cache_policy_operand_codegen():
 def test_cuda_thread_fence():
     @T.function
     def main(A: T.Tensor((16, 16), "int32")):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(32,)))
-        cta_id = T.cuda.block_idx("x")
-        tx = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(32,)))
+        cta_id = T.maca.block_idx("x")
+        tx = T.maca.thread_idx("x")
         if tx == 0:
             T.maca.thread_fence()
 
@@ -880,9 +883,9 @@ def test_cuda_nano_sleep():
 def test_cuda_atomic_cas():
     @T.function
     def main(A: T.Tensor((16, 16), "int32")):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(32,)))
-        cta_id = T.cuda.block_idx("x")
-        tx = T.cuda.thread_idx("x")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(32,)))
+        cta_id = T.maca.block_idx("x")
+        tx = T.maca.thread_idx("x")
         if tx == 0:
             T.maca.atomic_cas(A.data, T.int32(1), T.int32(2))
 
@@ -902,12 +905,14 @@ __device__ int32_t add_one(int32_t a) {
 
         @T.function
         def main(a: T.Tensor((16, 16), "int32"), b: T.Tensor((16, 16), "int32")):
-            T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(32,)))
-            cta_id = T.cuda.block_idx("x")
-            tx = T.cuda.thread_idx("x")
+            T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(32,)))
+            cta_id = T.maca.block_idx("x")
+            tx = T.maca.thread_idx("x")
             if tx == 0:
                 for i, j in T.grid(16, 16):
-                    b[i, j] = T.maca.func_call("add_one", a[i, j], add_one, ty="int32")
+                    b[i, j] = T.maca.func_call(
+                        "add_one", a[i, j], source_code=add_one, return_type="int32"
+                    )
 
         src, mod = _get_source(main, "maca")
         A = np.random.randint(0, 10, (16, 16)).astype("int32")
@@ -934,12 +939,12 @@ __device__ void print(int32_t a) {
 
         @T.function
         def main(a: T.Tensor((16, 16), "int32")):
-            T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(32,)))
-            cta_id = T.cuda.block_idx("x")
-            tx = T.cuda.thread_idx("x")
+            T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(32,)))
+            cta_id = T.maca.block_idx("x")
+            tx = T.maca.thread_idx("x")
             if tx == 0:
                 for i, j in T.grid(16, 16):
-                    T.maca.func_call("print", a[i, j], print_func)
+                    T.maca.func_call("print", a[i, j], source_code=print_func)
 
         src, mod = _get_source(main, "maca")
         A = np.random.randint(0, 10, (16, 16)).astype("int32")
@@ -963,10 +968,10 @@ def test_warp_shuffle_xor_sync():
     @T.function
     def func(A: T.Tensor((32,), dtype='float32', align=16)):
 
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=1 * 32))
-        cta_id = T.cuda.block_idx('x')
-        warp_id = T.cuda.warp_id()
-        lane_id = T.cuda.lane_id()
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 32))
+        cta_id = T.maca.block_idx('x')
+        warp_id = T.maca.warp_id()
+        lane_id = T.maca.lane_id()
 
         A_local = T.alloc_tensor(ty_args=[T.Tensor([1], "float32", scope="local")])
         i = T.alloc_tensor(ty_args=[T.Tensor([1], "int32", scope="local")])
@@ -1146,9 +1151,9 @@ def test_ptx_ldmatrix(trans, num):
 def test_uint32_loop_var_and_scope_id_emit_unsigned():
     @T.function
     def main(A: T.Tensor((128,), "int32")):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(128,)))
-        _ = T.cuda.block_idx("x")
-        tx = T.cast(T.cuda.thread_idx("x"), "uint32")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(128,)))
+        _ = T.maca.block_idx("x")
+        tx = T.cast(T.maca.thread_idx("x"), "uint32")
         for k in T.serial(4, dtype="uint32"):
             A[tx] = A[tx] + T.int32(k)
 
@@ -1164,9 +1169,9 @@ def test_uint32_loop_var_and_scope_id_emit_unsigned():
 def test_uint32_loop_var_runs_correctly():
     @T.function
     def main(A: T.Tensor((128,), "int32"), B: T.Tensor((128,), "int32")):
-        T.device_entry(launch=T.cuda.LaunchConfig(grid=(1,), block=(128,)))
-        _ = T.cuda.block_idx("x")
-        tx = T.cast(T.cuda.thread_idx("x"), "uint32")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(128,)))
+        _ = T.maca.block_idx("x")
+        tx = T.cast(T.maca.thread_idx("x"), "uint32")
         acc = T.alloc_tensor(ty_args=[T.Tensor((1,), "int32", scope="local")])
         acc[0] = 0
         for k in T.serial(4, dtype="uint32"):

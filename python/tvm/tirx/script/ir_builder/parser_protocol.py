@@ -736,12 +736,11 @@ def device_entry(
             raise ValueError("device_entry kernel_attrs require a launch configuration")
         return region("tirx.device_entry", launch_values, attrs=attributes, body_params=body_params)
     if getattr(launch, "_config_type", None) == "MacaLaunchConfig":
-        if kernel_attrs is not None:
-            raise TypeError("MACA LaunchConfig does not support CUDA kernel_attrs")
-        from tvm.backend.maca.launch import pack_launch
+        from tvm.backend.maca.launch import pack_kernel_attrs, pack_launch
 
         names, values = pack_launch(launch)
         attributes["maca.launch_fields"] = names
+        attributes["maca.kernel_attrs"] = pack_kernel_attrs(kernel_attrs, launch)
         return region("tirx.device_entry", values, attrs=attributes, body_params=body_params)
     from tvm.backend.cuda.launch._impl import pack_kernel_attrs, pack_launch
 

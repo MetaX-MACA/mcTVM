@@ -348,9 +348,9 @@ def test_insert_to_vdevice():
             with R.dataflow():
                 lv0 = R.hint_on_device(y, device_type=1, index=0)
                 lv1 = R.add(x, lv0)
-                lv2 = R.hint_on_device(lv1, device_type=2, index=0)
+                lv2 = R.hint_on_device(lv1, device_type=22, index=0)
                 lv3 = R.add(lv2, lv2)
-                lv4 = R.hint_on_device(z, device_type=2, index=0)
+                lv4 = R.hint_on_device(z, device_type=22, index=0)
                 gv = R.multiply(lv3, lv4)
                 R.output(gv)
             return gv

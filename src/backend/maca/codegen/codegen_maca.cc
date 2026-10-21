@@ -23,15 +23,18 @@
 
 #include "codegen_maca.h"
 
+#include <tvm/backend/maca/attr.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/transform.h>
 #include <tvm/ir/module.h>
 #include <tvm/runtime/logging.h>
+#include <tvm/s_tir/stmt.h>
 #include <tvm/sym/analyzer.h>
 #include <tvm/target/target.h>
 #include <tvm/tirx/index_map.h>
 #include <tvm/tirx/op/gpu.h>
+#include <tvm/tirx/op/region.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 
@@ -78,6 +81,44 @@ bool IsFloat(const PrimType& type) { return type.MatchesCode(DLDataTypeCode::kDL
 bool IsVectorBool(const PrimType& type) {
   return type.MatchesCode(DLDataTypeCode::kDLBool) && type.IsFixedLengthVector();
 }
+
+class ThreadIdxExtractor : public tirx::StmtExprVisitor {
+ public:
+  ffi::Optional<VisitInterrupt> Visit(ffi::AnyView value) override {
+    if (value.as<tvm::ExprNode>()) return std::nullopt;
+    return StmtExprVisitor::Visit(value);
+  }
+
+ private:
+  ffi::Optional<VisitInterrupt> Visit_(const RegionStmtNode* op) final {
+    if (!op->op.same_as(tirx::launch_thread_op())) {
+      TVM_FFI_THROW(ValueError) << "Unsupported region op " << op->op;
+    }
+    TVM_FFI_CHECK(!op->args[0].as_or_throw<StringImm>()->value.starts_with("vthread"), ValueError)
+        << "Virtual thread launches must be lowered before code generation";
+    ffi::String tag = op->args[0].as_or_throw<StringImm>()->value;
+    PrimExpr extent = op->args[1].as_or_throw<PrimExpr>();
+    auto [it, inserted] = thread_extents_.emplace(tag, extent);
+    TVM_FFI_CHECK(inserted || analyzer_->CanProveEqual(it->second, extent), ValueError)
+        << "Conflicting launch extents for " << tag;
+    if (tag == "threadIdx.x") {
+      threadIdx_x_ext = extent;
+    } else if (tag == "threadIdx.y") {
+      threadIdx_y_ext = extent;
+    } else if (tag == "threadIdx.z") {
+      threadIdx_z_ext = extent;
+    }
+    return StmtExprVisitor::Visit_(op);
+  }
+
+  sym::Analyzer analyzer_;
+  std::unordered_map<std::string, PrimExpr> thread_extents_;
+
+ public:
+  PrimExpr threadIdx_x_ext = IntImm::Int32(1);
+  PrimExpr threadIdx_y_ext = IntImm::Int32(1);
+  PrimExpr threadIdx_z_ext = IntImm::Int32(1);
+};
 
 }  // namespace
 
@@ -198,6 +239,31 @@ void CodeGenMACA::Init(bool output_ssa) {
   TVM_FFI_ICHECK(!vid_global_barrier_state_.empty());
 }
 
+void CodeGenMACA::InitFuncState(const Function& func) {
+  CodeGenC::InitFuncState(func);
+  min_blocks_per_sm_.reset();
+  in_kernel_launch_ =
+      func->GetAttr<CallingConv>(tvm::attr::kCallingConv, CallingConv::kDefault).value() ==
+      CallingConv::kDeviceKernelLaunch;
+  auto extractor = ffi::make_object<ThreadIdxExtractor>();
+  extractor->Visit(func->body);
+  launch_dimensions_ = {extractor->threadIdx_x_ext, extractor->threadIdx_y_ext,
+                        extractor->threadIdx_z_ext};
+  if (auto dimensions =
+          func->GetAttr<ffi::Array<PrimExpr>>(tvm::backend::maca::attr::kLaunchDimensions)) {
+    TVM_FFI_ICHECK_EQ(dimensions.value().size(), launch_dimensions_.size());
+    for (size_t i = 0; i < launch_dimensions_.size(); ++i) {
+      launch_dimensions_[i] = dimensions.value()[i];
+    }
+  }
+  if (auto kernel_attrs =
+          func->GetAttr<ffi::Map<ffi::String, int64_t>>(tvm::backend::maca::attr::kKernelAttrs)) {
+    if (auto value = kernel_attrs.value().Get("min_blocks_per_sm")) {
+      min_blocks_per_sm_ = *value;
+    }
+  }
+}
+
 void CodeGenMACA::PrintFunctionSignature(const ffi::String& function_name, const Function& func,
                                          std::ostream& os) {
   CallingConv calling_conv =
@@ -212,6 +278,23 @@ void CodeGenMACA::PrintFunctionSignature(const ffi::String& function_name, const
                                  << static_cast<int>(calling_conv);
   }
   CodeGenC::PrintFunctionSignature(function_name, func, os);
+}
+
+void CodeGenMACA::PrintExtraAttrs(const Function&, std::ostream& os) {
+  if (!in_kernel_launch_) return;
+  sym::Analyzer analyzer;
+  PrimExpr threads = analyzer->Simplify(launch_dimensions_[0] * launch_dimensions_[1] *
+                                        launch_dimensions_[2]);
+  const auto* count = threads.as<IntImmNode>();
+  TVM_FFI_CHECK(!min_blocks_per_sm_ || (count && count->value > 0), ValueError)
+      << "min_blocks_per_sm requires static block dimensions";
+  TVM_FFI_CHECK(!min_blocks_per_sm_ || *min_blocks_per_sm_ > 0, ValueError)
+      << "min_blocks_per_sm must be positive";
+  if (count && (count->value > 1 || min_blocks_per_sm_)) {
+    os << " __launch_bounds__(" << count->value;
+    if (min_blocks_per_sm_) os << ", " << *min_blocks_per_sm_;
+    os << ")";
+  }
 }
 
 std::string CodeGenMACA::Finish() {
@@ -554,6 +637,60 @@ void CodeGenMACA::Dispatch_(const ReturnNode* op) {
       << "MACA device kernel may only contain a successful early return, return 0";
   PrintIndent();
   stream << "return;\n";
+}
+
+void CodeGenMACA::Dispatch_(const BindNode* op) {
+  const auto* call = op->value.as<CallNode>();
+  if (!call || !call->op.same_as(tirx::alloc_tensor_op()) || call->ty_args.empty()) {
+    CodeGenC::Dispatch_(op);
+    return;
+  }
+
+  const auto* tensor_type = call->ty_args[0].as<tirx::TensorTypeNode>();
+  TVM_FFI_ICHECK(tensor_type);
+  const std::string scope = tensor_type->storage_scope;
+  if (scope != "wmma.matrix_a" && scope != "wmma.matrix_b" && scope != "wmma.accumulator") {
+    CodeGenC::Dispatch_(op);
+    return;
+  }
+
+  DictAttrs attrs = call->attrs.as_or_throw<DictAttrs>();
+  auto shape = attrs->dict.Get(s_tir::attr::kFragmentShape);
+  TVM_FFI_ICHECK(shape.has_value()) << "Missing TensorCore fragment shape for " << op->var->name;
+  auto shape_string = shape.value().as<ffi::String>();
+  TVM_FFI_ICHECK(shape_string.has_value());
+  fragment_shapes[op->var.get()] = shape_string.value().operator std::string();
+  if (scope == "wmma.matrix_a" || scope == "wmma.matrix_b") {
+    auto layout = attrs->dict.Get(s_tir::attr::kFragmentLayout);
+    TVM_FFI_ICHECK(layout.has_value())
+        << "Missing TensorCore fragment layout for " << op->var->name;
+    auto layout_string = layout.value().as<ffi::String>();
+    TVM_FFI_ICHECK(layout_string.has_value());
+    fragment_layouts[op->var.get()] = layout_string.value().operator std::string();
+  }
+
+  int m = 0, n = 0, k = 0;
+  std::stringstream shape_stream(fragment_shapes.at(op->var.get()));
+  char separator;
+  TVM_FFI_ICHECK(shape_stream >> m >> separator >> n >> separator >> k);
+  int64_t elements_per_fragment = scope == "wmma.matrix_a"   ? static_cast<int64_t>(m) * k
+                                  : scope == "wmma.matrix_b" ? static_cast<int64_t>(k) * n
+                                                             : static_cast<int64_t>(m) * n;
+  int64_t elements = 1;
+  for (const PrimExpr& dim : tensor_type->shape) {
+    const auto* extent = dim.as<IntImmNode>();
+    TVM_FFI_ICHECK(extent) << "WMMA fragment allocation must have a constant shape";
+    elements *= extent->value.as<int64_t>().value();
+  }
+  TVM_FFI_ICHECK_GT(elements_per_fragment, 0);
+  TVM_FFI_ICHECK_EQ(elements % elements_per_fragment, 0);
+
+  TensorVar buffer = op->var.as_or_throw<TensorVar>();
+  const std::string vid = AllocVarID(buffer.get(), buffer.name() + "_ptr");
+  PrintIndent();
+  PrintWmmaScope(scope, PrimType(tensor_type->dtype->dtype), buffer.get(), stream);
+  stream << ' ' << vid << '[' << elements / elements_per_fragment << "];\n";
+  RegisterHandleType(buffer.get(), PrimType(tensor_type->dtype->dtype));
 }
 
 void CodeGenMACA::BindThreadIndex(const PrimVar& var, const ffi::String& thread_tag) {
@@ -1230,7 +1367,9 @@ void CodeGenMACA::Dispatch_(const CallNode* op, std::ostream& os) {
   static const Op& tvm_load_matrix_sync_op = Op::Get("tirx.gpu_load_matrix_sync");
   static const Op& tvm_store_matrix_sync_op = Op::Get("tirx.gpu_store_matrix_sync");
   static const Op& tvm_mma_sync_op = Op::Get("tirx.gpu_mma_sync");
-  static const Op& tvm_bmma_sync_op = Op::Get("tirx.gpu_bmma_sync");
+  // Binary MMA is exposed as a CUDA-specific intrinsic.  Unlike the other
+  // matrix intrinsics above, there is no generic tirx.gpu_bmma_sync op.
+  static const Op& tvm_bmma_sync_op = Op::Get("tirx.cuda.bmma_sync");
   static const Op& maca_func_call_op = Op::Get("tirx.maca.func_call");
 
   if (auto opt_call_opt = op->op.as<Op>()) {
