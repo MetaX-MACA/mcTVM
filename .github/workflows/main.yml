@@ -177,6 +177,8 @@ jobs:
           rm -rf "${TVM_PYTEST_RESULT_DIR}"
           mkdir -p "${TVM_PYTEST_RESULT_DIR}"
           uv pip install -v --target=python ./3rdparty/tvm-ffi/
+          # Keep the source-built tvm-ffi when installing the ORC JIT extension.
+          uv pip install -v --target=python --no-deps apache-tvm-ffi-orcjit==0.1.2
 
       - name: Run 'Base' unittests
         if: ${{ !cancelled() && steps.pytest_setup.outcome == 'success' }}
