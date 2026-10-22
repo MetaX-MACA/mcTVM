@@ -20,7 +20,6 @@
 from .int_set import (
     IntSet,
     IntervalSet,
-    PresburgerSet,
     estimate_region_lower_bound,
     estimate_region_strict_bound,
     estimate_region_upper_bound,
@@ -32,7 +31,6 @@ from .analyzer import (
     ProofStrength,
     Extension,
     CompareResult,
-    Z3ContextScope,
     allow_uint_as_index,
 )
 from .bound import deduce_bound

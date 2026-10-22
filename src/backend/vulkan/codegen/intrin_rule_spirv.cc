@@ -22,10 +22,9 @@
  */
 #include <GLSL.std.450.h>
 #include <tvm/ffi/function.h>
-#include <tvm/ir/prim/builtin.h>
 #include <tvm/ir/prim/expr.h>
-#include <tvm/tirx/builtin.h>
-#include <tvm/tirx/op.h>
+#include <tvm/ir/prim/op.h>
+#include <tvm/tirx/op/abi.h>
 #include <tvm/tirx/op_attr_types.h>
 
 #include "../../../target/intrin_rule.h"
@@ -45,7 +44,7 @@ PrimExpr CallGLSLIntrin(PrimExpr e, const ffi::Array<PrimExpr>& args) {
   for (PrimExpr arg : args) {
     cargs.push_back(arg);
   }
-  return Call(call->ty.as_or_throw<PrimType>(), tirx::builtin::call_spirv_pure_glsl450(), cargs)
+  return Call(call->ty.as_or_throw<PrimType>(), tirx::call_spirv_pure_glsl450_op(), cargs)
       .as_or_throw<PrimExpr>();
 }
 
@@ -70,87 +69,85 @@ void RegisterVulkanLowerIntrinRules() {
   if (registered) return;
   registered = true;
 
-  // clang-format off
-TVM_REGISTER_OP("tirx.floor")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Floor>);
+  OpDef("prim.floor")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Floor>);
 
-TVM_REGISTER_OP("prim.ceil")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Ceil>);
+  OpDef("prim.ceil")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Ceil>);
 
-TVM_REGISTER_OP("tirx.round")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic",
-                               DispatchGLSLPureIntrin<GLSLstd450RoundEven>);
+  OpDef("prim.round")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic",
+                                 DispatchGLSLPureIntrin<GLSLstd450RoundEven>);
 
-TVM_REGISTER_OP("tirx.nearbyint")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic",
-                               DispatchGLSLPureIntrin<GLSLstd450RoundEven>);
+  OpDef("prim.nearbyint")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic",
+                                 DispatchGLSLPureIntrin<GLSLstd450RoundEven>);
 
-TVM_REGISTER_OP("tirx.trunc")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Trunc>);
+  OpDef("prim.trunc")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Trunc>);
 
-TVM_REGISTER_OP("tirx.fabs")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450FAbs>);
+  OpDef("prim.fabs")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450FAbs>);
 
-TVM_REGISTER_OP("tirx.exp")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Exp>);
+  OpDef("prim.exp")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Exp>);
 
-TVM_REGISTER_OP("tirx.exp2")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Exp2>);
+  OpDef("prim.exp2")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Exp2>);
 
-TVM_REGISTER_OP("tirx.sin")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Sin>);
+  OpDef("prim.sin")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Sin>);
 
-TVM_REGISTER_OP("tirx.cos")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Cos>);
+  OpDef("prim.cos")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Cos>);
 
-TVM_REGISTER_OP("tirx.tan")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Tan>);
+  OpDef("prim.tan")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Tan>);
 
-TVM_REGISTER_OP("tirx.asin")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Asin>);
+  OpDef("prim.asin")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Asin>);
 
-TVM_REGISTER_OP("tirx.acos")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Acos>);
+  OpDef("prim.acos")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Acos>);
 
-TVM_REGISTER_OP("tirx.atan")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Atan>);
+  OpDef("prim.atan")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Atan>);
 
-TVM_REGISTER_OP("tirx.sinh")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Sinh>);
+  OpDef("prim.sinh")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Sinh>);
 
-TVM_REGISTER_OP("tirx.cosh")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Cosh>);
+  OpDef("prim.cosh")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Cosh>);
 
-TVM_REGISTER_OP("tirx.tanh")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Tanh>);
+  OpDef("prim.tanh")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Tanh>);
 
-TVM_REGISTER_OP("tirx.asinh")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Asinh>);
+  OpDef("prim.asinh")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Asinh>);
 
-TVM_REGISTER_OP("tirx.acosh")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Acosh>);
+  OpDef("prim.acosh")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Acosh>);
 
-TVM_REGISTER_OP("tirx.atanh")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Atanh>);
+  OpDef("prim.atanh")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Atanh>);
 
-TVM_REGISTER_OP("tirx.atan2")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Atan2>);
+  OpDef("prim.atan2")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Atan2>);
 
-TVM_REGISTER_OP("tirx.log")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Log>);
+  OpDef("prim.log")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Log>);
 
-TVM_REGISTER_OP("prim.log2")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Log2>);
+  OpDef("prim.log2")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Log2>);
 
-TVM_REGISTER_OP("tirx.sqrt")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Sqrt>);
+  OpDef("prim.sqrt")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Sqrt>);
 
-TVM_REGISTER_OP("tirx.pow")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Pow>);
+  OpDef("prim.pow")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", DispatchGLSLPureIntrin<GLSLstd450Pow>);
 
-TVM_REGISTER_OP("tirx.erf")
-    .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", codegen::intrin ::DispatchFastErf);
-  // clang-format on
+  OpDef("prim.erf")
+      .set_attr<FLowerIntrinsic>("vulkan.FLowerIntrinsic", codegen::intrin ::DispatchFastErf);
 }
 }  // namespace intrin
 
@@ -163,14 +160,14 @@ void RegisterVulkanLegalizeRules() {
   registered = true;
 
   // clang-format off
-TVM_REGISTER_OP("prim.clz")
-    .set_attr<FLegalize>("vulkan.FLegalize", [](const PrimExpr& e) -> PrimExpr {
-      const CallNode* call = e.as<CallNode>();
-      TVM_FFI_ICHECK(call != nullptr);
-      TVM_FFI_ICHECK_EQ(call->args.size(), 1);
-      PrimExpr arg = call->args[0].as_or_throw<PrimExpr>();
-      PrimType arg_ty = arg.ty();
-      PrimExpr msb;
+  OpDef("prim.clz")
+      .set_attr<FLegalize>("vulkan.FLegalize", [](const PrimExpr& e) -> PrimExpr {
+    const CallNode* call = e.as<CallNode>();
+    TVM_FFI_ICHECK(call != nullptr);
+    TVM_FFI_ICHECK_EQ(call->args.size(), 1);
+    PrimExpr arg = call->args[0].as_or_throw<PrimExpr>();
+    PrimType arg_ty = arg.ty();
+    PrimExpr msb = [&]() -> PrimExpr {
       if (arg_ty.bits() == 64) {
         // SPIR-V FindUMsb intrinsic only supports 32 bit input
         auto int32 = PrimType::Int(32);
@@ -178,14 +175,15 @@ TVM_REGISTER_OP("prim.clz")
         PrimExpr arg_lo32 = tvm::prim::Cast(int32, arg);
         PrimExpr msb_hi = CallGLSLIntrin<GLSLstd450FindUMsb>(e, {arg_hi32});
         PrimExpr msb_lo = CallGLSLIntrin<GLSLstd450FindUMsb>(e, {arg_lo32});
-        msb = tvm::if_then_else(arg_hi32 == 0, msb_lo, msb_hi + 32);
+        return tvm::if_then_else(arg_hi32 == 0, msb_lo, msb_hi + 32);
       } else if (arg_ty.bits() == 32) {
-        msb = CallGLSLIntrin<GLSLstd450FindUMsb>(e);
+        return CallGLSLIntrin<GLSLstd450FindUMsb>(e);
       } else {
         TVM_FFI_THROW(InternalError) << "SPIR-V clz only supports a 32 bit or 64 bit integer.";
       }
-      return PrimExpr(arg_ty.bits() - 1) - msb;
-    });
+    }();
+    return PrimExpr(arg_ty.bits() - 1) - msb;
+  });
   // clang-format on
 }
 }  // namespace legalize

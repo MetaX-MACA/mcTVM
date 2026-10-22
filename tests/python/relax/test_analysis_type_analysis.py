@@ -25,6 +25,7 @@ import tvm
 import tvm.testing
 from tvm import ir, tirx
 from tvm import relax as rx
+from tvm.relax import ExternFunc as _ExternFunc
 from tvm.script import relax as R
 from tvm.script import tirx as T
 
@@ -634,14 +635,14 @@ def _generate_prim_test_cases():
 
     for dtype in dtypes:
         # LCA of a PrimType with itself yields itself
-        yield (R.Prim(dtype), R.Prim(dtype), R.Prim(dtype))
+        yield (tvm.ir.PrimType(dtype), tvm.ir.PrimType(dtype), tvm.ir.PrimType(dtype))
 
     for dtype_a in dtypes:
         for dtype_b in dtypes:
             if dtype_a != dtype_b:
                 # If the dtype differs between the two annotations,
                 # the next wider category is R.Any.
-                yield (R.Prim(dtype_a), R.Prim(dtype_b), R.Any)
+                yield (tvm.ir.PrimType(dtype_a), tvm.ir.PrimType(dtype_b), R.Any)
 
 
 @pytest.mark.parametrize("test_case", list(_generate_prim_test_cases()))
@@ -649,8 +650,6 @@ def test_prim_type_lca(test_case):
     def _normalize_ty(ty):
         if isinstance(ty, tvm.relax.Type):
             return ty
-        elif isinstance(ty, tvm.script.parser.relax.entry.TypeProxy):
-            return ty.as_ty()
         elif callable(ty):
             return ty()
         else:
@@ -710,7 +709,9 @@ def test_collect_symbolic_var_from_tensor_shape():
     x = rx.Var("x", rx.TensorType([m, m + n], "float32"))
     with bb.function("main", [x]):
         v0 = bb.match_cast(x, rx.TensorType([m, k], "float32"))
-        v1 = bb.emit(rx.call_dps_packed("test", x, rx.TensorType([p, q], "float32")))
+        v1 = bb.emit(
+            rx.call_dps_packed(_ExternFunc("test"), x, ty_args=[rx.TensorType([p, q], "float32")])
+        )
         bb.emit_func_output(rx.const(1))
     func = bb.get()["main"]
 
@@ -757,14 +758,17 @@ def test_collect_symbolic_var_from_non_tensor_params(param_type, param_order):
 
 
 def test_collect_nonnegative_expressions():
+    M = T.dynamic("M")
+    N = T.dynamic("N")
+
     @R.function
     def func(
-        A: R.Tensor([1024, "M", "N-2"]),
-        B: R.Tensor([128, "N", "M+2"]),
-        C: R.Shape(["M", "N"]),
-        D: R.Prim("int64"),
+        A: R.Tensor([1024, M, N - 2]),
+        B: R.Tensor([128, N, M + 2]),
+        C: R.Shape([M, N]),
+        D: T.int64,
     ):
-        return R.tuple()
+        return ()
 
     M, N = list(func.params[2].ty.values)
 

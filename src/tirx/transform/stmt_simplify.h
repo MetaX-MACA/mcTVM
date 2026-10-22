@@ -19,26 +19,25 @@
 
 /*!
  * \file stmt_simplify.h
- * \brief Statement-level simplification of TIR PrimFuncs.
+ * \brief Statement-level simplification of TIR Functions.
  */
 #ifndef TVM_TIR_TRANSFORM_STMT_SIMPLIFY_H_
 #define TVM_TIR_TRANSFORM_STMT_SIMPLIFY_H_
 
 #include <tvm/sym/analyzer.h>
 #include <tvm/tirx/function.h>
-
-#include "../ir/ir_mutator_with_analyzer.h"
+#include <tvm/tirx/stmt_functor_with_analyzer.h>
 
 namespace tvm {
 namespace tirx {
 
-struct StmtSimplifyConfigNode : public ffi::Object {
+struct StmtSimplifyConfigObj : public ffi::Object {
   bool transitively_prove_inequalities;
   bool convert_boolean_to_and_of_ors;
   bool apply_constraints_to_boolean_branches;
 
   static void RegisterReflection();
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.transform.StmtSimplifyConfig", StmtSimplifyConfigNode,
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.transform.StmtSimplifyConfig", StmtSimplifyConfigObj,
                                     ffi::Object);
 
   sym::RewriteSimplifier::Extension GetEnabledExtensions() const;
@@ -47,24 +46,24 @@ struct StmtSimplifyConfigNode : public ffi::Object {
 class StmtSimplifyConfig : public ffi::ObjectRef {
  public:
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(StmtSimplifyConfig, ffi::ObjectRef,
-                                                StmtSimplifyConfigNode);
+                                                StmtSimplifyConfigObj);
 };
 
-class StmtSimplifier : public IRMutatorWithAnalyzer {
+class StmtSimplifier : public StmtExprMutatorWithAnalyzer {
  public:
-  using IRMutatorWithAnalyzer::Mutate;
-  using IRMutatorWithAnalyzer::Mutate_;
-  static PrimFunc Apply(PrimFunc func, const sym::Analyzer& analyzer,
+  using StmtExprMutatorWithAnalyzer::Mutate;
+  using StmtExprMutatorWithAnalyzer::Mutate_;
+  static Function Apply(Function func, const sym::Analyzer& analyzer,
                         ffi::Optional<StmtSimplifyConfig> config_opt = std::nullopt);
 
   explicit StmtSimplifier(const sym::Analyzer& analyzer, StmtSimplifyConfig config)
-      : IRMutatorWithAnalyzer(analyzer), config_(config) {}
+      : StmtExprMutatorWithAnalyzer(analyzer), config_(config) {}
 
  protected:
-  using Parent = IRMutatorWithAnalyzer;
+  using Parent = StmtExprMutatorWithAnalyzer;
   StmtSimplifier(const VTable* vtable, const sym::Analyzer& analyzer, StmtSimplifyConfig config)
       : Parent(analyzer.get(), vtable), config_(config) {}
-  PrimFunc Run(PrimFunc func);
+  Function Run(Function func);
 
   UnchangedOr<ffi::Any> Mutate(ffi::AnyView input, InplaceMode inplace_mode) final;
 
@@ -72,10 +71,10 @@ class StmtSimplifier : public IRMutatorWithAnalyzer {
 
   UnchangedOr<Stmt> Mutate_(const BindNode* op, InplaceMode inplace_mode) override;
 
-  UnchangedOr<Stmt> Mutate_(const IfThenElseNode* op, InplaceMode inplace_mode) override;
+  UnchangedOr<Stmt> Mutate_(const IfNode* op, InplaceMode inplace_mode) override;
 
   // eliminate useless stores
-  UnchangedOr<Stmt> Mutate_(const BufferStoreNode* op, InplaceMode inplace_mode) override;
+  UnchangedOr<Stmt> Mutate_(const TensorStoreNode* op, InplaceMode inplace_mode) override;
 
  private:
   bool ArrayDeepEqual(const ffi::Array<PrimExpr>& lhs, const ffi::Array<PrimExpr>& rhs);
@@ -93,11 +92,11 @@ class StmtSimplifier : public IRMutatorWithAnalyzer {
   ffi::Map<Var, PrimExpr> non_inlined_bindings_;
 };
 
-/* \brief Simplify statements in the prim func
+/* \brief Simplify statements in the function
  *
  * Applies the same behavior as the tirx.transform.StmtSimplify pass.
  */
-PrimFunc StmtSimplify(PrimFunc func, const sym::Analyzer& analyzer);
+Function StmtSimplify(Function func, const sym::Analyzer& analyzer);
 
 }  // namespace tirx
 }  // namespace tvm

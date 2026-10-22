@@ -18,24 +18,25 @@
 import tvm
 from tvm import s_tir
 from tvm.script import ir as I
+from tvm.script import s_tir as Ts
 from tvm.script import tirx as T
 
 
 def test_rewrite_Select():
     @I.ir_module
     class ModuleY:
-        @T.prim_func(s_tir=True)
+        @Ts.function
         def main(i: T.int32):
-            A = T.alloc_buffer((100,))
+            A = T.alloc_tensor(ty_args=[T.Tensor((100,))])
             T.evaluate(T.Select(i > 1, A[i - 1], T.float32(1.0)))
 
     yy = tvm.s_tir.transform.RewriteUnsafeSelect()(ModuleY)["main"].body.seq[-1].value
 
     @I.ir_module
     class ModuleZ:
-        @T.prim_func(s_tir=True)
+        @Ts.function
         def main(i: T.int32):
-            A = T.alloc_buffer((100,))
+            A = T.alloc_tensor(ty_args=[T.Tensor((100,))])
             T.evaluate(
                 T.Select(
                     T.Select(i > 1, A[i - 1], T.float32(1.0)) > T.float32(0.0), A[i], T.float32(0.1)
@@ -46,10 +47,10 @@ def test_rewrite_Select():
 
     @I.ir_module
     class ModuleA:
-        @T.prim_func(s_tir=True)
+        @Ts.function
         def main(i: T.int32):
-            A = T.alloc_buffer((100,))
-            # Inline y and z to avoid Let bindings - outer Select condition is safe (no buffer access)
+            A = T.alloc_tensor(ty_args=[T.Tensor((100,))])
+            # Inline y and z to avoid Let bindings - outer Select condition is safe (no tensor access)
             T.evaluate(
                 T.Select(
                     T.floordiv(i, 4) > 10,
@@ -73,7 +74,7 @@ def test_rewrite_Select():
 def test_scalar_address_survives_generic_transforms():
     @I.ir_module
     class Before:
-        @T.prim_func(s_tir=True)
+        @Ts.function
         def main(value: T.uint32, condition: T.bool):
             T.evaluate(T.Select(condition, T.isnullptr(T.address_of(value)), T.bool(False)))
 

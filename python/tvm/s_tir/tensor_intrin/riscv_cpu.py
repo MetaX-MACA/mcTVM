@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=invalid-name,line-too-long
-# ruff: noqa: E501
 """Intrinsics for RISCV tensorization"""
 
 import logging
@@ -23,6 +22,7 @@ import logging
 import tvm_ffi
 
 from tvm.runtime import DataType
+from tvm.script import s_tir as Ts
 from tvm.script import tirx as T
 from tvm.target.codegen import Target, llvm_get_vector_width, target_has_features
 
@@ -73,19 +73,19 @@ def rvv_vec_dot_product_kernels(
         }
     """
 
-    @T.prim_func(s_tir=True)
+    @Ts.function
     def rvv_vec_dot_prod_desc(
-        A: T.Buffer((n_elems,), data_dtype, offset_factor=1),
-        B: T.Buffer((n_lanes, n_elems), weight_dtype, offset_factor=1),
-        C: T.Buffer((n_lanes,), out_dtype, offset_factor=1),
+        A: T.Tensor((n_elems,), data_dtype, offset_factor=1),
+        B: T.Tensor((n_lanes, n_elems), weight_dtype, offset_factor=1),
+        C: T.Tensor((n_lanes,), out_dtype, offset_factor=1),
     ) -> None:
-        with T.sblock("root"):
-            T.reads(C[0:n_lanes], A[0:n_elems], B[0:n_lanes, 0:n_elems])
-            T.writes(C[0:n_lanes])
+        with Ts.sblock("root"):
+            Ts.reads(C[0:n_lanes], A[0:n_elems], B[0:n_lanes, 0:n_elems])
+            Ts.writes(C[0:n_lanes])
             for j in T.serial(0, n_lanes):
                 for k in T.serial(0, n_elems):
-                    with T.sblock("update"):
-                        vj, vk = T.axis.remap("SR", [j, k])
+                    with Ts.sblock("update"):
+                        vj, vk = Ts.axis.remap("SR", [j, k])
                         C[vj] = C[vj] + T.cast(A[vk], out_dtype) * T.cast(B[vj, vk], out_dtype)
 
     # LLVM only supports ELEN=32 or ELEN=64
@@ -97,6 +97,8 @@ def rvv_vec_dot_product_kernels(
     # data type widening case
     o_dtype_lanes = max(o_dtype_lanes, 2)
 
+    weight_bytes = DataType(weight_dtype).bits // 8
+    output_bytes = DataType(out_dtype).bits // 8
     mask_args = () if data_dtype[0] in ("i", "u") else (T.uint64(7),)
 
     wide_dtype = out_dtype
@@ -105,37 +107,34 @@ def rvv_vec_dot_product_kernels(
         wide_dtype += str(DataType(data_dtype).bits * 2)
 
     # fmt: off
-    @T.prim_func(s_tir=True)
+    @Ts.function
     def rvv_vec_dot_prod_impl(
-        A: T.Buffer((n_elems,), data_dtype, offset_factor=1),
-        B: T.Buffer((n_lanes, n_elems), weight_dtype, offset_factor=1),
-        C: T.Buffer((n_lanes,), out_dtype, offset_factor=1),
+        A: T.Tensor((n_elems,), data_dtype, offset_factor=1),
+        B: T.Tensor((n_lanes, n_elems), weight_dtype, offset_factor=1),
+        C: T.Tensor((n_lanes,), out_dtype, offset_factor=1),
     ) -> None:
-        with T.sblock("root"):
-            T.reads(C[0:n_lanes], A[0:n_elems], B[0:n_lanes, 0:n_elems])
-            T.writes(C[0:n_lanes])
+        with Ts.sblock("root"):
+            Ts.reads(C[0:n_lanes], A[0:n_elems], B[0:n_lanes, 0:n_elems])
+            Ts.writes(C[0:n_lanes])
 
             vec_A = T.call_llvm_intrin(
-                f"{data_dtype}xvscalex{d_dtype_lanes}",
                 "llvm.riscv.vle",
                 T.broadcast(T.Cast(data_dtype, 0), T.vscale() * d_dtype_lanes),
-                T.tvm_access_ptr(T.type_annotation(data_dtype), A.data, 0, n_elems, 1),
-                T.int64(n_elems))
+                A.data,
+                T.int64(n_elems), ty=f"{data_dtype}xvscalex{d_dtype_lanes}")
 
             for i in range(n_lanes):
-                with T.sblock("update"):
-                    T.reads(B[i, 0:n_elems])
-                    T.writes(C[i])
+                with Ts.sblock("update"):
+                    Ts.reads(B[i, 0:n_elems])
+                    Ts.writes(C[i])
 
                     vec_B_row = T.call_llvm_intrin(
-                        f"{weight_dtype}xvscalex{w_dtype_lanes}",
                         "llvm.riscv.vle",
                         T.broadcast(T.Cast(data_dtype, 0), T.vscale() * w_dtype_lanes),
-                        T.tvm_access_ptr(T.type_annotation(weight_dtype), B.data, i * n_elems, n_elems, 1),
-                        T.int64(n_elems))
+                        T.ptr_byte_offset(B.data, i * n_elems * weight_bytes, ty=B.data.ty),
+                        T.int64(n_elems), ty=f"{weight_dtype}xvscalex{w_dtype_lanes}")
 
                     product = T.call_llvm_intrin(
-                        f"{wide_dtype}xvscalex{w_dtype_lanes}",
                         "llvm.riscv.vfmul" if out_dtype[0] == "f" else \
                         "llvm.riscv.vwmulsu" if (data_dtype[0] != weight_dtype[0]) else \
                         "llvm.riscv.vwmul",
@@ -143,30 +142,27 @@ def rvv_vec_dot_product_kernels(
                         vec_B_row,
                         vec_A,
                         *mask_args,
-                        T.uint64(n_elems))
+                        T.uint64(n_elems), ty=f"{wide_dtype}xvscalex{w_dtype_lanes}")
 
                     ini_acc = T.call_llvm_intrin(
-                        f"{out_dtype}xvscalex{o_dtype_lanes}",
                         "llvm.riscv.vle",
                         T.broadcast(T.Cast(out_dtype, 0), T.vscale() * o_dtype_lanes),
-                        T.tvm_access_ptr(T.type_annotation(out_dtype), C.data, i, 1, 1),
-                        T.int64(1))
+                        T.ptr_byte_offset(C.data, i * output_bytes, ty=C.data.ty),
+                        T.int64(1), ty=f"{out_dtype}xvscalex{o_dtype_lanes}")
 
                     red_sum = T.call_llvm_intrin(
-                        f"{out_dtype}xvscalex{o_dtype_lanes}",
                         "llvm.riscv.vfredusum" if out_dtype[0] == "f" else \
                         "llvm.riscv.vwredsum",
                         T.broadcast(T.Cast(out_dtype, 0), T.vscale() * o_dtype_lanes),
                         product,
                         ini_acc,
                         *mask_args,
-                        T.uint64(n_elems))
+                        T.uint64(n_elems), ty=f"{out_dtype}xvscalex{o_dtype_lanes}")
 
                     C[i] = T.call_llvm_intrin(
-                        out_dtype,
                         "llvm.riscv.vfmv.f.s" if out_dtype[0] == "f" else \
                         "llvm.riscv.vmv.x.s",
-                        red_sum)
+                        red_sum, ty=out_dtype)
     # fmt: on
     return rvv_vec_dot_prod_desc, rvv_vec_dot_prod_impl
 

@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# ruff: noqa: F841
 
 import numpy as np
 import pytest
@@ -23,7 +22,9 @@ import tvm
 import tvm.script
 import tvm.testing
 from tvm import relax
+from tvm.relax import ExternFunc as _ExternFunc
 from tvm.script import relax as R
+from tvm.script import s_tir as Ts
 from tvm.script import tirx as T
 
 use_np_array = tvm.testing.parameter(False, True)
@@ -32,18 +33,16 @@ use_np_array = tvm.testing.parameter(False, True)
 def test_bind_params(use_np_array):
     @tvm.script.ir_module
     class InputModule:
-        @T.prim_func(s_tir=True)
-        def tir_matmul(x: T.handle, y: T.handle, z: T.handle) -> None:
+        @Ts.function
+        def tir_matmul(A: T.Tensor((16, 16)), B: T.Tensor((16, 16)), C: T.Tensor((16, 16))) -> None:
             T.func_attr({"global_symbol": "tir_matmul"})
-            A = T.match_buffer(x, (16, 16))
-            B = T.match_buffer(y, (16, 16))
-            C = T.match_buffer(z, (16, 16))
+
             for i0, j, k0, i1, k1 in T.grid(4, 16, 4, 4, 4):
-                with T.sblock("matmul"):
-                    vi = T.axis.S(16, i0 * 4 + i1)
-                    vj = T.axis.S(16, j)
-                    vk = T.axis.R(16, k0 * 4 + k1)
-                    with T.init():
+                with Ts.sblock("matmul"):
+                    vi = Ts.axis.S(16, i0 * 4 + i1)
+                    vj = Ts.axis.S(16, j)
+                    vk = Ts.axis.R(16, k0 * 4 + k1)
+                    with Ts.init():
                         C[vi, vj] = T.float32(0)
                     C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
 
@@ -51,7 +50,9 @@ def test_bind_params(use_np_array):
         def main(x: R.Tensor((16, 16), "float32"), w: R.Tensor((16, 16), "float32")) -> R.Tensor(
             (16, 16), "float32"
         ):
-            gv0 = R.call_tir(InputModule.tir_matmul, (x, w), R.Tensor((16, 16), dtype="float32"))
+            gv0 = R.call_tir(
+                InputModule.tir_matmul, (x, w), ty_args=[R.Tensor((16, 16), dtype="float32")]
+            )
             return gv0
 
     x_np = np.random.rand(16, 16).astype(np.float32)
@@ -75,26 +76,31 @@ def test_bind_params(use_np_array):
 
 
 def test_bind_params_symbolic_vars():
+    batch = T.dynamic("batch")
+    k = T.dynamic("k")
+    m = T.dynamic("m")
+    n = T.dynamic("n")
+
     @tvm.script.ir_module
     class Before:
         @R.function
         def main(
-            x: R.Tensor(("batch", "m"), dtype="float32"),
-            w0: R.Tensor(("n", "m"), dtype="float32"),
-            b0: R.Tensor(("n",), dtype="float32"),
-            w1: R.Tensor(("k", "n"), dtype="float32"),
-            b1: R.Tensor(("k",), dtype="float32"),
-        ) -> R.Tensor(("batch", "k"), dtype="float32"):
-            batch = T.int64()
-            k = T.int64()
-            m = T.int64()
-            n = T.int64()
+            x: R.Tensor((batch, m), dtype="float32"),
+            w0: R.Tensor((n, m), dtype="float32"),
+            b0: R.Tensor((n,), dtype="float32"),
+            w1: R.Tensor((k, n), dtype="float32"),
+            b1: R.Tensor((k,), dtype="float32"),
+        ) -> R.Tensor((batch, k), dtype="float32"):
             with R.dataflow():
                 lv0 = R.call_dps_packed(
-                    "linear0", (x, w0, b0), out_ty=R.Tensor((batch, n), dtype="float32")
+                    _ExternFunc("linear0"),
+                    (x, w0, b0),
+                    ty_args=[R.Tensor((batch, n), dtype="float32")],
                 )
                 out = R.call_dps_packed(
-                    "linear1", (lv0, w1, b1), out_ty=R.Tensor((batch, k), dtype="float32")
+                    _ExternFunc("linear1"),
+                    (lv0, w1, b1),
+                    ty_args=[R.Tensor((batch, k), dtype="float32")],
                 )
                 R.output(out)
             return out

@@ -76,15 +76,17 @@ ffi::Map<ffi::String, ffi::Any> UpdateMACAAttrs(ffi::Map<ffi::String, ffi::Any> 
 void RegisterTargetKind() {
   namespace refl = tvm::ffi::reflection;
 
-  TVM_REGISTER_TARGET_KIND("maca", kDLMACA)
-      .add_attr_option<ffi::String>("mcpu")
-      .add_attr_option<ffi::String>("mtriple")
-      .add_attr_option<ffi::Array<ffi::String>>("mattr")
-      .add_attr_option<int64_t>("max_num_threads", refl::DefaultValue(1024))
-      .add_attr_option<int64_t>("max_threads_per_block", refl::DefaultValue(1024))
-      .add_attr_option<int64_t>("max_shared_memory_per_block", refl::DefaultValue(65536))
-      .add_attr_option<int64_t>("thread_warp_size", refl::DefaultValue(64))
-      .add_attr_option<int64_t>("max_local_memory_per_block", refl::DefaultValue(4095))
+  TargetKindDef("maca")
+      .set_default_device_type(kDLMACA)
+      .def_option<ffi::Map<ffi::String, ffi::Any>>("backend_config")
+      .def_option<ffi::String>("mcpu")
+      .def_option<ffi::String>("mtriple")
+      .def_option<ffi::Array<ffi::String>>("mattr")
+      .def_option<int64_t>("max_num_threads", refl::DefaultValue(1024))
+      .def_option<int64_t>("max_threads_per_block", refl::DefaultValue(1024))
+      .def_option<int64_t>("max_shared_memory_per_block", refl::DefaultValue(65536))
+      .def_option<int64_t>("thread_warp_size", refl::DefaultValue(64))
+      .def_option<int64_t>("max_local_memory_per_block", refl::DefaultValue(4095))
       .set_default_keys({"maca", "gpu"})
       .set_target_canonicalizer(UpdateMACAAttrs);
 }

@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Tests for T.cuda.warp_reduce / warp_sum / warp_max / warp_min intrinsics."""
+"""Tests for T.maca.warp_reduce / warp_sum / warp_max / warp_min intrinsics."""
 
 import numpy as np
 import pytest
@@ -28,7 +28,7 @@ TARGET = tvm.target.Target("maca")
 
 def _build_and_run(func, n=64):
     mod = tvm.IRModule({"main": func})
-    mod = tvm.compile(mod, target=TARGET, tir_pipeline="tirx")
+    mod = tvm.tirx.compile(mod, target=TARGET, pipeline="tirx")
     out_np = np.zeros(n, dtype="float32")
 
     def run_and_check():
@@ -43,23 +43,23 @@ def _build_and_run(func, n=64):
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_warp_sum_full():
-    """Full warp sum (width=32): each lane gets the sum of all 32 values."""
+    """Full warp sum (width=64): each lane gets the sum of all 64 values."""
 
     # fmt: off
-    @T.prim_func
-    def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (64,), "float32")
-        T.device_entry()
-        cta_id = T.cta_id([1])
-        warp_id = T.warp_id([1])
-        lane = T.lane_id([64])
+    @T.function
+    def func(out: T.Tensor((64,), 'float32')):
+
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 64))
+        cta_id = T.maca.block_idx('x')
+        warp_id = T.maca.warp_id()
+        lane = T.maca.lane_id()
         val: T.f32 = T.float32(lane + 1)
         val = T.maca.warp_sum(val)
         out[lane] = val
         # fmt: on
 
     result, mod = _build_and_run(func)
-    expected = np.float32(64 * 65 / 2)  # sum(1..32)
+    expected = np.float32(64 * 65 / 2)  # sum(1..64)
     np.testing.assert_allclose(result, np.full(64, expected))
     assert "maca_warp_reduce_sum_64" in mod.mod.imports[0].inspect_source()
 
@@ -67,16 +67,16 @@ def test_warp_sum_full():
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_warp_sum_partial_8():
-    """Partial warp sum (width=8): 4 groups of 8 lanes, each group sums independently."""
+    """Partial warp sum (width=8): 8 groups of 8 lanes, each group sums independently."""
 
     # fmt: off
-    @T.prim_func
-    def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (64,), "float32")
-        T.device_entry()
-        cta_id = T.cta_id([1])
-        warp_id = T.warp_id([1])
-        lane = T.lane_id([64])
+    @T.function
+    def func(out: T.Tensor((64,), 'float32')):
+
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 64))
+        cta_id = T.maca.block_idx('x')
+        warp_id = T.maca.warp_id()
+        lane = T.maca.lane_id()
         val: T.f32 = T.float32(lane + 1)
         val = T.maca.warp_sum(val, width=8)
         out[lane] = val
@@ -100,13 +100,13 @@ def test_warp_max_partial_4():
     """Partial warp max (width=4): 8 groups of 4 lanes."""
 
     # fmt: off
-    @T.prim_func
-    def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (64,), "float32")
-        T.device_entry()
-        cta_id = T.cta_id([1])
-        warp_id = T.warp_id([1])
-        lane = T.lane_id([64])
+    @T.function
+    def func(out: T.Tensor((64,), 'float32')):
+
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 64))
+        cta_id = T.maca.block_idx('x')
+        warp_id = T.maca.warp_id()
+        lane = T.maca.lane_id()
         val: T.f32 = T.float32(lane + 1)
         val = T.maca.warp_max(val, width=4)
         out[lane] = val
@@ -126,13 +126,13 @@ def test_warp_min_full():
     """Full warp min (width=32)."""
 
     # fmt: off
-    @T.prim_func
-    def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (64,), "float32")
-        T.device_entry()
-        cta_id = T.cta_id([1])
-        warp_id = T.warp_id([1])
-        lane = T.lane_id([64])
+    @T.function
+    def func(out: T.Tensor((64,), 'float32')):
+
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 64))
+        cta_id = T.maca.block_idx('x')
+        warp_id = T.maca.warp_id()
+        lane = T.maca.lane_id()
         val: T.f32 = T.float32(lane + 1)
         val = T.maca.warp_min(val)
         out[lane] = val
@@ -145,16 +145,16 @@ def test_warp_min_full():
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_warp_sum_partial_2():
-    """Smallest partial warp sum (width=2): 16 pairs of adjacent lanes."""
+    """Smallest partial warp sum (width=2): 32 pairs of adjacent lanes."""
 
     # fmt: off
-    @T.prim_func
-    def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (64,), "float32")
-        T.device_entry()
-        cta_id = T.cta_id([1])
-        warp_id = T.warp_id([1])
-        lane = T.lane_id([64])
+    @T.function
+    def func(out: T.Tensor((64,), 'float32')):
+
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 64))
+        cta_id = T.maca.block_idx('x')
+        warp_id = T.maca.warp_id()
+        lane = T.maca.lane_id()
         val: T.f32 = T.float32(lane)
         val = T.maca.warp_sum(val, width=2)
         out[lane] = val
@@ -172,18 +172,18 @@ def test_warp_sum_partial_2():
 
 @pytest.mark.gpu
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
-@pytest.mark.parametrize("width", [2, 4, 8, 16, 32])
+@pytest.mark.parametrize("width", [2, 4, 8, 16, 32, 64])
 def test_warp_sum_all_widths(width):
-    """Parametric test: warp_sum with every valid width."""
+    """Parametric test: warp_sum with every valid MACA warp width."""
 
     # fmt: off
-    @T.prim_func
-    def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (64,), "float32")
-        T.device_entry()
-        cta_id = T.cta_id([1])
-        warp_id = T.warp_id([1])
-        lane = T.lane_id([64])
+    @T.function
+    def func(out: T.Tensor((64,), 'float32')):
+
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=1 * 64))
+        cta_id = T.maca.block_idx('x')
+        warp_id = T.maca.warp_id()
+        lane = T.maca.lane_id()
         val: T.f32 = T.float32(lane)
         val = T.maca.warp_sum(val, width=width)
         out[lane] = val

@@ -30,10 +30,10 @@ VECTOR_N = 8
 
 
 def _compile_maca_unary(op, symbol):
-    @T.prim_func
-    def kernel(A: T.Buffer((VECTOR_N,), "float32"), B: T.Buffer((VECTOR_N,), "float32")):
+    @T.function
+    def kernel(A: T.Tensor((VECTOR_N,), "float32"), B: T.Tensor((VECTOR_N,), "float32")):
         T.func_attr({"global_symbol": symbol, "tirx.noalias": True})
-        for i in T.thread_binding(VECTOR_N, thread="threadIdx.x"):
+        with T.launch_thread("threadIdx.x", VECTOR_N) as i:
             B[i] = op(A[i])
 
     target = tvm.target.Target("maca")
@@ -117,22 +117,18 @@ def test_int_intrin(target, dtype):
     for tvm_intrin, np_func in test_funcs:
         n = 128
 
-        @I.ir_module(s_tir=True)
+        @I.ir_module
         class Module:
-            @T.prim_func(s_tir=True)
+            @T.function
             def main(
-                A: T.Buffer((n,), dtype),
-                B: T.Buffer((n,), dtype),
+                A: T.Tensor((n,), dtype),
+                B: T.Tensor((n,), dtype),
             ):
                 T.func_attr({"tirx.noalias": True})
-                for i0 in T.thread_binding(n, thread="threadIdx.x"):
-                    with T.sblock("B"):
-                        v_i0 = T.axis.spatial(n, i0)
-                        T.reads(A[v_i0])
-                        T.writes(B[v_i0])
-                        B[v_i0] = tvm_intrin(A[v_i0])
+                with T.launch_thread("threadIdx.x", n) as i0:
+                    B[i0] = tvm_intrin(A[i0])
 
-        f = tvm.compile(Module, target=target)
+        f = tvm.tirx.compile(Module, target=target)
 
         def run_and_check():
             dev = tvm.device_from_target(target)

@@ -21,8 +21,11 @@
  * \file intrin_rule_maca.cc
  * \brief MACA intrinsic rules.
  */
+#include <tvm/backend/maca/op_attr_types.h>
 #include <tvm/ffi/reflection/registry.h>
-#include <tvm/tirx/builtin.h>
+#include <tvm/ir/expr.h>
+#include <tvm/ir/op.h>
+#include <tvm/tirx/op/gpu.h>
 #include <tvm/tirx/op_attr_types.h>
 
 #include "../../../target/intrin_rule.h"
@@ -32,6 +35,25 @@ namespace codegen {
 namespace intrin {
 // Add float suffix to the intrinsics, MACA fast math.
 using tirx::FLowerIntrinsic;
+
+template <size_t N>
+Type InferTypeReturnArgType(const CallNode* call) {
+  TVM_FFI_CHECK_GT(call->args.size(), N, ValueError)
+      << "Return type inference requires argument " << N;
+  return call->args[N]->ty;
+}
+
+void RegisterMACAShuffleOp(const char* op_name, const char* symbol, const char* lane_arg) {
+  OpDef(op_name)
+      .signature(sig::arg<IntExpr>("mask"), sig::arg("value"), sig::arg<IntExpr>(lane_arg),
+                 sig::arg<IntExpr>("width"))
+      .set_attr<FInferType>(tvm::op_attr::kInferType,
+                            FInferType::FromNative<&InferTypeReturnArgType<1>>())
+      .set_attr<TGlobalSymbol>(tvm::tirx::op_attr::kGlobalSymbol, symbol)
+      .set_attr<TCallEffectKind>(tvm::op_attr::kCallEffectKind,
+                                 static_cast<int64_t>(CallEffectKind::kOpaque))
+      .set_attr<bool>(tvm::backend::maca::op_attr::kNeedWarpShuffle, true);
+}
 
 struct MACAMath {
   std::string operator()(const PrimType& t, std::string name) const {
@@ -121,18 +143,18 @@ struct MACAPopcount {
 
 struct MACAWarpIntrinsic {
   const Op operator()(const PrimType& t, const Op& orig_op) const {
-    if (orig_op.same_as(builtin::tvm_warp_shuffle())) {
+    if (orig_op.same_as(tirx::gpu_warp_shuffle_op())) {
       static const Op& maca_shfl_sync_op = Op::Get("tirx.maca.__shfl_sync");
       return maca_shfl_sync_op;
-    } else if (orig_op.same_as(builtin::tvm_warp_shuffle_up())) {
+    } else if (orig_op.same_as(tirx::gpu_warp_shuffle_up_op())) {
       static const Op& maca_shfl_up_sync_op = Op::Get("tirx.maca.__shfl_up_sync");
       return maca_shfl_up_sync_op;
-    } else if (orig_op.same_as(builtin::tvm_warp_shuffle_down())) {
+    } else if (orig_op.same_as(tirx::gpu_warp_shuffle_down_op())) {
       static const Op& maca_shfl_down_sync_op = Op::Get("tirx.maca.__shfl_down_sync");
       return maca_shfl_down_sync_op;
     } else {
       static const Op& maca_shfl_xor_sync_op = Op::Get("tirx.maca.__shfl_xor_sync");
-      TVM_FFI_ICHECK(orig_op.same_as(builtin::tvm_warp_shuffle_xor()));
+      TVM_FFI_ICHECK(orig_op.same_as(tirx::gpu_warp_shuffle_xor_op()));
       return maca_shfl_xor_sync_op;
     }
   }
@@ -158,183 +180,122 @@ static PrimExpr DispatchMACAShuffle(const PrimExpr& e) {
 
 void RegisterMACAIntrinRules() {
   // clang-format off
-TVM_REGISTER_OP("prim.clz").set_attr<FLowerIntrinsic>(
+OpDef("prim.clz").set_attr<FLowerIntrinsic>(
     "maca.FLowerIntrinsic", DispatchPureExtern<MACAMath, /*dtype_from_arg=*/true>);
 
-TVM_REGISTER_OP("tirx.floor")
+OpDef("prim.floor")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("prim.ceil")
+OpDef("prim.ceil")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.trunc")
+OpDef("prim.trunc")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.fabs")
+OpDef("prim.fabs")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.round")
+OpDef("prim.round")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.nearbyint")
+OpDef("prim.nearbyint")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.exp")
+OpDef("prim.exp")
     .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.exp2")
+OpDef("prim.exp2")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.exp10")
+OpDef("prim.exp10")
     .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.erf").set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic",
+OpDef("prim.erf").set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic",
                                                      DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.log")
+OpDef("prim.log")
     .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("prim.log2")
+OpDef("prim.log2")
     .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.log10")
+OpDef("prim.log10")
     .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.tan")
+OpDef("prim.tan")
     // Now the fast math version of tan and the default version of tan are same.
     .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic",
                                DispatchPureExtern<MACAFastMathTan>)
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.cos")
+OpDef("prim.cos")
     .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.cosh")
+OpDef("prim.cosh")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.sin")
+OpDef("prim.sin")
     .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.sinh")
+OpDef("prim.sinh")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.atan")
+OpDef("prim.atan")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.tanh")
+OpDef("prim.tanh")
     .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.sqrt")
+OpDef("prim.sqrt")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.pow")
+OpDef("prim.pow")
     .set_attr<FLowerIntrinsic>("maca.fastmath.FLowerIntrinsic", DispatchPureExtern<MACAFastMath>)
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.rsqrt")
+OpDef("prim.rsqrt")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-TVM_REGISTER_OP("tirx.popcount")
+OpDef("prim.popcount")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAPopcount>);
 
-TVM_REGISTER_OP("tirx.tvm_warp_shuffle")
+OpDef("tirx.gpu_warp_shuffle")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchMACAShuffle<MACAWarpIntrinsic>);
 
-TVM_REGISTER_OP("tirx.tvm_warp_shuffle_up")
+OpDef("tirx.gpu_warp_shuffle_up")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchMACAShuffle<MACAWarpIntrinsic>);
 
-TVM_REGISTER_OP("tirx.tvm_warp_shuffle_down")
+OpDef("tirx.gpu_warp_shuffle_down")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchMACAShuffle<MACAWarpIntrinsic>);
 
-TVM_REGISTER_OP("tirx.tvm_warp_shuffle_xor")
+OpDef("tirx.gpu_warp_shuffle_xor")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchMACAShuffle<MACAWarpIntrinsic>);
 
-TVM_REGISTER_OP("tirx.tvm_warp_activemask")
+OpDef("tirx.gpu_warp_activemask")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchMACAWarpActiveMask);
 
-TVM_REGISTER_OP("tirx.fmod")
+OpDef("prim.fmod")
     .set_attr<FLowerIntrinsic>("maca.FLowerIntrinsic", DispatchPureExtern<MACAMath>);
 
-// Register low-level builtin ops.
-// TODO(tvm-team): consider make MACA its own subfolder and create a file for low-level builtins.
-TVM_REGISTER_OP("tirx.maca.__shfl_sync")
-    .set_num_inputs(4)
-    .add_argument("mask", "Expr", "The thread mask.")
-    .add_argument("var", "Expr", "The variable to sync.")
-    .add_argument("lane", "Expr", "The source thread id.")
-    .add_argument("width", "Expr", "The warp thread width, must be a power of 2.")
-    .set_attr<tirx::TIRxOpCategory>("TIRxOpCategory", ffi::String("device_intrin"), 10)
-    .set_attr<tirx::TDeviceIntrinsicNamespace>("TDeviceIntrinsicNamespace", ffi::String("maca"),
-                                               10)
-    .set_attr<tirx::TScriptPrinterName>("TScriptPrinterName", ffi::String("maca.__shfl_sync"),
-                                        10)
-    .set_attr<TGlobalSymbol>("TGlobalSymbol", "__shfl_sync")
-    .set_attr<TCallEffectKind>("TCallEffectKind", static_cast<int64_t>(CallEffectKind::kOpaque))
-    .set_attr<bool>("maca.need_warp_shuffle", true);
+RegisterMACAShuffleOp("tirx.maca.__shfl_sync", "__shfl_sync", "lane");
+RegisterMACAShuffleOp("tirx.maca.__shfl_up_sync", "__shfl_up_sync", "delta");
+RegisterMACAShuffleOp("tirx.maca.__shfl_down_sync", "__shfl_down_sync", "delta");
+RegisterMACAShuffleOp("tirx.maca.__shfl_xor_sync", "__shfl_xor_sync", "lane_mask");
 
-TVM_REGISTER_OP("tirx.maca.__shfl_up_sync")
-    .set_num_inputs(4)
-    .add_argument("mask", "Expr", "The thread mask.")
-    .add_argument("var", "Expr", "The variable to sync.")
-    .add_argument("delta", "Expr", "The source lane id offset to be added.")
-    .add_argument("width", "Expr", "The warp thread width, must be a power of 2.")
-    .set_attr<tirx::TIRxOpCategory>("TIRxOpCategory", ffi::String("device_intrin"), 10)
-    .set_attr<tirx::TDeviceIntrinsicNamespace>("TDeviceIntrinsicNamespace", ffi::String("maca"),
-                                               10)
-    .set_attr<tirx::TScriptPrinterName>("TScriptPrinterName", ffi::String("maca.__shfl_up_sync"),
-                                        10)
-    .set_attr<TGlobalSymbol>("TGlobalSymbol", "__shfl_up_sync")
-    .set_attr<TCallEffectKind>("TCallEffectKind", static_cast<int64_t>(CallEffectKind::kOpaque))
-    .set_attr<bool>("maca.need_warp_shuffle", true);
-
-TVM_REGISTER_OP("tirx.maca.__shfl_down_sync")
-    .set_num_inputs(4)
-    .add_argument("mask", "Expr", "The thread mask.")
-    .add_argument("var", "Expr", "The variable to sync.")
-    .add_argument("delta", "Expr", "The source lane id offset to be subtracted.")
-    .add_argument("width", "Expr", "The warp thread width, must be a power of 2.")
-    .set_attr<tirx::TIRxOpCategory>("TIRxOpCategory", ffi::String("device_intrin"), 10)
-    .set_attr<tirx::TDeviceIntrinsicNamespace>("TDeviceIntrinsicNamespace", ffi::String("maca"),
-                                               10)
-    .set_attr<tirx::TScriptPrinterName>("TScriptPrinterName",
-                                        ffi::String("maca.__shfl_down_sync"), 10)
-    .set_attr<TGlobalSymbol>("TGlobalSymbol", "__shfl_down_sync")
-    .set_attr<TCallEffectKind>("TCallEffectKind", static_cast<int64_t>(CallEffectKind::kOpaque))
-    .set_attr<bool>("maca.need_warp_shuffle", true);
-
-TVM_REGISTER_OP("tirx.maca.__shfl_xor_sync")
-    .set_num_inputs(4)
-    .add_argument("mask", "Expr", "The thread mask.")
-    .add_argument("var", "Expr", "The variable to sync.")
-    .add_argument("lane_mask", "Expr", "The lane mask.")
-    .add_argument("width", "Expr", "The warp thread width, must be a power of 2.")
-    .set_attr<tirx::TIRxOpCategory>("TIRxOpCategory", ffi::String("device_intrin"), 10)
-    .set_attr<tirx::TDeviceIntrinsicNamespace>("TDeviceIntrinsicNamespace", ffi::String("maca"),
-                                               10)
-    .set_attr<tirx::TScriptPrinterName>("TScriptPrinterName", ffi::String("maca.__shfl_xor_sync"),
-                                        10)
-    .set_attr<TGlobalSymbol>("TGlobalSymbol", "__shfl_xor_sync")
-    .set_attr<TCallEffectKind>("TCallEffectKind", static_cast<int64_t>(CallEffectKind::kOpaque))
-    .set_attr<bool>("maca.need_warp_shuffle", true);
-
-TVM_REGISTER_OP("tirx.maca.__activemask")
-    .set_num_inputs(0)
-    .set_attr<tirx::TIRxOpCategory>("TIRxOpCategory", ffi::String("device_intrin"), 10)
-    .set_attr<tirx::TDeviceIntrinsicNamespace>("TDeviceIntrinsicNamespace", ffi::String("maca"),
-                                               10)
-    .set_attr<tirx::TScriptPrinterName>("TScriptPrinterName", ffi::String("maca.__activemask"),
-                                        10)
-    .set_attr<TGlobalSymbol>("TGlobalSymbol", "__activemask")
-    .set_attr<TCallEffectKind>("TCallEffectKind", static_cast<int64_t>(CallEffectKind::kPure))
-    .set_attr<bool>("maca.need_warp_shuffle", true);
+OpDef("tirx.maca.__activemask")
+    .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::UInt(64))
+    .set_attr<TGlobalSymbol>(tvm::tirx::op_attr::kGlobalSymbol, "__activemask")
+    .set_attr<TCallEffectKind>(tvm::op_attr::kCallEffectKind,
+                               static_cast<int64_t>(CallEffectKind::kPure))
+    .set_attr<bool>(tvm::backend::maca::op_attr::kNeedWarpShuffle, true);
   // clang-format on
 }
 

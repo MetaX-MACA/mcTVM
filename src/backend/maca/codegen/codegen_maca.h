@@ -24,12 +24,15 @@
 #ifndef TVM_BACKEND_MACA_CODEGEN_CODEGEN_MACA_H_
 #define TVM_BACKEND_MACA_CODEGEN_CODEGEN_MACA_H_
 
+#include <tvm/backend/maca/op_attr_types.h>
 #include <tvm/ffi/error.h>
+#include <tvm/ir/op.h>
 #include <tvm/ir/prim/expr.h>
 #include <tvm/s_tir/stmt.h>
 #include <tvm/target/codegen.h>
-#include <tvm/tirx/op.h>
 
+#include <array>
+#include <optional>
 #include <queue>
 #include <string>
 #include <unordered_map>
@@ -41,39 +44,6 @@ namespace tvm {
 namespace codegen {
 namespace maca {
 
-class VisitPipelineCommitQueueScope : public tirx::StmtExprVisitor {
- public:
-  // info of each pipeline commit queue scope
-  std::queue<size_t> total_cp_async_nums;
-  std::queue<size_t> last_cp_async_size;
-
-  ffi::Optional<VisitInterrupt> Visit_(const CallNode* op) final {
-    static const Op& cp_async_op = Op::Get("tirx.s_tir.cp_async_raw");
-    if (op->op.same_as(cp_async_op)) {
-      mxc_cp_async_calls.push_back(op);
-    }
-    return tirx::StmtExprVisitor::Visit_(op);
-  }
-  ffi::Optional<VisitInterrupt> Visit_(const AttrStmtNode* op) final {
-    mxc_cp_async_calls.clear();
-    if (op->attr_key == s_tir::attr::async_commit_queue_scope) {
-      this->Visit(op->body);
-    }
-    if (!mxc_cp_async_calls.empty()) {
-      this->total_cp_async_nums.push(mxc_cp_async_calls.size());
-      size_t last_cp_size =
-          mxc_cp_async_calls.back()->args[4].as_or_throw<IntImm>()->value.as<size_t>().value();
-      TVM_FFI_ICHECK(last_cp_size == 4 || last_cp_size == 8 || last_cp_size == 16)
-          << "For MACA, the size of an memcpy_async must be 4/8/16.";
-      this->last_cp_async_size.push(last_cp_size);
-    }
-    return tirx::StmtExprVisitor::Visit_(op);
-  }
-
- private:
-  std::vector<const CallNode*> mxc_cp_async_calls;
-};
-
 class CodeGenMACA final : public CodeGenC {
  public:
   CodeGenMACA();
@@ -84,11 +54,9 @@ class CodeGenMACA final : public CodeGenC {
             need_mma_h_);
   }
   // override behavior
-  void PreFunctionBody(const PrimFunc& f) final;
-  void PrintFunctionSignature(const ffi::String& function_name, const PrimFunc& func,
+  void PrintFunctionSignature(const ffi::String& function_name, const Function& func,
                               std::ostream& os) final;
-  void PrintExtraAttrs(const PrimFunc& f, std::ostream& os) final;  // NOLINT(*)
-  void Dispatch_(const ForNode* op) final;
+  void InitFuncState(const Function& func) final;
   void PrintStorageSync(const CallNode* op) final;
   void PrintStorageScope(const std::string& scope, std::ostream& os) final;  // NOLINT(*)
   using CodeGenC::PrintType;
@@ -100,7 +68,7 @@ class CodeGenMACA final : public CodeGenC {
                         std::ostream& os) final;  // NOLINT(*)
   void PrintVecElemStore(const std::string& vec, const PrimType& t, int i,
                          const std::string& value) final;
-  void BindThreadIndex(const IterVar& iv) final;  // NOLINT(*)
+  void BindThreadIndex(const PrimVar& var, const ffi::String& thread_tag) final;  // NOLINT(*)
   void PrintVecElemLoadExpr(const PrimType& t, int i, const std::string& value,
                             std::ostream& os) final;
   std::string CastFromTo(std::string value, const PrimType& from, const PrimType& target) final;
@@ -113,12 +81,12 @@ class CodeGenMACA final : public CodeGenC {
   void Dispatch_(const CallNode* op, std::ostream& os) final;
   void Dispatch_(const prim::CastNode* op, std::ostream& os) final;
   void Dispatch_(const EvaluateNode* op) final;
+  void Dispatch_(const BindNode* op) final;
   void Dispatch_(const ReturnNode* op) final;
-  void Dispatch_(const AllocBufferNode* op) final;
-  void Dispatch_(const AttrStmtNode* op) final;
-  void Dispatch_(const DeclBufferNode* op) final;
+  void Dispatch_(const ForNode* op) final;
 
  protected:
+  void PrintExtraAttrs(const Function& f, std::ostream& os) final;  // NOLINT(*)
   void PrintCallExtern(Type ret_type, ffi::String global_symbol, const ffi::Array<Expr>& args,
                        bool skip_first_arg, std::ostream& os) final;  // NOLINT(*)
 
@@ -155,10 +123,13 @@ class CodeGenMACA final : public CodeGenC {
   // Whether the current function is a __global__ kernel entry rather than a
   // __device__ subroutine.
   bool in_kernel_launch_{false};
+  std::array<PrimExpr, 3> launch_dimensions_{IntImm::Int32(1), IntImm::Int32(1), IntImm::Int32(1)};
+  std::optional<int64_t> min_blocks_per_sm_;
   // Codegen tags
   std::unordered_set<std::string> codegen_tags_;
   // Op attribute map
-  OpAttrMap<bool> op_need_warp_shuffle_ = Op::GetAttrMap<bool>("maca.need_warp_shuffle");
+  OpAttrMap<bool> op_need_warp_shuffle_ =
+      Op::GetAttrMap<bool>(tvm::backend::maca::op_attr::kNeedWarpShuffle);
 
   // The name of the barrier array in shared memory
   const std::string barrier_name_ = "barrier";

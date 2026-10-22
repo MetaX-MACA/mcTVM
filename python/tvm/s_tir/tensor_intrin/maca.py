@@ -20,9 +20,9 @@
 from typing import Literal
 
 from tvm.s_tir import TensorIntrin
+from tvm.script import s_tir as Ts
 from tvm.script import tirx as T
-from tvm.tirx import Cast, IntImm
-from tvm.tirx.function import PrimFunc
+from tvm.tirx import Cast, Function, IntImm
 
 ######## WMMA intrinsics ########
 
@@ -72,7 +72,7 @@ def get_wmma_load_intrin(
     shared_scope: str,
     is_b: bool,
     is_col_major: bool,
-) -> tuple[PrimFunc, PrimFunc]:
+) -> tuple[Function, Function]:
     """Generator of wmma_load intrins"""
     wmma_fragment_scope = f"wmma.matrix_{'b' if is_b else 'a'}"
     layout = "col_major" if is_col_major else "row_major"
@@ -82,65 +82,64 @@ def get_wmma_load_intrin(
         frag_m, frag_n = frag_n, frag_m
     offset_factor = frag_n
 
-    @T.prim_func(s_tir=True)
-    def wmma_load_desc(a: T.handle, c: T.handle) -> None:
-        A = T.match_buffer(
-            a, (frag_m, frag_n), dtype, align=64, offset_factor=offset_factor, scope=shared_scope
-        )
-        C = T.match_buffer(
-            c,
+    @Ts.function
+    def wmma_load_desc(
+        A: T.Tensor(
+            (frag_m, frag_n), dtype, align=64, offset_factor=offset_factor, scope=shared_scope
+        ),
+        C: T.Tensor(
             (frag_m, frag_n),
             dtype,
             align=64,
             offset_factor=offset_factor,
             scope=wmma_fragment_scope,
-        )
-        with T.sblock("root"):
-            T.reads(A[0:frag_m, 0:frag_n])
-            T.writes(C[0:frag_m, 0:frag_n])
+        ),
+    ) -> None:
+        with Ts.sblock("root"):
+            Ts.reads(A[0:frag_m, 0:frag_n])
+            Ts.writes(C[0:frag_m, 0:frag_n])
             for i, j in T.grid(frag_m, frag_n):
-                with T.sblock("load"):
-                    vii, vjj = T.axis.remap("SS", [i, j])
+                with Ts.sblock("load"):
+                    vii, vjj = Ts.axis.remap("SS", [i, j])
                     C[vii, vjj] = A[vii, vjj]
 
-    @T.prim_func(s_tir=True)
-    def wmma_load_impl(a: T.handle, c: T.handle) -> None:
-        s1 = T.int32()
-        s0 = T.int32()
-        d1 = T.int32()
-        d0 = T.int32()
-        A = T.match_buffer(
-            a,
+    s1 = T.dynamic("s1", "int32")
+    s0 = T.dynamic("s0", "int32")
+    d1 = T.dynamic("d1", "int32")
+    d0 = T.dynamic("d0", "int32")
+
+    @Ts.function
+    def wmma_load_impl(
+        A: T.Tensor(
             (frag_m, frag_n),
             dtype,
             align=64,
             offset_factor=offset_factor,
             scope=shared_scope,
             strides=[s1, s0],
-        )
-        C = T.match_buffer(
-            c,
+        ),
+        C: T.Tensor(
             (frag_m, frag_n),
             dtype,
             align=64,
             offset_factor=offset_factor,
             scope=wmma_fragment_scope,
             strides=[d1, d0],
-        )
-        with T.sblock("root"):
-            T.reads(A[0:frag_m, 0:frag_n])
-            T.writes(C[0:frag_m, 0:frag_n])
+        ),
+    ) -> None:
+        with Ts.sblock("root"):
+            Ts.reads(A[0:frag_m, 0:frag_n])
+            Ts.writes(C[0:frag_m, 0:frag_n])
             T.evaluate(
-                T.tvm_load_matrix_sync(
+                T.gpu_load_matrix_sync(
                     C.data,
                     m_dim,
                     n_dim,
                     k_dim,
                     get_wmma_fragment_index(C, d1, frag_m, frag_n),
-                    A.access_ptr("r"),
+                    A.ptr_to([0, 0]),
                     s1,
                     layout,
-                    dtype="handle",
                 )
             )
 
@@ -149,54 +148,54 @@ def get_wmma_load_intrin(
 
 def get_wmma_fill_intrin(
     m_dim: int, n_dim: int, k_dim: int, dtype: str
-) -> tuple[PrimFunc, PrimFunc]:
+) -> tuple[Function, Function]:
     """Generator of wmma_fill intrins"""
     zero = IntImm("int32", 0).astype(dtype)
     offset_factor = n_dim
 
-    @T.prim_func(s_tir=True)
-    def wmma_fill_desc(c: T.handle) -> None:
-        C = T.match_buffer(
-            c,
+    @Ts.function
+    def wmma_fill_desc(
+        C: T.Tensor(
             (m_dim, n_dim),
             dtype,
             align=64,
             offset_factor=offset_factor,
             scope="wmma.accumulator",
-        )
-        with T.sblock("root"):
-            T.reads()
-            T.writes(C[0:m_dim, 0:n_dim])
+        ),
+    ) -> None:
+        with Ts.sblock("root"):
+            Ts.reads()
+            Ts.writes(C[0:m_dim, 0:n_dim])
             for i, j in T.grid(m_dim, n_dim):
-                with T.sblock("init"):
-                    vii, vjj = T.axis.remap("SS", [i, j])
+                with Ts.sblock("init"):
+                    vii, vjj = Ts.axis.remap("SS", [i, j])
                     C[vii, vjj] = zero
 
-    @T.prim_func(s_tir=True)
-    def wmma_fill_impl(c: T.handle) -> None:
-        d1 = T.int32()
-        d0 = T.int32()
-        C = T.match_buffer(
-            c,
+    d1 = T.dynamic("d1", "int32")
+    d0 = T.dynamic("d0", "int32")
+
+    @Ts.function
+    def wmma_fill_impl(
+        C: T.Tensor(
             (m_dim, n_dim),
             dtype,
             align=64,
             offset_factor=offset_factor,
             scope="wmma.accumulator",
             strides=[d1, d0],
-        )
-        with T.sblock("root"):
-            T.reads()
-            T.writes(C[0:m_dim, 0:n_dim])
+        ),
+    ) -> None:
+        with Ts.sblock("root"):
+            Ts.reads()
+            Ts.writes(C[0:m_dim, 0:n_dim])
             T.evaluate(
-                T.tvm_fill_fragment(
+                T.gpu_fill_fragment(
                     C.data,
                     m_dim,
                     n_dim,
                     k_dim,
                     get_wmma_fragment_index(C, d1, m_dim, n_dim),
                     T.float32(0),
-                    dtype="handle",
                 )
             )
 
@@ -205,69 +204,66 @@ def get_wmma_fill_intrin(
 
 def get_wmma_store_intrin(
     m_dim: int, n_dim: int, k_dim: int, dtype: str, scope: str
-) -> tuple[PrimFunc, PrimFunc]:
+) -> tuple[Function, Function]:
     """Generator of wmma_store intrins"""
     offset_factor = n_dim
 
-    @T.prim_func(s_tir=True)
-    def wmma_store_desc(a: T.handle, c: T.handle) -> None:
-        A = T.match_buffer(
-            a,
+    @Ts.function
+    def wmma_store_desc(
+        A: T.Tensor(
             (m_dim, n_dim),
             dtype,
             align=64,
             offset_factor=offset_factor,
             scope="wmma.accumulator",
-        )
-        C = T.match_buffer(
-            c, (m_dim, n_dim), dtype, align=64, offset_factor=offset_factor, scope=scope
-        )
-        with T.sblock("root"):
-            T.reads(A[0:m_dim, 0:n_dim])
-            T.writes(C[0:m_dim, 0:n_dim])
+        ),
+        C: T.Tensor((m_dim, n_dim), dtype, align=64, offset_factor=offset_factor, scope=scope),
+    ) -> None:
+        with Ts.sblock("root"):
+            Ts.reads(A[0:m_dim, 0:n_dim])
+            Ts.writes(C[0:m_dim, 0:n_dim])
             for i, j in T.grid(m_dim, n_dim):
-                with T.sblock("store"):
-                    vii, vjj = T.axis.remap("SS", [i, j])
+                with Ts.sblock("store"):
+                    vii, vjj = Ts.axis.remap("SS", [i, j])
                     C[vii, vjj] = A[vii, vjj]
 
-    @T.prim_func(s_tir=True)
-    def wmma_store_impl(a: T.handle, c: T.handle) -> None:
-        s1 = T.int32()
-        s0 = T.int32()
-        d1 = T.int32()
-        d0 = T.int32()
-        A = T.match_buffer(
-            a,
+    s1 = T.dynamic("s1", "int32")
+    s0 = T.dynamic("s0", "int32")
+    d1 = T.dynamic("d1", "int32")
+    d0 = T.dynamic("d0", "int32")
+
+    @Ts.function
+    def wmma_store_impl(
+        A: T.Tensor(
             (m_dim, n_dim),
             dtype,
             align=64,
             offset_factor=offset_factor,
             scope="wmma.accumulator",
             strides=[d1, d0],
-        )
-        C = T.match_buffer(
-            c,
+        ),
+        C: T.Tensor(
             (m_dim, n_dim),
             dtype,
             align=64,
             offset_factor=offset_factor,
             scope=scope,
             strides=[s1, s0],
-        )
-        with T.sblock("root"):
-            T.reads(A[0:m_dim, 0:n_dim])
-            T.writes(C[0:m_dim, 0:n_dim])
+        ),
+    ) -> None:
+        with Ts.sblock("root"):
+            Ts.reads(A[0:m_dim, 0:n_dim])
+            Ts.writes(C[0:m_dim, 0:n_dim])
             T.evaluate(
-                T.tvm_store_matrix_sync(
+                T.gpu_store_matrix_sync(
                     A.data,
                     m_dim,
                     n_dim,
                     k_dim,
                     get_wmma_fragment_index(A, d1, m_dim, n_dim),
-                    C.access_ptr("w"),
+                    C.ptr_to([0, 0]),
                     s1,
                     "row_major",
-                    dtype="handle",
                 )
             )
 
@@ -276,7 +272,7 @@ def get_wmma_store_intrin(
 
 def get_wmma_sync_intrin(
     m_dim: int, n_dim: int, k_dim: int, in_dtype: str, out_dtype: str, b_transposed: bool
-) -> tuple[PrimFunc, PrimFunc]:
+) -> tuple[Function, Function]:
     """Generator of wmma_sync intrins"""
 
     def maybe_cast(v):
@@ -295,86 +291,80 @@ def get_wmma_sync_intrin(
     B_offset_factor = b_shape_1
     out_offset_factor = n_dim
 
-    @T.prim_func(s_tir=True)
-    def wmma_sync_desc(a: T.handle, b: T.handle, c: T.handle) -> None:
-        A = T.match_buffer(
-            a,
+    @Ts.function
+    def wmma_sync_desc(
+        A: T.Tensor(
             (m_dim, k_dim),
             in_dtype,
             align=64,
             offset_factor=A_offset_factor,
             scope="wmma.matrix_a",
-        )
-        B = T.match_buffer(
-            b,
+        ),
+        B: T.Tensor(
             maybe_swap(k_dim, n_dim),
             in_dtype,
             align=64,
             offset_factor=B_offset_factor,
             scope="wmma.matrix_b",
-        )
-        C = T.match_buffer(
-            c,
+        ),
+        C: T.Tensor(
             (m_dim, n_dim),
             out_dtype,
             align=64,
             offset_factor=out_offset_factor,
             scope="wmma.accumulator",
-        )
-
-        with T.sblock("root"):
-            T.reads(C[0:m_dim, 0:n_dim], A[0:m_dim, 0:k_dim], B[0:b_shape_0, 0:b_shape_1])
-            T.writes(C[0:m_dim, 0:n_dim])
+        ),
+    ) -> None:
+        with Ts.sblock("root"):
+            Ts.reads(C[0:m_dim, 0:n_dim], A[0:m_dim, 0:k_dim], B[0:b_shape_0, 0:b_shape_1])
+            Ts.writes(C[0:m_dim, 0:n_dim])
             for i, j, k in T.grid(m_dim, n_dim, k_dim):
-                with T.sblock(""):
-                    vii, vjj, vkk = T.axis.remap("SSR", [i, j, k])
+                with Ts.sblock(""):
+                    vii, vjj, vkk = Ts.axis.remap("SSR", [i, j, k])
                     B_index_0, B_index_1 = T.meta_var(maybe_swap(vkk, vjj))
                     C[vii, vjj] = C[vii, vjj] + maybe_cast(A[vii, vkk]) * maybe_cast(
                         B[B_index_0, B_index_1]
                     )
 
-    @T.prim_func(s_tir=True)
-    def wmma_sync_impl(a: T.handle, b: T.handle, c: T.handle) -> None:
-        a1 = T.int32()
-        a0 = T.int32()
-        b1 = T.int32()
-        b0 = T.int32()
-        c1 = T.int32()
-        c0 = T.int32()
+    a1 = T.dynamic("a1", "int32")
+    a0 = T.dynamic("a0", "int32")
+    b1 = T.dynamic("b1", "int32")
+    b0 = T.dynamic("b0", "int32")
+    c1 = T.dynamic("c1", "int32")
+    c0 = T.dynamic("c0", "int32")
 
-        A = T.match_buffer(
-            a,
+    @Ts.function
+    def wmma_sync_impl(
+        A: T.Tensor(
             (m_dim, k_dim),
             in_dtype,
             align=64,
             offset_factor=A_offset_factor,
             scope="wmma.matrix_a",
             strides=[a1, a0],
-        )
-        B = T.match_buffer(
-            b,
+        ),
+        B: T.Tensor(
             maybe_swap(k_dim, n_dim),
             in_dtype,
             align=64,
             offset_factor=B_offset_factor,
             scope="wmma.matrix_b",
             strides=[b1, b0],
-        )
-        C = T.match_buffer(
-            c,
+        ),
+        C: T.Tensor(
             (m_dim, n_dim),
             out_dtype,
             align=64,
             offset_factor=out_offset_factor,
             scope="wmma.accumulator",
             strides=[c1, c0],
-        )
-
-        with T.sblock("root"):
-            T.reads(C[0:m_dim, 0:n_dim], A[0:m_dim, 0:k_dim], B[0:b_shape_0, 0:b_shape_1])
-            T.writes(C[0:m_dim, 0:n_dim])
+        ),
+    ) -> None:
+        with Ts.sblock("root"):
+            Ts.reads(C[0:m_dim, 0:n_dim], A[0:m_dim, 0:k_dim], B[0:b_shape_0, 0:b_shape_1])
+            Ts.writes(C[0:m_dim, 0:n_dim])
             T.evaluate(
-                T.tvm_mma_sync(
+                T.gpu_mma_sync(
                     C.data,
                     get_wmma_fragment_index(C, c1, m_dim, n_dim),
                     A.data,
@@ -383,7 +373,6 @@ def get_wmma_sync_intrin(
                     get_wmma_fragment_index(B, b1, b_shape_0, b_shape_1),
                     C.data,
                     get_wmma_fragment_index(C, c1, m_dim, n_dim),
-                    dtype="handle",
                 )
             )
 

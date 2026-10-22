@@ -16,59 +16,88 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-#ifndef TVM_SCRIPT_PRINTER_IR_UTILS_H_
-#define TVM_SCRIPT_PRINTER_IR_UTILS_H_
+#ifndef SRC_SCRIPT_PRINTER_IR_UTILS_H_
+#define SRC_SCRIPT_PRINTER_IR_UTILS_H_
 
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/expr.h>
-#include <tvm/ir/function.h>
-#include <tvm/ir/op.h>
-#include <tvm/ir/with_context.h>
-#include <tvm/script/printer/ir_docsifier.h>
+#include <tvm/ir/stmt.h>
+#include <tvm/ir/type.h>
+#include <tvm/script/printer/doc_translator.h>
 
-#include <string>
+#include <optional>
 #include <utility>
-
-#include "../utils.h"
 
 namespace tvm {
 namespace script {
 namespace printer {
 
-class IRFrameNode : public FrameNode {
- public:
-  ffi::Map<ffi::String, ffi::Array<GlobalInfo>>* global_infos = nullptr;
+namespace details {
 
-  static void RegisterReflection() {
-    namespace refl = tvm::ffi::reflection;
-    // global infos is not exposed
+ffi::Array<StmtDoc> Body(const Stmt& stmt, DocTranslatorObj* d);
+ffi::Array<Doc> TensorIndices(DocTranslatorObj* d, const ffi::Array<PrimExpr>& indices,
+                              bool store = false);
+
+ffi::Optional<ExprDoc> InvokeDocHook(ffi::AnyView hook, DocTranslatorObj* d, ffi::AnyView input,
+                                     const ffi::Object* destination);
+ffi::Optional<ExprDoc> VarDocTranslate(DocTranslatorObj* d, ffi::AnyView input,
+                                       const ffi::Object* destination);
+void EmitVarDefinition(DocTranslatorObj* d, const Var& var, ExprDoc rhs);
+
+ExprDoc AddMetadata(DocTranslatorObj* d, ffi::Any value);
+IdDoc VarDoc(DocTranslatorObj* d, const Var& var, bool explicit_def = true);
+ExprDoc GlobalReference(DocTranslatorObj* d, const ffi::String& name);
+ExprDoc NamedCallCallee(const ffi::String& canonical_name);
+
+ExprDoc TypeValue(DocTranslatorObj* d, const Type& type, bool dtype_literal = true);
+ffi::Optional<ExprDoc> StandardCallDocTranslate(DocTranslatorObj* d, const CallNode* call);
+ExprDoc RawCall(DocTranslatorObj* d, const CallNode* call,
+                ffi::Optional<ffi::Array<ExprDoc>> translated_args = std::nullopt);
+ExprDoc AnyValue(DocTranslatorObj* d, ffi::AnyView value);
+ffi::Map<Var, IdDoc> CopyImplicitDefs(DocTranslatorObj* d);
+void FinalizeFunctionDefinitions(DocTranslatorObj* d, const ffi::Map<Var, IdDoc>& signature,
+                                 const FunctionDoc& function);
+
+// Owner hooks use these scoped values while translating a nested function or type.
+// Keep the existing value when recursion returns, including exceptional returns.
+template <typename T>
+class ExtraStateScope {
+ public:
+  ExtraStateScope(DocTranslatorObj* d, const ffi::String& key, T value)
+      : d_(d), key_(key), saved_(d->GetOrCreateExtraState<T>(key)) {
+    d_->SetExtraState(key_, std::move(value));
   }
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.printer.IRFrame", IRFrameNode, FrameNode);
+  ~ExtraStateScope() { d_->SetExtraState(key_, std::move(saved_)); }
+
+ private:
+  DocTranslatorObj* d_;
+  ffi::String key_;
+  T saved_;
 };
 
-class IRFrame : public Frame {
+class VarScope {
  public:
-  explicit IRFrame(const IRDocsifier& d) {
-    ffi::ObjectPtr<IRFrameNode> n = ffi::make_object<IRFrameNode>();
-    n->stmts.clear();
-    n->d = d.get();
-    n->global_infos = nullptr;
-    data_ = std::move(n);
+  explicit VarScope(DocTranslatorObj* d) : d_(d) { d_->BeginVarScope(); }
+  ~VarScope() noexcept {
+    if (d_) {
+      try {
+        d_->EndVarScope();
+      } catch (...) { /* Preserve translation failure. */
+      }
+    }
+  }
+  void Close() {
+    DocTranslatorObj* d = std::exchange(d_, nullptr);
+    d->EndVarScope();
   }
 
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(IRFrame, Frame, IRFrameNode);
+ private:
+  DocTranslatorObj* d_;
 };
 
-/*! \brief Redirected method for the ffi repr hook */
-inline std::string ReprPrintIR(const ffi::ObjectRef& obj, const PrinterConfig& cfg) {
-  IRDocsifier d(cfg);
-  With<IRFrame> f(d);
-  (*f)->AddDispatchToken(d, "ir");
-  return Docsify(obj, d, *f, cfg);
-}
-
+}  // namespace details
 }  // namespace printer
 }  // namespace script
 }  // namespace tvm
 
-#endif  // TVM_SCRIPT_PRINTER_IR_UTILS_H_
+#endif  // SRC_SCRIPT_PRINTER_IR_UTILS_H_

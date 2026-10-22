@@ -43,7 +43,7 @@ def test_randint():
             print("skip because extern function is not available")
             return
         dev = tvm.cpu(0)
-        f = tvm.compile(te.create_prim_func([A]), target=target)
+        f = tvm.compile(te.create_function([A]), target=target)
         a = tvm.runtime.tensor(np.zeros((m, n), dtype=A.dtype), dev)
         f(a)
         na = a.numpy()
@@ -68,7 +68,7 @@ def test_uniform():
             print("skip because extern function is not available")
             return
         dev = tvm.cpu(0)
-        f = tvm.compile(te.create_prim_func([A]), target=target)
+        f = tvm.compile(te.create_function([A]), target=target)
         a = tvm.runtime.tensor(np.zeros((m, n), dtype=A.dtype), dev)
         f(a)
         na = a.numpy()
@@ -93,7 +93,7 @@ def test_normal():
             print("skip because extern function is not available")
             return
         dev = tvm.cpu(0)
-        f = tvm.compile(te.create_prim_func([A]), target=target)
+        f = tvm.compile(te.create_function([A]), target=target)
         a = tvm.runtime.tensor(np.zeros((m, n), dtype=A.dtype), dev)
         f(a)
         na = a.numpy()
@@ -130,7 +130,7 @@ def test_random_fill():
 
         def check_remote(server):
             remote = rpc.connect(server.host, server.port)
-            value = tvm.runtime.empty((512, 512), dtype, remote.cpu())
+            value = remote.cpu().empty((512, 512), dtype)
             random_fill = remote.get_function("tvm.contrib.random.random_fill")
             random_fill(value)
 

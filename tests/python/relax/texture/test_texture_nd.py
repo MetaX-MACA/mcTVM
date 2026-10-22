@@ -33,6 +33,7 @@ from tvm import (
 from tvm.relax.transform.legalize_ops import adreno as legalize_adreno
 from tvm.rpc import connect_tracker
 from tvm.script import ir as I
+from tvm.script import s_tir as Ts
 from tvm.script import tirx as T
 from tvm.support import ndk
 from tvm.target import Target
@@ -120,14 +121,14 @@ def test_texture_copy(backend, dtype, channel_size, read_width):
     if read_width > lanes:
         return
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class TextureCopy:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer((M, N), dtype), B: T.Buffer((M, N), dtype)):
+        @Ts.function
+        def main(A: T.Tensor((M, N), dtype), B: T.Tensor((M, N), dtype)):
             T.func_attr({"global_symbol": "main"})
             for li, lj in T.grid(M, N):
-                with T.sblock("Copy"):
-                    i, j = T.axis.remap("SS", [li, lj])
+                with Ts.sblock("Copy"):
+                    i, j = Ts.axis.remap("SS", [li, lj])
                     B[i, j] = A[i, j]
 
     def schedule_texture_read(sch: s_tir.Schedule):
@@ -183,8 +184,12 @@ def test_texture_copy(backend, dtype, channel_size, read_width):
             device_arr = [dev for _ in range(len(mod.global_infos["vdevice"]))]
         else:
             device_arr = [dev]
-        vm = relax.VirtualMachine(rexec, device_arr)
-        inps = [tvm.runtime.tensor(inp, dev) for inp in inputs]
+        if remote_session is not None:
+            vm = tvm.rpc.virtual_machine(rexec, device_arr)
+            inps = [dev.tensor(inp) for inp in inputs]
+        else:
+            vm = relax.VirtualMachine(rexec, device_arr)
+            inps = [tvm.runtime.tensor(inp, dev) for inp in inputs]
         vm["main"](*inps)
         np.testing.assert_equal(inps[-1].numpy(), inps[0].numpy())
 

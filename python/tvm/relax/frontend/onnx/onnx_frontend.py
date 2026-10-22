@@ -1080,6 +1080,14 @@ class Hardmax(OnnxOpConverter):
             data = bb.normalize(data)
         normalized_axis, axis_extent = _get_axis_extent(data, axis, "Hardmax")
         dtype = data.ty.dtype
+        if not isinstance(axis_extent, int):
+            # one_hot needs a static depth. For a symbolic extent, mark the first
+            # maximum by comparing its index against a broadcast iota instead.
+            argmax = relax.op.argmax(data, axis=normalized_axis, keepdims=True)
+            iota_shape = [1] * data.ty.ndim
+            iota_shape[normalized_axis] = axis_extent
+            iota = relax.op.reshape(relax.op.arange(0, axis_extent, dtype="int64"), iota_shape)
+            return relax.op.astype(relax.op.equal(iota, argmax), dtype)
         argmax = relax.op.argmax(data, axis=normalized_axis)
         on_value = relax.prim_value(tvm.tirx.const(1.0, dtype))
         off_value = relax.prim_value(tvm.tirx.const(0.0, dtype))
@@ -6492,7 +6500,7 @@ class ONNXGraphImporter:
                 else_expr = self._convert_subgraph(self.bb, attr["else_branch"])
                 then_seq = relax.SeqExpr(blocks=[], body=then_expr)
                 else_seq = relax.SeqExpr(blocks=[], body=else_expr)
-                if_result = self.bb.emit(relax.If(cond, then_seq, else_seq))
+                if_result = self.bb.emit(relax.IfExpr(cond, then_seq, else_seq))
                 if len(outputs) == 1:
                     self._nodes[outputs[0]] = if_result
                 else:
@@ -6677,7 +6685,7 @@ class ONNXGraphImporter:
                     else_expr = self._convert_subgraph(bb, attr["else_branch"])
                     then_seq = relax.SeqExpr(blocks=[], body=then_expr)
                     else_seq = relax.SeqExpr(blocks=[], body=else_expr)
-                    op = bb.emit(relax.If(cond, then_seq, else_seq))
+                    op = bb.emit(relax.IfExpr(cond, then_seq, else_seq))
                     outputs = node.output
                     if len(outputs) == 1:
                         self._nodes[outputs[0]] = op

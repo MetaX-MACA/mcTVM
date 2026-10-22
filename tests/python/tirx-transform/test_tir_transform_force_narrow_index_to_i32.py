@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# ruff: noqa: F841
 import pytest
 
 import tvm
@@ -22,64 +21,42 @@ import tvm.testing
 from tvm.script import tirx as T
 
 
-def _lower_blocks(value):
-    """Use the same block-to-statement boundary as the S-TIR pipeline."""
-    is_func = isinstance(value, tvm.tirx.PrimFunc)
-    mod = tvm.IRModule.from_expr(value) if is_func else value
-    mod = tvm.s_tir.transform.ConvertBlocksToOpaque()(mod)
-    mod = tvm.s_tir.transform.LowerOpaqueBlock()(mod)
-    return mod["main"] if is_func else mod
-
-
-def _transform():
-    return tvm.transform.Sequential(
-        [
-            tvm.s_tir.transform.ConvertBlocksToOpaque(),
-            tvm.s_tir.transform.LowerOpaqueBlock(),
-            tvm.tirx.transform.ForceNarrowIndexToInt32(),
-        ]
-    )
-
-
 def test_thread_axis1():
-    @T.prim_func(private=True, s_tir=True)
-    def before(A: T.Buffer((T.int64(64),), "float32"), B: T.Buffer((T.int64(64),), "float32")):
-        blockIdx_x = T.env_thread("blockIdx.x")
-        T.launch_thread(blockIdx_x, T.int64(2))
-        threadIdx_x = T.env_thread("threadIdx.x")
-        T.launch_thread(threadIdx_x, T.int64(32))
+    @T.function(private=True)
+    def before(A: T.Tensor((T.int64(64),), "float32"), B: T.Tensor((T.int64(64),), "float32")):
+        blockIdx_x = T.launch_thread("blockIdx.x", T.int64(2))
+        threadIdx_x = T.launch_thread("threadIdx.x", T.int64(32))
         B[T.Cast("int64", blockIdx_x) * T.int64(32) + T.Cast("int64", threadIdx_x)] = A[
             T.Cast("int64", blockIdx_x) * T.int64(32) + T.Cast("int64", threadIdx_x)
         ] + T.float32(1)
 
-    @T.prim_func(private=True, s_tir=True)
-    def expected(A: T.Buffer((64,), "float32"), B: T.Buffer((64,), "float32")):
-        blockIdx_x = T.env_thread("blockIdx.x")
-        T.launch_thread(blockIdx_x, 2)
-        threadIdx_x = T.env_thread("threadIdx.x")
-        T.launch_thread(threadIdx_x, 32)
+    @T.function(private=True)
+    def expected(A: T.Tensor((64,), "float32"), B: T.Tensor((64,), "float32")):
+        blockIdx_x = T.launch_thread("blockIdx.x", 2)
+        threadIdx_x = T.launch_thread("threadIdx.x", 32)
         B[blockIdx_x * 32 + threadIdx_x] = A[blockIdx_x * 32 + threadIdx_x] + T.float32(1)
 
     mod = tvm.IRModule.from_expr(before)
-    func = _transform()(mod)["main"]
-    tvm.ir.assert_structural_equal(func, _lower_blocks(expected))
+    func = tvm.tirx.transform.ForceNarrowIndexToInt32()(mod)["main"]
+    tvm.ir.assert_structural_equal(func, expected)
 
 
 def test_thread_axis2():
-    @T.prim_func(s_tir=True)
+    @T.function
     def before(
-        T_reshape: T.Buffer((1, 12, 384, 384), "float32"),
-        placeholder_1: T.Buffer((T.int64(1), T.int64(12), T.int64(384), 384), "bool"),
-        T_where: T.Buffer((T.int64(1), T.int64(12), T.int64(384), 384), "float32"),
+        T_reshape: T.Tensor((1, 12, 384, 384), "float32"),
+        placeholder_1: T.Tensor((T.int64(1), T.int64(12), T.int64(384), 384), "bool"),
+        T_where: T.Tensor((T.int64(1), T.int64(12), T.int64(384), 384), "float32"),
     ) -> None:
         T.func_attr({"global_symbol": "main", "tirx.noalias": True})
-        for i0_i1_i2_i3_fused_1 in T.thread_binding(T.int64(256), thread="blockIdx.x"):
-            for i0_i1_i2_i3_fused_2 in T.thread_binding(T.int64(1024), thread="threadIdx.x"):
+        with T.launch_thread("blockIdx.x", T.int64(256)) as i0_i1_i2_i3_fused_1:
+            with T.launch_thread("threadIdx.x", T.int64(1024)) as i0_i1_i2_i3_fused_2:
                 for i0_i1_i2_i3_fused_0 in T.serial(T.int64(7)):
-                    with T.sblock("T_where"):
-                        ax0 = T.axis.spatial(T.int64(1), T.int64(0))
-                        ax1 = T.axis.spatial(
-                            T.int64(12),
+                    if (i0_i1_i2_i3_fused_0 * T.int64(256) + i0_i1_i2_i3_fused_1) * T.int64(
+                        1024
+                    ) + i0_i1_i2_i3_fused_2 < T.int64(1769472):
+                        T_where[
+                            T.int64(0),
                             (
                                 (i0_i1_i2_i3_fused_0 * T.int64(256) + i0_i1_i2_i3_fused_1)
                                 * T.int64(1024)
@@ -87,9 +64,6 @@ def test_thread_axis2():
                             )
                             % T.int64(1769472)
                             // T.int64(147456),
-                        )
-                        ax2 = T.axis.spatial(
-                            T.int64(384),
                             (
                                 (i0_i1_i2_i3_fused_0 * T.int64(256) + i0_i1_i2_i3_fused_1)
                                 * T.int64(1024)
@@ -97,9 +71,6 @@ def test_thread_axis2():
                             )
                             % T.int64(147456)
                             // T.int64(384),
-                        )
-                        ax3 = T.axis.spatial(
-                            384,
                             T.cast(
                                 (
                                     (i0_i1_i2_i3_fused_0 * T.int64(256) + i0_i1_i2_i3_fused_1)
@@ -109,199 +80,262 @@ def test_thread_axis2():
                                 % T.int64(384),
                                 "int32",
                             ),
-                        )
-                        T.where(
-                            (i0_i1_i2_i3_fused_0 * T.int64(256) + i0_i1_i2_i3_fused_1)
-                            * T.int64(1024)
-                            + i0_i1_i2_i3_fused_2
-                            < T.int64(1769472)
-                        )
-                        T.reads(placeholder_1[ax0, ax1, ax2, ax3], T_reshape[ax0, ax1, ax2, ax3])
-                        T.writes(T_where[ax0, ax1, ax2, ax3])
-                        T_where[ax0, ax1, ax2, ax3] = T.Select(
-                            T.cast(placeholder_1[ax0, ax1, ax2, ax3], "int32") != 0,
+                        ] = T.Select(
+                            T.cast(
+                                placeholder_1[
+                                    T.int64(0),
+                                    (
+                                        (i0_i1_i2_i3_fused_0 * T.int64(256) + i0_i1_i2_i3_fused_1)
+                                        * T.int64(1024)
+                                        + i0_i1_i2_i3_fused_2
+                                    )
+                                    % T.int64(1769472)
+                                    // T.int64(147456),
+                                    (
+                                        (i0_i1_i2_i3_fused_0 * T.int64(256) + i0_i1_i2_i3_fused_1)
+                                        * T.int64(1024)
+                                        + i0_i1_i2_i3_fused_2
+                                    )
+                                    % T.int64(147456)
+                                    // T.int64(384),
+                                    T.cast(
+                                        (
+                                            (
+                                                i0_i1_i2_i3_fused_0 * T.int64(256)
+                                                + i0_i1_i2_i3_fused_1
+                                            )
+                                            * T.int64(1024)
+                                            + i0_i1_i2_i3_fused_2
+                                        )
+                                        % T.int64(384),
+                                        "int32",
+                                    ),
+                                ],
+                                "int32",
+                            )
+                            != 0,
                             T.float32(-1000000000),
-                            T_reshape[ax0, ax1, ax2, ax3],
+                            T_reshape[
+                                T.int64(0),
+                                (
+                                    (i0_i1_i2_i3_fused_0 * T.int64(256) + i0_i1_i2_i3_fused_1)
+                                    * T.int64(1024)
+                                    + i0_i1_i2_i3_fused_2
+                                )
+                                % T.int64(1769472)
+                                // T.int64(147456),
+                                (
+                                    (i0_i1_i2_i3_fused_0 * T.int64(256) + i0_i1_i2_i3_fused_1)
+                                    * T.int64(1024)
+                                    + i0_i1_i2_i3_fused_2
+                                )
+                                % T.int64(147456)
+                                // T.int64(384),
+                                T.cast(
+                                    (
+                                        (i0_i1_i2_i3_fused_0 * T.int64(256) + i0_i1_i2_i3_fused_1)
+                                        * T.int64(1024)
+                                        + i0_i1_i2_i3_fused_2
+                                    )
+                                    % T.int64(384),
+                                    "int32",
+                                ),
+                            ],
                         )
 
-    @T.prim_func(s_tir=True)
+    @T.function
     def expected(
-        T_reshape: T.Buffer((1, 12, 384, 384), "float32"),
-        placeholder_1: T.Buffer((1, 12, 384, 384), "bool"),
-        T_where: T.Buffer((1, 12, 384, 384), "float32"),
+        T_reshape: T.Tensor((1, 12, 384, 384), "float32"),
+        placeholder_1: T.Tensor((1, 12, 384, 384), "bool"),
+        T_where: T.Tensor((1, 12, 384, 384), "float32"),
     ):
         T.func_attr({"global_symbol": "main", "tirx.noalias": True})
-        for i0_i1_i2_i3_fused_1 in T.thread_binding(256, thread="blockIdx.x"):
-            for i0_i1_i2_i3_fused_2 in T.thread_binding(1024, thread="threadIdx.x"):
+        with T.launch_thread("blockIdx.x", 256) as i0_i1_i2_i3_fused_1:
+            with T.launch_thread("threadIdx.x", 1024) as i0_i1_i2_i3_fused_2:
                 for i0_i1_i2_i3_fused_0 in range(7):
-                    with T.sblock("T_where"):
-                        ax0 = T.axis.spatial(1, 0)
-                        ax1 = T.axis.spatial(
-                            12,
+                    if (
+                        i0_i1_i2_i3_fused_0 * 256 + i0_i1_i2_i3_fused_1
+                    ) * 1024 + i0_i1_i2_i3_fused_2 < 1769472:
+                        T_where[
+                            0,
                             (
                                 (i0_i1_i2_i3_fused_0 * 256 + i0_i1_i2_i3_fused_1) * 1024
                                 + i0_i1_i2_i3_fused_2
                             )
                             % 1769472
                             // 147456,
-                        )
-                        ax2 = T.axis.spatial(
-                            384,
                             (
                                 (i0_i1_i2_i3_fused_0 * 256 + i0_i1_i2_i3_fused_1) * 1024
                                 + i0_i1_i2_i3_fused_2
                             )
                             % 147456
                             // 384,
-                        )
-                        ax3 = T.axis.spatial(
-                            384,
                             (
                                 (i0_i1_i2_i3_fused_0 * 256 + i0_i1_i2_i3_fused_1) * 1024
                                 + i0_i1_i2_i3_fused_2
                             )
                             % 384,
-                        )
-                        T.where(
-                            (i0_i1_i2_i3_fused_0 * 256 + i0_i1_i2_i3_fused_1) * 1024
-                            + i0_i1_i2_i3_fused_2
-                            < 1769472
-                        )
-                        T.reads(placeholder_1[ax0, ax1, ax2, ax3], T_reshape[ax0, ax1, ax2, ax3])
-                        T.writes(T_where[ax0, ax1, ax2, ax3])
-                        T_where[ax0, ax1, ax2, ax3] = T.Select(
-                            T.Cast("int32", placeholder_1[ax0, ax1, ax2, ax3]) != 0,
+                        ] = T.Select(
+                            T.Cast(
+                                "int32",
+                                placeholder_1[
+                                    0,
+                                    (
+                                        (i0_i1_i2_i3_fused_0 * 256 + i0_i1_i2_i3_fused_1) * 1024
+                                        + i0_i1_i2_i3_fused_2
+                                    )
+                                    % 1769472
+                                    // 147456,
+                                    (
+                                        (i0_i1_i2_i3_fused_0 * 256 + i0_i1_i2_i3_fused_1) * 1024
+                                        + i0_i1_i2_i3_fused_2
+                                    )
+                                    % 147456
+                                    // 384,
+                                    (
+                                        (i0_i1_i2_i3_fused_0 * 256 + i0_i1_i2_i3_fused_1) * 1024
+                                        + i0_i1_i2_i3_fused_2
+                                    )
+                                    % 384,
+                                ],
+                            )
+                            != 0,
                             T.float32(-1000000000),
-                            T_reshape[ax0, ax1, ax2, ax3],
+                            T_reshape[
+                                0,
+                                (
+                                    (i0_i1_i2_i3_fused_0 * 256 + i0_i1_i2_i3_fused_1) * 1024
+                                    + i0_i1_i2_i3_fused_2
+                                )
+                                % 1769472
+                                // 147456,
+                                (
+                                    (i0_i1_i2_i3_fused_0 * 256 + i0_i1_i2_i3_fused_1) * 1024
+                                    + i0_i1_i2_i3_fused_2
+                                )
+                                % 147456
+                                // 384,
+                                (
+                                    (i0_i1_i2_i3_fused_0 * 256 + i0_i1_i2_i3_fused_1) * 1024
+                                    + i0_i1_i2_i3_fused_2
+                                )
+                                % 384,
+                            ],
                         )
 
     mod = tvm.IRModule.from_expr(before)
-    func = _transform()(mod)["main"]
-    tvm.ir.assert_structural_equal(func, _lower_blocks(expected))
+    func = tvm.tirx.transform.ForceNarrowIndexToInt32()(mod)["main"]
+    tvm.ir.assert_structural_equal(func, expected)
 
 
 def test_block():
-    @T.prim_func(private=True, s_tir=True)
-    def before(A: T.Buffer((128,), "float32"), B: T.Buffer((128,), "float32")):
+    @T.function(private=True)
+    def before(A: T.Tensor((128,), "float32"), B: T.Tensor((128,), "float32")):
         for i in T.serial(0, T.int64(16)):
             for j in T.serial(0, T.int64(8)):
-                with T.sblock():
-                    vi = T.axis.spatial(T.int64(128), i * T.int64(8) + j)
-                    B[vi] = A[vi] + T.float32(1)
+                B[i * T.int64(8) + j] = A[i * T.int64(8) + j] + T.float32(1)
 
-    @T.prim_func(private=True, s_tir=True)
-    def expected(A: T.Buffer((128,), "float32"), B: T.Buffer((128,), "float32")):
+    @T.function(private=True)
+    def expected(A: T.Tensor((128,), "float32"), B: T.Tensor((128,), "float32")):
         for i in T.serial(0, T.int32(16)):
             for j in T.serial(0, T.int32(8)):
-                with T.sblock():
-                    vi = T.axis.spatial(T.int32(128), i * T.int32(8) + j)
-                    B[vi] = A[vi] + T.float32(1)
+                B[i * T.int32(8) + j] = A[i * T.int32(8) + j] + T.float32(1)
 
     mod = tvm.IRModule.from_expr(before)
-    func = _transform()(mod)["main"]
-    tvm.ir.assert_structural_equal(func, _lower_blocks(expected))
+    func = tvm.tirx.transform.ForceNarrowIndexToInt32()(mod)["main"]
+    tvm.ir.assert_structural_equal(func, expected)
 
 
-def test_i16_buffer():
-    @T.prim_func(private=True, s_tir=True)
-    def before(A: T.Buffer((128,), "int16"), B: T.Buffer((128,), "int16")):
+def test_i16_tensor():
+    @T.function(private=True)
+    def before(A: T.Tensor((128,), "int16"), B: T.Tensor((128,), "int16")):
         for i in T.serial(0, T.int64(16)):
             for j in T.serial(0, T.int64(16)):
-                with T.sblock():
-                    vi = T.axis.spatial(T.int64(128), i * 8 + j)
-                    B[vi] = A[vi] + T.int16(1)
+                B[i * 8 + j] = A[i * 8 + j] + T.int16(1)
 
-    @T.prim_func(private=True, s_tir=True)
-    def expected(A: T.Buffer((128,), "int16"), B: T.Buffer((128,), "int16")):
+    @T.function(private=True)
+    def expected(A: T.Tensor((128,), "int16"), B: T.Tensor((128,), "int16")):
         for i in T.serial(0, 16):
             for j in T.serial(0, 16):
-                with T.sblock():
-                    vi = T.axis.spatial(128, i * 8 + j)
-                    B[vi] = A[vi] + T.int16(1)
+                B[i * 8 + j] = A[i * 8 + j] + T.int16(1)
 
     mod = tvm.IRModule.from_expr(before)
-    after = _transform()(mod)["main"]
-    tvm.ir.assert_structural_equal(after, _lower_blocks(expected))
+    after = tvm.tirx.transform.ForceNarrowIndexToInt32()(mod)["main"]
+    tvm.ir.assert_structural_equal(after, expected)
 
 
-def test_fail_on_buffer_param():
-    @T.prim_func(private=True, s_tir=True)
-    def func(A: T.Buffer((128,), "int64"), B: T.Buffer((128,), "int64")):
+def test_fail_on_tensor_param():
+    @T.function(private=True)
+    def func(A: T.Tensor((128,), "int64"), B: T.Tensor((128,), "int64")):
         for i in T.serial(0, 16):
             for j in T.serial(0, 8):
-                with T.sblock():
-                    vi = T.axis.spatial(128, i * 8 + j)
-                    B[vi] = A[vi] + T.int64(1)
+                B[i * 8 + j] = A[i * 8 + j] + T.int64(1)
 
     mod = tvm.IRModule.from_expr(func)
     with pytest.raises(RuntimeError):
-        _transform()(mod)["main"]
+        tvm.tirx.transform.ForceNarrowIndexToInt32()(mod)["main"]
 
 
-def test_fail_on_internal_buffer():
-    @T.prim_func(private=True, s_tir=True)
-    def func(A: T.Buffer((128,), "int32"), B: T.Buffer((128,), "int32")):
-        C = T.sblock_alloc_buffer((128,), "int64")
+def test_fail_on_internal_tensor():
+    @T.function(private=True)
+    def func(A: T.Tensor((128,), "int32"), B: T.Tensor((128,), "int32")):
+        C = T.alloc_tensor(ty_args=[T.Tensor((128,), "int64")])
         for i in T.serial(0, 16):
             for j in T.serial(0, 8):
-                with T.sblock():
-                    vi = T.axis.spatial(128, i * 8 + j)
-                    C[vi] = T.cast(A[vi], "int64") + T.int64(1)
+                C[i * 8 + j] = T.cast(A[i * 8 + j], "int64") + T.int64(1)
         for i in T.serial(0, 16):
             for j in T.serial(0, 8):
-                with T.sblock():
-                    vi = T.axis.spatial(128, i * 8 + j)
-                    B[vi] = T.cast(C[vi] + T.int64(1), "int32")
+                B[i * 8 + j] = T.cast(C[i * 8 + j] + T.int64(1), "int32")
 
     mod = tvm.IRModule.from_expr(func)
     with pytest.raises(RuntimeError):
-        _transform()(mod)["main"]
+        tvm.tirx.transform.ForceNarrowIndexToInt32()(mod)["main"]
 
 
 def test_pod_params_and_select():
     @tvm.script.ir_module
     class Before:
-        @T.prim_func(s_tir=True)
+        @T.function
         def main(
-            A: T.Buffer((T.int64(4),), "float32"), B: T.Buffer((T.int64(4),), "float32"), n: T.int64
+            A: T.Tensor((T.int64(4),), "float32"), B: T.Tensor((T.int64(4),), "float32"), n: T.int64
         ):
             for i in T.serial(T.int64(4)):
                 B[i] = T.Select(T.int64(1) <= i, A[i + n], T.Cast("float32", i))
 
     @tvm.script.ir_module
     class Expected:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer((4,), "float32"), B: T.Buffer((4,), "float32"), n: T.int32):
+        @T.function
+        def main(A: T.Tensor((4,), "float32"), B: T.Tensor((4,), "float32"), n: T.int32):
             for i in range(4):
                 B[i] = T.Select(1 <= i, A[i + n], T.Cast("float32", i))
 
-    after = _transform()(Before)
-    tvm.ir.assert_structural_equal(_lower_blocks(Expected), after)
+    after = tvm.tirx.transform.ForceNarrowIndexToInt32()(Before)
+    tvm.ir.assert_structural_equal(Expected, after)
 
 
 def test_if_then_else_index():
     @tvm.script.ir_module
     class Before:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer((T.int64(4),), "float32"), B: T.Buffer((1,), "float32"), n: T.int64):
+        @T.function
+        def main(A: T.Tensor((T.int64(4),), "float32"), B: T.Tensor((1,), "float32"), n: T.int64):
             B[0] = A[T.if_then_else(n < T.int64(0), n + T.int64(1), n)]
 
     @tvm.script.ir_module
     class Expected:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer((4,), "float32"), B: T.Buffer((1,), "float32"), n: T.int32):
+        @T.function
+        def main(A: T.Tensor((4,), "float32"), B: T.Tensor((1,), "float32"), n: T.int32):
             B[0] = A[T.if_then_else(n < 0, n + 1, n)]
 
-    after = _transform()(Before)
-    tvm.ir.assert_structural_equal(_lower_blocks(Expected), after)
+    after = tvm.tirx.transform.ForceNarrowIndexToInt32()(Before)
+    tvm.ir.assert_structural_equal(Expected, after)
 
 
 def test_conditional_index_mixed_width_branches():
     @tvm.script.ir_module
     class Before:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer((T.int64(4),), "float32"), B: T.Buffer((4,), "float32"), n: T.int64):
-            opaque_index = T.call_extern("opaque_index", n, dtype="int64")
+        @T.function
+        def main(A: T.Tensor((T.int64(4),), "float32"), B: T.Tensor((4,), "float32"), n: T.int64):
+            opaque_index: T.int64 = T.call_extern("opaque_index", n, ty="int64")
             B[0] = A[T.if_then_else(n < T.int64(0), opaque_index, n)]
             B[1] = A[T.if_then_else(n < T.int64(0), n, opaque_index)]
             B[2] = A[T.Select(n < T.int64(0), opaque_index, n)]
@@ -309,64 +343,64 @@ def test_conditional_index_mixed_width_branches():
 
     @tvm.script.ir_module
     class Expected:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer((4,), "float32"), B: T.Buffer((4,), "float32"), n: T.int32):
-            opaque_index = T.call_extern("opaque_index", n, dtype="int64")
+        @T.function
+        def main(A: T.Tensor((4,), "float32"), B: T.Tensor((4,), "float32"), n: T.int32):
+            opaque_index: T.int64 = T.call_extern("opaque_index", n, ty="int64")
             B[0] = A[T.if_then_else(n < 0, opaque_index, T.Cast("int64", n))]
             B[1] = A[T.if_then_else(n < 0, T.Cast("int64", n), opaque_index)]
             B[2] = A[T.Select(n < 0, opaque_index, T.Cast("int64", n))]
             B[3] = A[T.Select(n < 0, T.Cast("int64", n), opaque_index)]
 
-    after = _transform()(Before)
-    tvm.ir.assert_structural_equal(_lower_blocks(Expected), after)
+    after = tvm.tirx.transform.ForceNarrowIndexToInt32()(Before)
+    tvm.ir.assert_structural_equal(Expected, after)
 
 
 def test_clz():
     @tvm.script.ir_module
     class Before:
-        @T.prim_func(s_tir=True)
-        def main(B: T.Buffer((T.int64(4),), "int32")):
+        @T.function
+        def main(B: T.Tensor((T.int64(4),), "int32")):
             for i in T.serial(T.int64(4)):
                 B[i] = T.clz(i)
 
     @tvm.script.ir_module
     class Expected:
-        @T.prim_func(s_tir=True)
-        def main(B: T.Buffer((4,), "int32")):
+        @T.function
+        def main(B: T.Tensor((4,), "int32")):
             for i in range(4):
                 B[i] = T.clz(i) - 32 + 64
 
-    after = _transform()(Before)
-    tvm.ir.assert_structural_equal(_lower_blocks(Expected), after)
+    after = tvm.tirx.transform.ForceNarrowIndexToInt32()(Before)
+    tvm.ir.assert_structural_equal(Expected, after)
 
 
 def test_right_shift_preserves_sign_extension_after_narrowing():
     @tvm.script.ir_module
     class Before:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer((T.int64(6),), "float32"), B: T.Buffer((1,), "float32"), n: T.int64):
+        @T.function
+        def main(A: T.Tensor((T.int64(6),), "float32"), B: T.Tensor((1,), "float32"), n: T.int64):
             B[0] = A[T.shift_right(T.truncmod(n - T.int64(8), T.int64(6)), T.int64(63))]
 
     @tvm.script.ir_module
     class Expected:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer((6,), "float32"), B: T.Buffer((1,), "float32"), n: T.int32):
+        @T.function
+        def main(A: T.Tensor((6,), "float32"), B: T.Tensor((1,), "float32"), n: T.int32):
             B[0] = A[T.shift_right(T.truncmod(n - 8, 6), 31)]
 
     # ForceNarrowIndexToInt32 assumes that index values fit in int32.  Under
     # that precondition, shifting the original int64 value by 63 and shifting
     # the narrowed value by its sign-bit position have the same result.
-    after = _transform()(Before)
-    tvm.ir.assert_structural_equal(_lower_blocks(Expected), after)
+    after = tvm.tirx.transform.ForceNarrowIndexToInt32()(Before)
+    tvm.ir.assert_structural_equal(Expected, after)
 
 
 def test_right_shift_dynamic_and_vector_amounts():
     @tvm.script.ir_module
     class Before:
-        @T.prim_func(s_tir=True)
+        @T.function
         def main(
-            A: T.Buffer((T.int64(6),), "float32"),
-            B: T.Buffer((T.int64(5),), "float32"),
+            A: T.Tensor((T.int64(6),), "float32"),
+            B: T.Tensor((T.int64(5),), "float32"),
             n: T.int64,
             shift: T.int64,
         ):
@@ -380,10 +414,10 @@ def test_right_shift_dynamic_and_vector_amounts():
 
     @tvm.script.ir_module
     class Expected:
-        @T.prim_func(s_tir=True)
+        @T.function
         def main(
-            A: T.Buffer((6,), "float32"),
-            B: T.Buffer((5,), "float32"),
+            A: T.Tensor((6,), "float32"),
+            B: T.Tensor((5,), "float32"),
             n: T.int32,
             shift: T.int32,
         ):
@@ -395,17 +429,17 @@ def test_right_shift_dynamic_and_vector_amounts():
                 )
             ]
 
-    after = _transform()(Before)
-    tvm.ir.assert_structural_equal(_lower_blocks(Expected), after)
+    after = tvm.tirx.transform.ForceNarrowIndexToInt32()(Before)
+    tvm.ir.assert_structural_equal(Expected, after)
 
 
 def test_left_shift_dynamic_and_vector_amounts_remain_valid():
     @tvm.script.ir_module
     class Before:
-        @T.prim_func(s_tir=True)
+        @T.function
         def main(
-            A: T.Buffer((T.int64(1),), "float32"),
-            B: T.Buffer((T.int64(5),), "float32"),
+            A: T.Tensor((T.int64(1),), "float32"),
+            B: T.Tensor((T.int64(5),), "float32"),
             n: T.int64,
             shift: T.int64,
         ):
@@ -419,10 +453,10 @@ def test_left_shift_dynamic_and_vector_amounts_remain_valid():
 
     @tvm.script.ir_module
     class Expected:
-        @T.prim_func(s_tir=True)
+        @T.function
         def main(
-            A: T.Buffer((1,), "float32"),
-            B: T.Buffer((5,), "float32"),
+            A: T.Tensor((1,), "float32"),
+            B: T.Tensor((5,), "float32"),
             n: T.int32,
             shift: T.int32,
         ):
@@ -434,36 +468,36 @@ def test_left_shift_dynamic_and_vector_amounts_remain_valid():
                 )
             ]
 
-    after = _transform()(Before)
-    tvm.ir.assert_structural_equal(_lower_blocks(Expected), after)
+    after = tvm.tirx.transform.ForceNarrowIndexToInt32()(Before)
+    tvm.ir.assert_structural_equal(Expected, after)
 
 
 def test_let_binding():
+    n = T.dynamic("n")
+
     @tvm.script.ir_module
     class Before:
-        @T.prim_func(s_tir=True)
-        def main(buf: T.handle):
-            n = T.int64()
-            Buf = T.match_buffer(buf, [n], "int32")
-            ceil_log2 = T.Cast("int64", T.ceil(T.log2(T.Cast("float32", n))))
+        @T.function
+        def main(Buf: T.Tensor([n], "int32")):
+            ceil_log2: T.int64 = T.Cast("int64", T.ceil(T.log2(T.Cast("float32", n))))
             for i in T.serial(ceil_log2):
                 T.evaluate(0)
 
+    n = T.dynamic("n", "int32")
+
     @tvm.script.ir_module
     class Expected:
-        @T.prim_func(s_tir=True)
-        def main(buf: T.handle):
-            n = T.int32()
-            Buf = T.match_buffer(buf, [n], "int32")
+        @T.function
+        def main(Buf: T.Tensor([n], "int32")):
             # The pass narrows indexing variables (n, the For extent) but leaves
             # an explicitly-typed `T.Cast("int64", ...)` storage alone; a Cast to
             # int32 is inserted at the use site (the For iter) instead.
-            ceil_log2 = T.Cast("int64", T.ceil(T.log2(T.Cast("float32", n))))
+            ceil_log2: T.int64 = T.Cast("int64", T.ceil(T.log2(T.Cast("float32", n))))
             for i in range(T.Cast("int32", ceil_log2)):
                 T.evaluate(0)
 
-    after = _transform()(Before)
-    tvm.ir.assert_structural_equal(_lower_blocks(Expected), after)
+    after = tvm.tirx.transform.ForceNarrowIndexToInt32()(Before)
+    tvm.ir.assert_structural_equal(Expected, after)
 
 
 if __name__ == "__main__":

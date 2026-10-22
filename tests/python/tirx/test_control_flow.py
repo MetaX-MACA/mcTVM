@@ -26,7 +26,7 @@ def run_test_break_continue(func, shape, expected):
     target = tvm.target.Target("maca")
     mod = tvm.IRModule({"main": func})
     with target:
-        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+        mod = tvm.tirx.compile(mod, target=target, pipeline="tirx")
     arr_np = np.zeros(shape, dtype="int32")
 
     def run_and_check():
@@ -42,13 +42,12 @@ def run_test_break_continue(func, shape, expected):
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_break_continue1():
     # fmt: off
-    @T.prim_func
-    def func(A_ptr: T.handle):
-        A = T.match_buffer(A_ptr, (10,), "int32")
+    @T.function
+    def func(A: T.Tensor((10,), 'int32')):
 
-        T.device_entry()
-        cta_id = T.cta_id([1])
-        tid = T.thread_id([32])
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(64,)))
+        cta_id = T.maca.block_idx('x')
+        tid = T.maca.thread_idx('x')
         for i in T.serial(10):
             if i == 2:
                 continue
@@ -65,14 +64,13 @@ def test_break_continue1():
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_break_continue2():
     # fmt: off
-    @T.prim_func
-    def func(A_ptr: T.handle):
-        A = T.match_buffer(A_ptr, (9,), "int32")
+    @T.function
+    def func(A: T.Tensor((9,), 'int32')):
 
-        T.device_entry()
-        cta_id = T.cta_id([1])
-        tid = T.thread_id([32])
-        idx = T.alloc_buffer((1,), "int32", scope="local")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(64,)))
+        cta_id = T.maca.block_idx('x')
+        tid = T.maca.thread_idx('x')
+        idx = T.alloc_tensor(ty_args=[T.Tensor((1,), "int32", scope="local")])
         idx[0] = 0
         for i in T.serial(3):
             if i == 0:
@@ -93,14 +91,13 @@ def test_break_continue2():
 @pytest.mark.skipif(not env.has_maca(), reason="need maca")
 def test_break_continue3():
     # fmt: off
-    @T.prim_func
-    def func(A_ptr: T.handle):
-        A = T.match_buffer(A_ptr, (10,), "int32")
+    @T.function
+    def func(A: T.Tensor((10,), 'int32')):
 
-        T.device_entry()
-        cta_id = T.cta_id([1])
-        tid = T.thread_id([32])
-        i = T.alloc_buffer((1,), "int32", scope="local")
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(64,)))
+        cta_id = T.maca.block_idx('x')
+        tid = T.maca.thread_idx('x')
+        i = T.alloc_tensor(ty_args=[T.Tensor((1,), "int32", scope="local")])
         i[0] = 0
         while i[0] < 10:
             if (i[0] % 2) == 1:

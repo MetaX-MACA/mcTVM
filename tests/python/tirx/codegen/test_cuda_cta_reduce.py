@@ -28,7 +28,7 @@ TARGET = tvm.target.Target("maca")
 
 def _build_and_run(func, n):
     mod = tvm.IRModule({"main": func})
-    mod = tvm.compile(mod, target=TARGET, tir_pipeline="tirx")
+    mod = tvm.tirx.compile(mod, target=TARGET, pipeline="tirx")
     out_np = np.zeros(n, dtype="float32")
 
     def run_and_check():
@@ -48,15 +48,15 @@ def test_cta_sum_4_warps():
     N = NUM_WAVES * 64
 
     # fmt: off
-    @T.prim_func
-    def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (N,), "float32")
-        T.device_entry()
-        cta_id = T.cta_id([1])
-        warp_id = T.warp_id([NUM_WAVES])
-        lane_id = T.lane_id([64])
-        tid = T.thread_id([N])
-        scratch = T.alloc_buffer((NUM_WAVES,), "float32", scope="shared")
+    @T.function
+    def func(out: T.Tensor((N,), 'float32')):
+
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(N,)))
+        cta_id = T.maca.block_idx('x')
+        warp_id = T.maca.warp_id()
+        lane_id = T.maca.lane_id()
+        tid = T.maca.thread_idx('x')
+        scratch = T.alloc_tensor(ty_args=[T.Tensor((NUM_WAVES,), "float32", scope="shared")])
         val: T.f32 = T.float32(tid + 1)
         val = T.maca.cta_sum(val, NUM_WAVES, scratch.ptr_to([0]))
         out[tid] = val
@@ -76,15 +76,15 @@ def test_cta_sum_8_warps():
     N = NUM_WAVES * 64
 
     # fmt: off
-    @T.prim_func
-    def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (N,), "float32")
-        T.device_entry()
-        cta_id = T.cta_id([1])
-        warp_id = T.warp_id([NUM_WAVES])
-        lane_id = T.lane_id([64])
-        tid = T.thread_id([N])
-        scratch = T.alloc_buffer((NUM_WAVES,), "float32", scope="shared")
+    @T.function
+    def func(out: T.Tensor((N,), 'float32')):
+
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(N,)))
+        cta_id = T.maca.block_idx('x')
+        warp_id = T.maca.warp_id()
+        lane_id = T.maca.lane_id()
+        tid = T.maca.thread_idx('x')
+        scratch = T.alloc_tensor(ty_args=[T.Tensor((NUM_WAVES,), "float32", scope="shared")])
         val: T.f32 = T.float32(tid + 1)
         val = T.maca.cta_sum(val, NUM_WAVES, scratch.ptr_to([0]))
         out[tid] = val
@@ -103,15 +103,15 @@ def test_cta_max_4_warps():
     N = NUM_WAVES * 64
 
     # fmt: off
-    @T.prim_func
-    def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (N,), "float32")
-        T.device_entry()
-        cta_id = T.cta_id([1])
-        warp_id = T.warp_id([NUM_WAVES])
-        lane_id = T.lane_id([64])
-        tid = T.thread_id([N])
-        scratch = T.alloc_buffer((NUM_WAVES,), "float32", scope="shared")
+    @T.function
+    def func(out: T.Tensor((N,), 'float32')):
+
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(N,)))
+        cta_id = T.maca.block_idx('x')
+        warp_id = T.maca.warp_id()
+        lane_id = T.maca.lane_id()
+        tid = T.maca.thread_idx('x')
+        scratch = T.alloc_tensor(ty_args=[T.Tensor((NUM_WAVES,), "float32", scope="shared")])
         val: T.f32 = T.float32(tid + 1)
         val = T.maca.cta_max(val, NUM_WAVES, scratch.ptr_to([0]))
         out[tid] = val
@@ -129,15 +129,15 @@ def test_cta_min_4_warps():
     N = NUM_WAVES * 64
 
     # fmt: off
-    @T.prim_func
-    def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (N,), "float32")
-        T.device_entry()
-        cta_id = T.cta_id([1])
-        warp_id = T.warp_id([NUM_WAVES])
-        lane_id = T.lane_id([64])
-        tid = T.thread_id([N])
-        scratch = T.alloc_buffer((NUM_WAVES,), "float32", scope="shared")
+    @T.function
+    def func(out: T.Tensor((N,), 'float32')):
+
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(N,)))
+        cta_id = T.maca.block_idx('x')
+        warp_id = T.maca.warp_id()
+        lane_id = T.maca.lane_id()
+        tid = T.maca.thread_idx('x')
+        scratch = T.alloc_tensor(ty_args=[T.Tensor((NUM_WAVES,), "float32", scope="shared")])
         val: T.f32 = T.float32(tid + 1)
         val = T.maca.cta_min(val, NUM_WAVES, scratch.ptr_to([0]))
         out[tid] = val
@@ -155,15 +155,15 @@ def test_cta_sum_1_warp():
     N = 64
 
     # fmt: off
-    @T.prim_func
-    def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (N,), "float32")
-        T.device_entry()
-        cta_id = T.cta_id([1])
-        warp_id = T.warp_id([NUM_WAVES])
-        lane_id = T.lane_id([64])
-        tid = T.thread_id([N])
-        scratch = T.alloc_buffer((NUM_WAVES,), "float32", scope="shared")
+    @T.function
+    def func(out: T.Tensor((N,), 'float32')):
+
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(N,)))
+        cta_id = T.maca.block_idx('x')
+        warp_id = T.maca.warp_id()
+        lane_id = T.maca.lane_id()
+        tid = T.maca.thread_idx('x')
+        scratch = T.alloc_tensor(ty_args=[T.Tensor((NUM_WAVES,), "float32", scope="shared")])
         val: T.f32 = T.float32(tid + 1)
         val = T.maca.cta_sum(val, NUM_WAVES, scratch.ptr_to([0]))
         out[tid] = val
@@ -182,15 +182,15 @@ def test_cta_sum_all_warp_counts(num_warps):
     N = num_warps * 64
 
     # fmt: off
-    @T.prim_func
-    def func(out_ptr: T.handle):
-        out = T.match_buffer(out_ptr, (N,), "float32")
-        T.device_entry()
-        cta_id = T.cta_id([1])
-        warp_id = T.warp_id([num_warps])
-        lane_id = T.lane_id([64])
-        tid = T.thread_id([N])
-        scratch = T.alloc_buffer((num_warps,), "float32", scope="shared")
+    @T.function
+    def func(out: T.Tensor((N,), 'float32')):
+
+        T.device_entry(launch=T.maca.LaunchConfig(grid=(1,), block=(N,)))
+        cta_id = T.maca.block_idx('x')
+        warp_id = T.maca.warp_id()
+        lane_id = T.maca.lane_id()
+        tid = T.maca.thread_idx('x')
+        scratch = T.alloc_tensor(ty_args=[T.Tensor((num_warps,), "float32", scope="shared")])
         val: T.f32 = T.float32(tid + 1)
         val = T.maca.cta_sum(val, num_warps, scratch.ptr_to([0]))
         out[tid] = val

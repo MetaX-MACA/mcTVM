@@ -25,6 +25,7 @@
 #define TVM_IR_GLOBAL_INFO_H_
 
 #include <tvm/ffi/object.h>
+#include <tvm/ffi/reflection/registry.h>
 
 namespace tvm {
 
@@ -45,7 +46,7 @@ class GlobalInfoNode : public ffi::Object {
  */
 class GlobalInfo : public ffi::ObjectRef {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(GlobalInfo, ffi::ObjectRef, GlobalInfoNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(GlobalInfo, ffi::ObjectRef, GlobalInfoNode);
 };
 
 }  // namespace tvm

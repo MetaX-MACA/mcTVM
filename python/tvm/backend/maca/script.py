@@ -19,9 +19,11 @@
 from __future__ import annotations
 
 from tvm.backend.maca import op as _maca_op
-from tvm.tirx import is_buffer_var
+from tvm.backend.maca.launch import KernelAttributes as KernelAttributes
+from tvm.backend.maca.launch import LaunchConfig as LaunchConfig
+from tvm.ir import Op as _Op
+from tvm.tirx import is_tensor_var
 from tvm.tirx import op as _tir_op
-from tvm.tirx.script.builder.ir import _op_wrapper
 
 # pylint: disable=protected-access
 
@@ -29,51 +31,61 @@ from tvm.tirx.script.builder.ir import _op_wrapper
 class MACANamespace:
     """The MACA intrinsics submodule."""
 
+    LaunchConfig = LaunchConfig
+    KernelAttributes = KernelAttributes
+
     def __init__(self):
-        self.func_call = _op_wrapper(_maca_op.maca_func_call)
-        self.warp_reduce = _op_wrapper(_maca_op.maca_warp_reduce)
-        self.warp_sum = _op_wrapper(_maca_op.maca_warp_sum)
-        self.warp_max = _op_wrapper(_maca_op.maca_warp_max)
-        self.warp_min = _op_wrapper(_maca_op.maca_warp_min)
-        self.cta_reduce = _op_wrapper(_maca_op.maca_cta_reduce)
-        self.cta_sum = _op_wrapper(_maca_op.maca_cta_sum)
-        self.cta_max = _op_wrapper(_maca_op.maca_cta_max)
-        self.cta_min = _op_wrapper(_maca_op.maca_cta_min)
-        self.thread_fence = _op_wrapper(_maca_op.maca_thread_fence)
-        self.atomic_add = _op_wrapper(_maca_op.maca_atomic_add)
-        self.atomic_cas = _op_wrapper(_maca_op.maca_atomic_cas)
-        self.ldg = _op_wrapper(_maca_op.maca_ldg)
-        self.warp_sync = _op_wrapper(_maca_op.maca_warp_sync)
-        self.cta_sync = _op_wrapper(_maca_op.maca_cta_sync)
-        self.copy_bytes = _op_wrapper(_maca_op.maca_copy_bytes)
-        self.copy_async_32b = _op_wrapper(_maca_op.maca_copy_async_32b)
-        self.copy_async_64b = _op_wrapper(_maca_op.maca_copy_async_64b)
-        self.copy_async_128b = _op_wrapper(_maca_op.maca_copy_async_128b)
-        self.copy_async_32b_zfill = _op_wrapper(_maca_op.maca_copy_async_32b_zfill)
-        self.copy_async_64b_zfill = _op_wrapper(_maca_op.maca_copy_async_64b_zfill)
-        self.copy_async_128b_zfill = _op_wrapper(_maca_op.maca_copy_async_128b_zfill)
-        self.async_wait_gvmcnt = _op_wrapper(_maca_op.maca_async_wait_gvmcnt)
-        self.barrier_inst = _op_wrapper(_maca_op.maca_barrier_inst)
-        self.mma_m16n16k16_f16_f32 = _op_wrapper(_maca_op.maca_mma_m16n16k16_f16_f32)
-        self.mma_m16n16k16_bf16_f32 = _op_wrapper(_maca_op.maca_mma_m16n16k16_bf16_f32)
-        self.mma_m16n16k16_i8_i32 = _op_wrapper(_maca_op.maca_mma_m16n16k16_i8_i32)
-        self.mma_m16n16k4_f32_f32 = _op_wrapper(_maca_op.maca_mma_m16n16k4_f32_f32)
-        self.mma_m16n16k8_tf32_f32 = _op_wrapper(_maca_op.maca_mma_m16n16k8_tf32_f32)
-        self.mma_m16n16k4_f64_f64 = _op_wrapper(_maca_op.maca_mma_m16n16k4_f64_f64)
-        self.wmma_load = _op_wrapper(_maca_op.maca_wmma_load)
-        self.wmma_fill = _op_wrapper(_maca_op.maca_wmma_fill)
-        self.wmma_sync = _op_wrapper(_maca_op.maca_wmma_sync)
-        self.wmma_store = _op_wrapper(_maca_op.maca_wmma_store)
-        self.copy_128b = _op_wrapper(_maca_op.maca_copy_128b)
-        self.copy_64b = _op_wrapper(_maca_op.maca_copy_64b)
-        self.copy_32b = _op_wrapper(_maca_op.maca_copy_32b)
-        self.copy_16b = _op_wrapper(_maca_op.maca_copy_16b)
-        self.copy_8b = _op_wrapper(_maca_op.maca_copy_8b)
+        self.func_call = _maca_op.maca_func_call
+        self.warp_reduce = _maca_op.maca_warp_reduce
+        self.warp_sum = _maca_op.maca_warp_sum
+        self.warp_max = _maca_op.maca_warp_max
+        self.warp_min = _maca_op.maca_warp_min
+        self.cta_reduce = _maca_op.maca_cta_reduce
+        self.cta_sum = _maca_op.maca_cta_sum
+        self.cta_max = _maca_op.maca_cta_max
+        self.cta_min = _maca_op.maca_cta_min
+        self.thread_fence = _maca_op.maca_thread_fence
+        self.atomic_add = _maca_op.maca_atomic_add
+        self.atomic_cas = _maca_op.maca_atomic_cas
+        self.ldg = _maca_op.maca_ldg
+        self.warp_sync = _maca_op.maca_warp_sync
+        self.cta_sync = _maca_op.maca_cta_sync
+        self.copy_bytes = _maca_op.maca_copy_bytes
+        self.copy_async_32b = _maca_op.maca_copy_async_32b
+        self.copy_async_64b = _maca_op.maca_copy_async_64b
+        self.copy_async_128b = _maca_op.maca_copy_async_128b
+        self.copy_async_32b_zfill = _maca_op.maca_copy_async_32b_zfill
+        self.copy_async_64b_zfill = _maca_op.maca_copy_async_64b_zfill
+        self.copy_async_128b_zfill = _maca_op.maca_copy_async_128b_zfill
+        self.async_wait_gvmcnt = _maca_op.maca_async_wait_gvmcnt
+        self.barrier_inst = _maca_op.maca_barrier_inst
+        self.mma_m16n16k16_f16_f32 = _maca_op.maca_mma_m16n16k16_f16_f32
+        self.mma_m16n16k16_bf16_f32 = _maca_op.maca_mma_m16n16k16_bf16_f32
+        self.mma_m16n16k16_i8_i32 = _maca_op.maca_mma_m16n16k16_i8_i32
+        self.mma_m16n16k4_f32_f32 = _maca_op.maca_mma_m16n16k4_f32_f32
+        self.mma_m16n16k8_tf32_f32 = _maca_op.maca_mma_m16n16k8_tf32_f32
+        self.mma_m16n16k4_f64_f64 = _maca_op.maca_mma_m16n16k4_f64_f64
+        self.wmma_load = _maca_op.maca_wmma_load
+        self.wmma_fill = _maca_op.maca_wmma_fill
+        self.wmma_sync = _maca_op.maca_wmma_sync
+        self.wmma_store = _maca_op.maca_wmma_store
+        self.copy_128b = _maca_op.maca_copy_128b
+        self.copy_64b = _maca_op.maca_copy_64b
+        self.copy_32b = _maca_op.maca_copy_32b
+        self.copy_16b = _maca_op.maca_copy_16b
+        self.copy_8b = _maca_op.maca_copy_8b
         setattr(self, "__activemask", self._activemask)
         setattr(self, "__shfl_xor_sync", self._shfl_xor_sync)
         setattr(self, "__shfl_sync", self._shfl_sync)
         setattr(self, "__shfl_up_sync", self._shfl_up_sync)
         setattr(self, "__shfl_down_sync", self._shfl_down_sync)
+        for op_name in _Op.list_op_names():
+            prefix = "tirx.maca."
+            if not op_name.startswith(prefix):
+                continue
+            name = op_name[len(prefix) :]
+            if "." not in name and not hasattr(self, name):
+                setattr(self, name, getattr(_maca_op, name))
 
     @staticmethod
     def _activemask():
@@ -81,7 +93,7 @@ class MACANamespace:
 
     @staticmethod
     def _shfl_xor_sync(mask, value, lane_mask, width):
-        if is_buffer_var(value):
+        if is_tensor_var(value):
             value = value[0]
         return _tir_op.call_intrin(
             value.ty, "tirx.maca.__shfl_xor_sync", mask, value, lane_mask, width
@@ -89,23 +101,23 @@ class MACANamespace:
 
     @staticmethod
     def _shfl_sync(mask, value, lane, width):
-        if is_buffer_var(value):
+        if is_tensor_var(value):
             value = value[0]
         return _tir_op.call_intrin(value.ty, "tirx.maca.__shfl_sync", mask, value, lane, width)
 
     @staticmethod
     def _shfl_up_sync(mask, value, delta, width):
-        if is_buffer_var(value):
+        if is_tensor_var(value):
             value = value[0]
         return _tir_op.call_intrin(value.ty, "tirx.maca.__shfl_up_sync", mask, value, delta, width)
 
     @staticmethod
     def _shfl_down_sync(mask, value, delta, width):
-        if is_buffer_var(value):
+        if is_tensor_var(value):
             value = value[0]
         return _tir_op.call_intrin(
             value.ty, "tirx.maca.__shfl_down_sync", mask, value, delta, width
         )
 
 
-__all__ = ["MACANamespace"]
+__all__ = ["LaunchConfig", "MACANamespace"]

@@ -21,7 +21,7 @@ import tvm
 from tvm import relax
 from tvm.ir.module import IRModule
 from tvm.runtime import Executable
-from tvm.tirx.function import PrimFunc
+from tvm.tirx.function import Function
 
 from . import _ffi_api
 
@@ -51,7 +51,6 @@ class VMExecutable(Executable):
 def _vmcodegen(
     builder: "relax.ExecBuilder",
     mod: tvm.IRModule,
-    exec_mode: str = "bytecode",
 ) -> tvm.IRModule:
     """Running VM codegen.
 
@@ -63,20 +62,13 @@ def _vmcodegen(
     mod: IRModule
         The input IRModule to be built.
 
-    exec_mode: {"bytecode", "compiled"}
-        The execution mode.
-
     Return
     ------
     leftover: IRModule
         Left over IRModule that may contain extra functions.
     """
 
-    if exec_mode == "bytecode":
-        return _ffi_api.VMCodeGen(builder, mod)  # type:ignore
-    if exec_mode == "compiled":
-        return _ffi_api.VMTIRCodeGen(builder, mod)  # type: ignore
-    raise ValueError(f"Unknown exec_mode {exec_mode}")
+    return _ffi_api.VMCodeGen(builder, mod)  # type: ignore
 
 
 def _auto_attach_system_lib_prefix(
@@ -154,7 +146,7 @@ def _vmlink(
     tir_ext_libs = []
     if tir_mod is not None and len(tir_mod.get_global_vars()) > 0:
         tir_mod = _auto_attach_system_lib_prefix(tir_mod, target, system_lib)
-        lib = tvm.tirx.build(tir_mod, target=target, pipeline=tir_pipeline)
+        lib = tvm.tirx.compile(tir_mod, target=target, pipeline=tir_pipeline).mod
     for ext_mod in ext_libs:
         if _is_device_module(ext_mod):
             tir_ext_libs.append(ext_mod)
@@ -175,7 +167,6 @@ def build(
     params: dict[str, list] | None = None,
     relax_pipeline: None | str | tvm.transform.Pass = "default",
     tir_pipeline: None | str | tvm.transform.Pass = "default",
-    exec_mode: str = "bytecode",
     *,
     system_lib: bool | None = None,
 ) -> Executable:
@@ -205,9 +196,6 @@ def build(
 
     tir_pipelinie : str = "default"
         The TIR compilation pipeline to use.
-
-    exec_mode: {"bytecode", "compiled"}
-        The execution mode.
 
     system_lib: Optional[bool]
         Whether to build system lib that is being packed statically and
@@ -241,6 +229,9 @@ def build(
         constants = attrs.get("const_name_to_constant", {})
         return ext_libs, constants
 
+    from tvm.backend.config import prepare_target
+
+    target = prepare_target(target, mod)
     if isinstance(target, str):
         target = tvm.target.Target(target)
     if not params:
@@ -272,7 +263,7 @@ def build(
     ext_libs, constants = _extract_attrs(mod)
     params.update(dict(constants))
     builder = relax.ExecBuilder()
-    mod = _vmcodegen(builder, mod, exec_mode)
+    mod = _vmcodegen(builder, mod)
     return _vmlink(
         builder=builder,
         target=target,
@@ -285,7 +276,7 @@ def build(
 
 
 def _filter_tir(mod: tvm.IRModule) -> tvm.IRModule | None:
-    tir_mod = {gvar: func for gvar, func in mod.functions.items() if isinstance(func, PrimFunc)}
+    tir_mod = {gvar: func for gvar, func in mod.functions.items() if isinstance(func, Function)}
 
     if tir_mod:
         return IRModule(tir_mod, attrs=mod.attrs)

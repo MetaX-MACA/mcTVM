@@ -22,6 +22,7 @@
  * \brief The MACA graph related builtin functions for Relax virtual machine.
  */
 
+#include <tvm/ffi/base_details.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/function.h>
@@ -29,7 +30,6 @@
 #include <tvm/runtime/vm/vm.h>
 
 #include "../../../backend/maca/runtime/maca_common.h"
-#include "../../../support/utils.h"
 #include "dlpack/dlpack.h"
 namespace tvm {
 namespace runtime {
@@ -57,7 +57,7 @@ struct MACAGraphCaptureKeyHash {
     std::hash<int64_t> hash_fn;
     size_t hash = hash_fn(key.index);
     for (const auto& shape : key.shape_expr) {
-      support::HashCombine(hash, hash_fn(shape));
+      hash = ffi::details::StableHashCombine(hash, hash_fn(shape));
     }
     return hash;
   }
@@ -146,7 +146,7 @@ class MACACaptureStream {
 }  // namespace
 
 /*! \brief The VM extension of MACA graph. */
-class MACAGraphExtensionNode : public VMExtensionNode {
+class MACAGraphExtensionObj : public VMExtensionObj {
  public:
   /*!
    * \brief Launch the maca graph if it has been cached, otherwise execute it in capture mode.
@@ -228,8 +228,7 @@ class MACAGraphExtensionNode : public VMExtensionNode {
   }
 
   static constexpr const bool _type_mutable = true;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("vm.MACAGraphExtension", MACAGraphExtensionNode,
-                                    VMExtensionNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("vm.MACAGraphExtension", MACAGraphExtensionObj, VMExtensionObj);
 
  private:
   /*!
@@ -246,14 +245,14 @@ class MACAGraphExtensionNode : public VMExtensionNode {
   std::unordered_map<int64_t, ffi::ObjectRef> alloc_cache_;
 };
 
-/*! Managed reference to MACAGraphExtensionNode */
+/*! Managed reference to MACAGraphExtensionObj */
 class MACAGraphExtension : public VMExtension {
  public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(MACAGraphExtension, VMExtension,
-                                             MACAGraphExtensionNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(MACAGraphExtension, VMExtension,
+                                                MACAGraphExtensionObj);
   static MACAGraphExtension Create() {
-    auto data_ = ffi::make_object<MACAGraphExtensionNode>();
-    return MACAGraphExtension(std::move(data_));
+    auto data_ = ffi::make_object<MACAGraphExtensionObj>();
+    return ffi::GetRef<MACAGraphExtension>(data_.get());
   }
 };
 

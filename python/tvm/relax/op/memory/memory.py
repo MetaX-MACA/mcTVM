@@ -15,12 +15,12 @@
 # specific language governing permissions and limitations
 """Relax memory primitives."""
 
-import tvm
-from tvm.ir import Call, GenericConst, StringImm
+from tvm.ir import Call, DataTypeImm, GenericConst, StringImm
+from tvm.ir import Call as _Call
+from tvm.ir.location import UNKNOWN_LOC, Location
 
 from ...expr import Expr, prim_value
 from ...utils import convert_to_expr
-from . import _ffi_api
 
 
 def alloc_storage(
@@ -28,6 +28,9 @@ def alloc_storage(
     virtual_device_index: int | Expr,
     storage_scope: str | Expr,
     dtype: str | Expr,
+    *,
+    ty=None,
+    loc: Location = UNKNOWN_LOC,
 ) -> Call:
     """Construct a Call to allocate a storage with specific size, virtual_device_index,
     storage_scope and dtype.
@@ -53,13 +56,18 @@ def alloc_storage(
         A relax Call, which gets the allocated storage.
     """
     size = convert_to_expr(size)
-    if isinstance(dtype, str):
-        dtype = GenericConst(tvm.DataType(dtype), tvm.relax.AnyType())
+    if isinstance(dtype, str | GenericConst):
+        dtype = DataTypeImm(dtype.value if isinstance(dtype, GenericConst) else dtype)
     if isinstance(storage_scope, str):
         storage_scope = StringImm(storage_scope)
     if isinstance(virtual_device_index, int):
         virtual_device_index = prim_value(virtual_device_index)
-    return _ffi_api.alloc_storage(size, virtual_device_index, storage_scope, dtype)  # type: ignore
+    return _Call(
+        "relax.memory.alloc_storage",
+        [size, virtual_device_index, storage_scope, dtype],
+        ty=ty,
+        loc=loc,
+    )  # type: ignore
 
 
 def alloc_tensor(
@@ -68,6 +76,9 @@ def alloc_tensor(
     shape: Expr,
     dtype: str | Expr,
     runtime_device_ind: int | Expr = prim_value(0),
+    *,
+    ty=None,
+    loc: Location = UNKNOWN_LOC,
 ) -> Call:
     """Construct a Call to allocate a tensor on a certain storage starting from the given offset.
 
@@ -97,14 +108,19 @@ def alloc_tensor(
     if isinstance(offset, int):
         offset = prim_value(offset)
     shape = convert_to_expr(shape)
-    if isinstance(dtype, str):
-        dtype = GenericConst(tvm.DataType(dtype), tvm.relax.AnyType())
+    if isinstance(dtype, str | GenericConst):
+        dtype = DataTypeImm(dtype.value if isinstance(dtype, GenericConst) else dtype)
     if isinstance(runtime_device_ind, int):
         runtime_device_ind = prim_value(runtime_device_ind)
-    return _ffi_api.alloc_tensor(storage, offset, shape, dtype, runtime_device_ind)  # type: ignore
+    return _Call(
+        "relax.memory.alloc_tensor",
+        [storage, offset, shape, dtype, runtime_device_ind],
+        ty=ty,
+        loc=loc,
+    )  # type: ignore
 
 
-def kill_storage(storage: Expr) -> Call:
+def kill_storage(storage: Expr, *, ty=None, loc: Location = UNKNOWN_LOC) -> Call:
     """Construct a Call to kill a storage.
 
     Parameters
@@ -117,10 +133,15 @@ def kill_storage(storage: Expr) -> Call:
     result : Call
         A relax Call to kill a storage.
     """
-    return _ffi_api.kill_storage(storage)  # type: ignore
+    return _Call(
+        "relax.memory.kill_storage",
+        [storage],
+        ty=ty,
+        loc=loc,
+    )  # type: ignore
 
 
-def kill_tensor(tensor: Expr) -> Call:
+def kill_tensor(tensor: Expr, *, ty=None, loc: Location = UNKNOWN_LOC) -> Call:
     """Construct a Call to kill a tensor.
 
     Parameters
@@ -133,4 +154,9 @@ def kill_tensor(tensor: Expr) -> Call:
     result : Call
         A relax Call to kill a tensor.
     """
-    return _ffi_api.kill_tensor(tensor)  # type: ignore
+    return _Call(
+        "relax.memory.kill_tensor",
+        [tensor],
+        ty=ty,
+        loc=loc,
+    )  # type: ignore

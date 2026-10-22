@@ -17,53 +17,96 @@
 """A generic IRBuilder across the TVM stack"""
 
 from collections.abc import Callable
-from contextlib import contextmanager
-from typing import Any
+from contextlib import contextmanager, nullcontext
+from functools import wraps
+from inspect import signature
+from typing import Any, Generic, TypeVar
 
 from tvm_ffi import register_object as _register_object
+from tvm_ffi.dataclasses import MISSING as MISSING
 
+from tvm import ir
+from tvm.ir.location import UnknownLoc
 from tvm.runtime import Object as _Object
 
 from . import _ffi_api
+
+
+def resolve_global_info_args(
+    *fields: str, resolver: Callable[[str], Any]
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Resolve selected string arguments before calling a builder operation.
+
+    Parameters
+    ----------
+    *fields : str
+        Names of positional-only, positional-or-keyword, or keyword-only parameters.
+        Repeated names are resolved once. Omitted arguments use their declared defaults.
+    resolver : Callable[[str], Any]
+        Explicit callback receiving each selected string and returning its replacement.
+        The callback owns selector syntax, lookup scope, and errors. Non-string values
+        pass through with their identity preserved; containers are not decoded recursively.
+
+    Returns
+    -------
+    Callable
+        Decorator preserving the callable's signature, name, and documentation. The
+        signature is inspected once when decorating, then reused for argument binding.
+
+    Raises
+    ------
+    ValueError
+        If a selected name is absent or names a variadic parameter.
+
+    Notes
+    -----
+    All argument expressions are evaluated once in ordinary Python order before binding,
+    resolution, and the callable body. Positional, keyword, unpacked, and aliased calls
+    share this behavior. Selected string defaults are resolved on every call. Exceptions
+    from binding, the resolver, and the callable propagate unchanged.
+
+    .. code:: python
+
+        @resolve_global_info_args("device", resolver=lookup_device)
+        def tensor(shape, device="default"):
+            return make_tensor(shape, device)
+    """
+    fields = tuple(dict.fromkeys(fields))
+
+    def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
+        call_signature = signature(function)
+        for field in fields:
+            parameter = call_signature.parameters.get(field)
+            if parameter is None or parameter.kind in (
+                parameter.VAR_POSITIONAL,
+                parameter.VAR_KEYWORD,
+            ):
+                raise ValueError(f"Unknown or variadic global-info argument: {field!r}")
+
+        @wraps(function)
+        def invoke(*args, **kwargs):
+            bound = call_signature.bind(*args, **kwargs)
+            bound.apply_defaults()
+            for field in fields:
+                value = bound.arguments[field]
+                if isinstance(value, str):
+                    bound.arguments[field] = resolver(value)
+            return function(*bound.args, **bound.kwargs)
+
+        return invoke
+
+    return decorate
 
 
 @_register_object("script.ir_builder.IRBuilderFrame")
 class IRBuilderFrame(_Object):
     """A stack frame of the IRBuilder used to keep track of the current scope.
 
-    Furthermore, the information stored in each stack frame can be useful for context-dependent
-    IR construction.
-
-    Examples
-    --------
-
-    The `T.match_buffer` below instead an element in the buffer map of `PrimFuncFrame`:
-
-    .. code-block:: python
-
-        from tvm.script.ir_builder import tirx as T
-        from tvm.script.ir_builder import IRBuilder
-
-        with IRBuilder() as builder:
-            with T.prim_func(...):  # pushes a PrimFuncFrame (subclass of IRBuilderFrame)
-                                    # to `builder`'s stack of frames
-                buffer = T.match_buffer(...)
-
-
-    The `T.match_buffer` below instead generates `MatchBufferRegion` in a TIR block:
-
-    .. code-block:: python
-
-        from tvm.script.ir_builder import tirx as T
-        from tvm.script.ir_builder import IRBuilder
-
-        with IRBuilder() as builder:
-            with T.prim_func(...):  # pushes a PrimFuncFrame (subclass of IRBuilderFrame)
-                                    # to `builder`'s stack of frames
-               with T.sblock(...):  # pushes a BlockFrame (subclass of IRBuilderFrame)
-                                    # to `builder`'s stack of frames
-                    buffer = T.match_buffer(...)
-
+    A language variant supplies frame subclasses that retain the information
+    needed for context-dependent construction. Entering a frame pushes it onto
+    the active builder's stack; nested operations can inspect that stack to
+    find their enclosing scope. Normal exit finalizes the frame and runs its
+    registered callbacks.
     """
 
     def __enter__(self) -> "IRBuilderFrame":
@@ -90,24 +133,22 @@ class IRBuilderFrame(_Object):
 
 @_register_object("script.ir_builder.IRBuilder")
 class IRBuilder(_Object):
-    """A dialect-agnostic IRBuilder that constructs any IR of TVM.
+    """A shared construction context for any language variant's IR.
 
     Examples
     --------
-    An idiomatic use of this class is to put this inside the with-scope,
-    call dialect-specific methods accordingly. Upon exiting the scope.
+    Enter the builder before using a language variant's construction frames.
+    Each completed frame contributes to the result returned by ``get``.
 
     .. code-block:: python
 
-        from tvm.script.ir_builder import tirx as T
         from tvm.script.ir_builder import IRBuilder
 
-        with IRBuilder() as builder:
-            with T.prim_func(...):  # pushes a PrimFuncFrame (subclass of IRBuilderFrame)
-                                # to `builder`'s stack of frames
-                buffer = T.match_buffer(...)
-
-        return builder.get()        # returns the constructed IR, i.e. tirx.PrimFunc
+        def build(frame, emit_body):
+            with IRBuilder() as builder:
+                with frame:
+                    emit_body()
+            return builder.get()
     """
 
     def __init__(self) -> None:
@@ -163,30 +204,30 @@ class IRBuilder(_Object):
         return _ffi_api.IRBuilderGet(self)  # type: ignore[attr-defined] # pylint: disable=no-member
 
     @contextmanager
-    def with_source_span(self, span):
-        """Attach ``span`` to IR nodes constructed in the nested scope.
+    def with_loc(self, loc):
+        """Attach ``loc`` to IR nodes constructed in the nested scope.
 
-        Nested scopes are retained as a ``SequentialSpan`` when they describe
+        Nested scopes are retained as a ``CallSiteLoc`` when they describe
         distinct source ranges, such as a TVMScript inline expansion.
 
         Parameters
         ----------
-        span : tvm.ir.Span
+        loc : tvm.ir.Location
             The frontend source range active in the nested scope.
         """
-        _ffi_api.IRBuilderPushSourceSpan(  # type: ignore[attr-defined] # pylint: disable=no-member
-            self, span
+        _ffi_api.IRBuilderPushLoc(  # type: ignore[attr-defined] # pylint: disable=no-member
+            self, loc
         )
         try:
             yield
         finally:
-            _ffi_api.IRBuilderPopSourceSpan(  # type: ignore[attr-defined] # pylint: disable=no-member
+            _ffi_api.IRBuilderPopLoc(  # type: ignore[attr-defined] # pylint: disable=no-member
                 self
             )
 
-    def _set_current_source_span(self, value):
-        """Attach the active source span to an expression without one."""
-        return _ffi_api.IRBuilderSetCurrentSourceSpan(  # type: ignore[attr-defined] # pylint: disable=no-member
+    def _set_current_loc(self, value):
+        """Compose the active source location onto the same supported IR node or frame."""
+        return _ffi_api.IRBuilderSetCurrentLoc(  # type: ignore[attr-defined] # pylint: disable=no-member
             self, value
         )
 
@@ -229,3 +270,173 @@ class IRBuilder(_Object):
         """
         assert len(s) == len(vs)
         return [IRBuilder.name(i, v) for i, v in zip(s, vs)]
+
+
+_T = TypeVar("_T")
+
+
+class AlreadyEmitted(Generic[_T]):
+    """Hold the exact emitted value; location handling preserves this receipt.
+
+    Parameters
+    ----------
+    value : Any
+        Object already emitted by a language variant's builder. The receipt
+        retains this object without copying it. Binding or emitting the receipt
+        must not emit the object again.
+
+    Attributes
+    ----------
+    value : Any
+        The same emitted object, available for identity checks and source-location
+        attachment.
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: _T) -> None:
+        self.value = value
+
+
+class LocationEntry:
+    """A materialized source range shared by generated builder operations.
+
+    Entries retain only fixed source metadata. Calling an entry attaches its
+    loc to the same result; ``ctx(thunk)`` additionally supplies call provenance
+    during evaluation. ``ctx(thunk, attach_result=False)`` supplies only the
+    evaluation context, leaving result attachment to the binding operation.
+    Both compose the active caller context at invocation.
+    Builders accepting an explicit loc unwrap the entry at native boundaries.
+    """
+
+    __slots__ = ("loc",)
+
+    def __init__(self, loc: ir.Location) -> None:
+        if not isinstance(loc, ir.Location):
+            raise TypeError("loc must be a Location")
+        self.loc = loc
+
+    def __call__(self, value: _T) -> _T:
+        """Attach this range to the same value, receipt, or native frame."""
+        return at(self.loc, value)
+
+    def ctx(self, thunk: Callable[[], _T], *, attach_result: bool = True) -> _T:
+        """Evaluate once under this range, optionally attaching it to the result.
+
+        Context is restored even on failure. Frames constructed during the call
+        retain their native construction location regardless of result attachment.
+        """
+        return with_at_group_(self.loc, thunk, attach_result=attach_result)
+
+
+def at(loc: LocationEntry | ir.Location | None, value: _T) -> _T:
+    """Attach source context to the same IR node, emission receipt, or frame.
+
+    Parameters
+    ----------
+    loc : LocationEntry, Location or None, optional
+        Source location to compose with the active construction context.
+        None leaves the value unchanged; stored locations remain non-nullable.
+        UnknownLoc adds no source context.
+    value : Any
+        Native object, :class:`AlreadyEmitted` receipt, or list/tuple of native
+        objects to annotate. A receipt's contained object receives the loc.
+
+    Returns
+    -------
+    Any
+        The exact ``value`` object, including its original receipt or container.
+        With no active builder, the value is returned without modification.
+
+    Notes
+    -----
+    Native mutation annotates the statement held by the builder itself.  Keep
+    the original Python facade as well, including callable objects and frames.
+    Unsupported objects and ordinary Python values pass through unchanged.
+    """
+    if loc is None:
+        return value
+    if isinstance(loc, LocationEntry):
+        loc = loc.loc
+    if not isinstance(loc, ir.Location):
+        raise TypeError("loc must be a Location")
+    if isinstance(loc, UnknownLoc) or not IRBuilder.is_in_scope():
+        return value
+    target = value.value if isinstance(value, AlreadyEmitted) else value
+    targets = target if isinstance(target, list | tuple) else (target,)
+    for item in targets:
+        if isinstance(item, _Object):
+            _ffi_api.IRBuilderSetLoc(IRBuilder.current(), item, loc)
+    return value
+
+
+def with_at_group_(
+    location: LocationEntry | ir.Location | None,
+    thunk: Callable[[], _T],
+    *,
+    attach_result: bool = True,
+) -> _T:
+    """Evaluate once under a location, optionally attaching it to the same result.
+
+    Parameters
+    ----------
+    location : LocationEntry, Location
+        Source context for the call. None, UnknownLoc, or no active builder
+        leaves construction context unchanged.
+    thunk : Callable[[], Any]
+        Zero-argument callable evaluated exactly once inside that context.
+    attach_result : bool, optional
+        Attach the location to the returned object with :func:`at_`. Defaults
+        to True. False supplies construction context only, leaving explicit
+        result attachment to a later operation.
+
+    Returns
+    -------
+    Any
+        The exact result of ``thunk``, with its receipt or container preserved.
+
+    Notes
+    -----
+    The prior source context is restored even if the callable raises; its
+    exception propagates unchanged. Frames created during the call retain their
+    construction locations regardless of ``attach_result``.
+    """
+    loc = location.loc if isinstance(location, LocationEntry) else location
+    if loc is not None and not isinstance(loc, ir.Location):
+        raise TypeError("loc must be a Location or None")
+    context = (
+        IRBuilder.current().with_loc(loc)
+        if loc is not None and not isinstance(loc, UnknownLoc) and IRBuilder.is_in_scope()
+        else nullcontext()
+    )
+    with context:
+        value = thunk()
+        return at(loc, value) if attach_result else value
+
+
+at_ = at
+
+
+def _return_annotation(annotation):
+    """Evaluate the deferred return expression before normalizing its annotation value."""
+    if callable(annotation) and not isinstance(annotation, ir.Expr | ir.Type):
+        return annotation()
+    return annotation
+
+
+def annotation_constructor(constructor):
+    """Expose a constructor as a real annotation class supporting Python unions.
+
+    Calls construct ordinary native values directly. The class preserves the
+    constructor's signature and documentation without adapting its arguments.
+    """
+    return type(
+        constructor.__name__,
+        (),
+        {
+            "__new__": lambda cls, *args, **kwargs: constructor(*args, **kwargs),
+            "__signature__": signature(constructor),
+            "__doc__": constructor.__doc__,
+            "__module__": constructor.__module__,
+        },
+    )

@@ -27,6 +27,7 @@ import tvm
 import tvm.libinfo
 import tvm.testing
 from tvm import relax
+from tvm.relax import ExternFunc as _ExternFunc
 from tvm.relax.frontend import nn
 from tvm.relax.frontend.nn import spec
 from tvm.relax.transform import AttachExternModules
@@ -86,6 +87,10 @@ def _check_ir_equality(mod):
 
     # pylint: enable=import-outside-toplevel
 
+    x = T.dynamic("x")
+    y = T.dynamic("y")
+    z = T.dynamic("z")
+
     @I.ir_module
     class ExpectedModule:
         @R.function
@@ -95,7 +100,7 @@ def _check_ir_equality(mod):
             R.func_attr({"num_input": 2})
             with R.dataflow():
                 ext_scalar_add = R.call_dps_packed(
-                    "ext_scalar_add", (a, b), out_ty=R.Tensor((), dtype="float32")
+                    _ExternFunc("ext_scalar_add"), (a, b), ty_args=[R.Tensor((), dtype="float32")]
                 )
                 gv: R.Tensor((), dtype="float32") = ext_scalar_add
                 R.output(gv)
@@ -103,15 +108,14 @@ def _check_ir_equality(mod):
 
         @R.function
         def test_sym(
-            a: R.Tensor(("x", "y", 1), dtype="float32"), b: R.Tensor(("y", "z", 5), dtype="float32")
-        ) -> R.Tensor(("x", "y", "z", 9), dtype="float32"):
-            x = T.int64()
-            y = T.int64()
-            z = T.int64()
+            a: R.Tensor((x, y, 1), dtype="float32"), b: R.Tensor((y, z, 5), dtype="float32")
+        ) -> R.Tensor((x, y, z, 9), dtype="float32"):
             R.func_attr({"num_input": 2})
             with R.dataflow():
                 ext_test_sym = R.call_dps_packed(
-                    "ext_test_sym", (a, b), out_ty=R.Tensor((x, y, z, 9), dtype="float32")
+                    _ExternFunc("ext_test_sym"),
+                    (a, b),
+                    ty_args=[R.Tensor((x, y, z, 9), dtype="float32")],
                 )
                 gv1: R.Tensor((x, y, z, 9), dtype="float32") = ext_test_sym
                 R.output(gv1)

@@ -15,10 +15,10 @@
     specific language governing permissions and limitations
     under the License.
 
-gemm_async
-==========
+tcgen05.mma / tcgen05.mma_block_scale
+=====================================
 
-``gemm_async`` lowers a matrix multiply to the **Blackwell asynchronous
+``Tx.cuda.tile.tcgen05.mma`` lowers a matrix multiply to the **Blackwell asynchronous
 tensor-core** instruction ``tcgen05.mma``. B, and normally A, live in **shared
 memory** and are named by 64-bit *matrix descriptors*; A can instead use the
 tensor-memory operand path. The accumulator lives in **tensor memory**, and one
@@ -26,9 +26,9 @@ thread launches the MMA, which runs asynchronously. A
 single-thread call site has already selected that issuer; a warp-scoped call uses
 ``elect_sync`` internally. The caller signals completion with ``tcgen05.commit``
 against an mbarrier. It also
-supports **block-scaled** low precision (fp8 / fp4 with per-block scale factors
+provides ``Tx.cuda.tile.tcgen05.mma_block_scale`` for block-scaled low precision (fp8 / fp4 with per-block scale factors
 ``SFA`` / ``SFB`` in tensor memory). Source:
-``python/tvm/backend/cuda/tile_primitive/gemm_async/tcgen05.py``. (For the
+``python/tvm/backend/cuda/tile/gemm_async/tcgen05.py``. (For the
 synchronous warp-register path see :doc:`gemm`.)
 
 What it accepts
@@ -36,30 +36,22 @@ What it accepts
 
 A single predicate — single-thread or warp scope:
 
-.. code-block:: python
-
-    # register_dispatch("gemm_async", "cuda", priority=10, when=[
-    predicate("single_thread_or_warp",
-              lambda op, sctx: (single_thread(op, sctx) or sctx.is_warp,
-                                f"unsupported exec_scope {sctx.exec_scope}"))
-    # ])
-
 .. list-table::
    :header-rows: 1
    :widths: 22 78
 
    * - Property
      - Requirement
-   * - target / scope / priority
+   * - target / scope
      - ``cuda`` target with ``tcgen05`` support (this implementation is tested
-       with ``sm_100a``); **single thread or warp**; priority ``10``
+       with ``sm_100a``); **single thread or warp**
    * - operands
      - B is in **shared**; A is in **shared** or, for the TMEM-A path, **tmem**;
        the accumulator C/D is in **tmem** (``float32``)
    * - dtype
      - without ``is_AB_tf32``, dense A/B use the same dtype: ``float16``,
        ``bfloat16``, ``float8_e4m3fn``, or ``float8_e5m2``. Typical TF32
-       authoring uses ``float32`` buffers with ``is_AB_tf32=True``; the flag
+       authoring uses ``float32`` tensors with ``is_AB_tf32=True``; the flag
        replaces both semantic A/B dtypes with ``tf32`` before validation, so
        the current implementation does not separately validate the underlying
        storage dtypes or their equality in that mode.
@@ -84,14 +76,14 @@ A single predicate — single-thread or warp scope:
        ``M * cta_group``; ``mma_n`` must divide N exactly; the resulting
        physical tile is also checked by the tcgen05 hardware-shape validator
    * - instruction descriptor
-     - dense MMA always encodes its descriptor in the dispatcher and rejects
+     - dense MMA always encodes its descriptor during lowering and rejects
        ``descI``.  Block-scaled MMA may accept a pre-encoded uint32 ``descI``
    * - layout forms
      - swizzled shared layouts, no-swizzle packed shared layouts, regular tmem
        accumulators, and FlashMLA-style packed ``N/2`` tmem accumulator layouts
 
 Demonstration program
-----------------------
+---------------------
 
 One selected thread in a warpgroup multiplies a ``128×64`` × ``64×128``
 ``float16`` tile (f32 accumulate) into a tmem accumulator, after TMA-loading A/B
@@ -100,22 +92,46 @@ into shared (from
 
 .. code-block:: python
 
-    from tvm.tirx.layout import S, TCol, TLane, TileLayout, tid_in_wg as axis_tid_in_wg
-    from tvm.backend.cuda.tile_primitive.tma_utils import mma_shared_layout
+    from tvm.tirx.layout import S, TileLayout
+    from tvm.backend.cuda.axis import TCol, TLane, tid_in_wg as axis_tid_in_wg
+    from tvm.backend.cuda.tile.tma_utils import mma_shared_layout
 
-    A_smem = Tx.alloc_buffer((3,128,64), "float16", scope="shared", layout=mma_shared_layout("float16", 3, (3,128,64)))
-    B_smem = Tx.alloc_buffer((3,128,64), "float16", scope="shared", layout=mma_shared_layout("float16", 3, (3,128,64)))
+    A_smem = Tx.alloc_tensor(
+        ty_args=[
+            Tx.Tensor(
+                (3, 128, 64),
+                "float16",
+                scope="shared",
+                layout=mma_shared_layout("float16", 3, (3, 128, 64)),
+            )
+        ]
+    )
+    B_smem = Tx.alloc_tensor(
+        ty_args=[
+            Tx.Tensor(
+                (3, 128, 64),
+                "float16",
+                scope="shared",
+                layout=mma_shared_layout("float16", 3, (3, 128, 64)),
+            )
+        ]
+    )
     tmem_addr = Tx.alloc_shared([1], "uint32"); mma_mbar = Tx.alloc_shared([1], "uint64")
     # ... mbarrier.init, cta_sync ...
     if warp_id == 0:
         Tx.ptx["tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32"](
             Tx.address_of(tmem_addr), Tx.uint32(512))
     Tx.cuda.cta_sync()
-    tmem = Tx.decl_buffer((128, 512), "float32", scope="tmem", allocated_addr=tmem_addr[0],
-                         layout=TileLayout(S[(128, 512) : (1 @ TLane, 1 @ TCol)]))
+    tmem = Tx.cuda.decl_tmem(
+        tmem_addr[0],
+        ty_args=[Tx.Tensor(
+            (128, 512), "float32", scope="tmem",
+            layout=TileLayout(S[(128, 512) : (1 @ TLane, 1 @ TCol)]),
+        )],
+    )
     # ... TMA-load A_smem, B_smem from global, wait ...
     if tid_in_wg == 0:
-        Tx.tile.gemm_async(tmem[0:128, 256:384], A_smem[1:2, :, :], B_smem[2:3, :, :], dispatch="tcgen05")
+        Tx.cuda.tile.tcgen05.mma(tmem[0:128, 256:384], A_smem[1:2, :, :], B_smem[2:3, :, :])
         # caller signals completion
         Tx.ptx.tcgen05.commit.cta_group__1.mbarrier__arrive__one.shared__cluster.b64(
             mma_mbar.ptr_to([0]))
@@ -165,7 +181,7 @@ destination's existing value.
 For **block-scaled** fp8/fp4 the chain gains ``.block_scale.scale_vec::<n>X``
 with two extra tmem addresses — ``SFA`` / ``SFB`` — and the scale-factor dtypes;
 the instruction descriptor is encoded at runtime unless the caller supplies
-``descI``. As with the other async ops, the dispatch emits **no** completion —
+``descI``. As with the other async ops, the lowerer emits **no** completion —
 the caller's ``tcgen05.commit`` + mbarrier wait close it.
 
 For row-0 schedules, the lowering folds ``Tx.cuda.get_tmem_addr(base, 0, col)`` to
@@ -173,7 +189,7 @@ For row-0 schedules, the lowering folds ``Tx.cuda.get_tmem_addr(base, 0, col)`` 
 FlashMLA kernels while preserving the helper call for nonzero row offsets.
 On the dense path, ``weight_stationary=True`` with ``cta_group=1`` selects the
 ``tcgen05.mma.ws`` ABI.  The PTX table has no ``.ws.cta_group::2`` form.  The
-dispatcher also infers this mode from the packed M=64 Layout-E accumulator and
+lowerer also infers this mode from the packed M=64 Layout-E accumulator and
 rejects layout/flag combinations that would place tensor-memory rows
 incorrectly. Block-scaled MMA uses its own instruction chain and does not append
 ``.ws``.
@@ -195,16 +211,15 @@ Allocate and read a Layout B result as follows:
 
     accumulator = tmem_pool.alloc_tcgen05_mma_D(
         (64, N), "float32", M=128, cta_group=2)
-    Tx.tile.gemm_async(
+    Tx.cuda.tile.tcgen05.mma(
         accumulator[:, :],
         A_smem[:, :],
         B_smem[:, :],
-        dispatch="tcgen05",
         cta_group=2,
     )
 
     frag = Tx.alloc_tcgen05_ldst_frag("32x32b", (64, N), "float32")
-    Tx.tile.wg.copy_async(frag[:, :], accumulator[:, :])
+    Tx.cuda.tile.tcgen05.ld(frag[:, :], accumulator[:, :], scope="warpgroup")
     Tx.ptx.tcgen05.wait__ld.sync.aligned()
 
 The fragment is a logical ``(64, N)`` view of one physical

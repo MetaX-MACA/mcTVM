@@ -25,34 +25,61 @@
 #define TVM_BACKEND_MACA_CODEGEN_MACA_FALLBACK_MODULE_H_
 
 #include <tvm/ffi/container/map.h>
+#include <tvm/ffi/extra/json.h>
 #include <tvm/ffi/extra/module.h>
 #include <tvm/ffi/function.h>
+#include <tvm/support/env.h>
+#include <tvm/target/target.h>
 
 #include <utility>
 
 #include "../../../runtime/metadata.h"
-#include "../../../support/env.h"
 
 namespace tvm {
 namespace target {
 
 ffi::Module MACAFallbackModuleCreate(ffi::Bytes data, ffi::String fmt,
                                      ffi::Map<ffi::String, runtime::FunctionInfo> fmap,
-                                     ffi::String maca_source);
+                                     ffi::String maca_source, ffi::String backend_config);
 
-inline ffi::Module MACAModuleCreateWithFallback(ffi::Bytes data, ffi::String fmt,
-                                                ffi::Map<ffi::String, runtime::FunctionInfo> fmap,
-                                                ffi::String maca_source) {
+inline ffi::String MACABackendConfig(const Target& target) {
+  namespace json = tvm::ffi::json;
+  json::Object maca_config;
+  auto backend_config = target->GetAttr<ffi::Map<ffi::String, ffi::Any>>("backend_config");
+  if (backend_config.has_value()) {
+    auto maca = backend_config.value().Get("maca");
+    if (maca.has_value()) {
+      auto maca_settings = maca.value().cast<ffi::Map<ffi::String, ffi::Any>>();
+      for (const auto& [key, value] : maca_settings) {
+        maca_config.Set(key, value);
+      }
+    }
+  }
+  if (!maca_config.count("arch")) {
+    maca_config.Set("arch", target->GetAttr<ffi::String>("mcpu").value_or(ffi::String()));
+  }
+  json::Object config;
+  config.Set("maca", std::move(maca_config));
+  return ffi::String(json::Stringify(config));
+}
+
+inline ffi::Module MACAModuleCreateWithFallback(ffi::Bytes source, const Target& target,
+                                                ffi::Map<ffi::String, runtime::FunctionInfo> fmap) {
+  ffi::String source_text(source.data(), source.size());
+  ffi::String config = MACABackendConfig(target);
   if (tvm::support::GetEnv<bool>("TVM_COMPILE_FORCE_FALLBACK", false)) {
-    return MACAFallbackModuleCreate(std::move(data), std::move(fmt), std::move(fmap),
-                                    std::move(maca_source));
+    return MACAFallbackModuleCreate(std::move(source), "maca", std::move(fmap),
+                                    std::move(source_text), std::move(config));
   }
   auto fcreate = ffi::Function::GetGlobal("ffi.Module.create.maca");
-  if (fcreate.has_value()) {
-    return (*fcreate)(data, fmt, fmap, maca_source).cast<ffi::Module>();
+  if (!fcreate.has_value()) {
+    return MACAFallbackModuleCreate(std::move(source), "maca", std::move(fmap),
+                                    std::move(source_text), std::move(config));
   }
-  return MACAFallbackModuleCreate(std::move(data), std::move(fmt), std::move(fmap),
-                                  std::move(maca_source));
+
+  return (*fcreate)(std::move(source), "maca", std::move(fmap), std::move(source_text),
+                    std::move(config))
+      .cast<ffi::Module>();
 }
 
 }  // namespace target

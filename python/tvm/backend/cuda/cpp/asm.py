@@ -90,7 +90,7 @@ def _wait_until_scalar_suffix(ty, requested=""):
 
 
 def _wait_until_pointee(ptr, what):
-    if not isinstance(ptr.ty, ir.PointerType):
+    if not isinstance(ptr.ty, ir.PtrType):
         raise TypeError(f"{what} ptr must be a pointer to the synchronization word")
     return ptr.ty.element_type
 
@@ -260,7 +260,7 @@ def cuda_wait_until(dst, ptr, condition, scope, space, ptx_type, backoff_ns):
             f"{closing} }} while (0)\n"
         )
         operands = (condition, backoff_ns)
-    return cuda_func_call(name, *load_call.args[1:-1], *operands, source_code=source), tags
+    return cuda_func_call(name, *load_call.args[1:-1], *operands, source), tags
 
 
 # =============================================================================
@@ -457,7 +457,7 @@ def codegen_s_tir_cp_async_raw(*args):
         ca_or_cg = "cg" if cp_size_v == 16 else "ca"
 
         # Recover the per-side element dtype from each pointer's type
-        # type (Var has ty = PointerType(PrimType(dtype))).
+        # type (Var has ty = PtrType(PrimType(dtype))).
         # InjectPTXAsyncCopy emits offsets in element-units of each side's
         # buffer dtype (dst gets dst_offset * src_elem_size only when dst is a
         # merged shared.dyn byte buffer, in which case dst_elem_dtype is uint8
@@ -525,7 +525,7 @@ def codegen_s_tir_cp_async_raw(*args):
                 src_ptr_in,
                 src_offset,
                 predicate,
-                source_code=source_code,
+                source_code,
             )
         # No predicate — plain cp.async.
         func_name = f"ptx_cp_async_legacy_{ca_or_cg}_{cp_size_v}_{dst_elem_bytes}_{src_elem_bytes}"
@@ -549,7 +549,7 @@ def codegen_s_tir_cp_async_raw(*args):
             dst_offset,
             src_ptr_in,
             src_offset,
-            source_code=source_code,
+            source_code,
         )
     else:
         raise ValueError(f"cp_async_raw codegen expects 5/6 args, got {len(args)}")

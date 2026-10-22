@@ -17,6 +17,8 @@
 # ruff: noqa: F401
 """Test eliminate common subexpr pass"""
 
+from __future__ import annotations
+
 import tvm
 import tvm.testing
 from tvm.relax import VDevice
@@ -45,10 +47,10 @@ def test_dataflow_binding():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("llvm"),
-                    I.vdevice("maca", 0),
-                    I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "maca"}, 0),
+                    R.vdevice("llvm"),
+                    R.vdevice("maca", 0),
+                    R.vdevice("metal", 0, "global"),
+                    R.vdevice({"kind": "maca"}, 0),
                 ]
             }
         )
@@ -64,7 +66,7 @@ def test_dataflow_binding():
                 y1 = y
                 x2 = x1
                 y2 = y1
-                x2 = R.hint_on_device(x2, tvm.cpu())
+                x2 = R.hint_on_device(x2, device_type=1, index=0)
                 lv0 = R.add(x2, y2)
                 gv = R.multiply(lv0, z)
                 R.output(gv)
@@ -76,10 +78,10 @@ def test_dataflow_binding():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("llvm"),
-                    I.vdevice("maca", 0),
-                    I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "maca"}, 0),
+                    R.vdevice("llvm"),
+                    R.vdevice("maca", 0),
+                    R.vdevice("metal", 0, "global"),
+                    R.vdevice({"kind": "maca"}, 0),
                 ]
             }
         )
@@ -111,7 +113,7 @@ def test_binding():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("llvm"),
+                    R.vdevice("llvm"),
                 ]
             }
         )
@@ -126,7 +128,7 @@ def test_binding():
             y1 = y
             x2 = x1
             y2 = y1
-            x2 = R.hint_on_device(x2, tvm.cpu())
+            x2 = R.hint_on_device(x2, device_type=1, index=0)
             s = R.add(x2, y2)
             m = R.multiply(s, z)
             return m
@@ -137,7 +139,7 @@ def test_binding():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("llvm"),
+                    R.vdevice("llvm"),
                 ]
             }
         )
@@ -167,7 +169,7 @@ def test_func_ret():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("maca"),
+                    R.vdevice("maca"),
                 ]
             }
         )
@@ -190,7 +192,7 @@ def test_func_ret():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("maca"),
+                    R.vdevice("maca"),
                 ]
             }
         )
@@ -217,7 +219,7 @@ def test_tuple_func_ret():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("maca"),
+                    R.vdevice("maca"),
                 ]
             }
         )
@@ -240,7 +242,7 @@ def test_tuple_func_ret():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("maca"),
+                    R.vdevice("maca"),
                 ]
             }
         )
@@ -267,10 +269,10 @@ def test_multi_device():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("llvm"),
-                    I.vdevice("maca", 0),
-                    I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "maca"}, 0),
+                    R.vdevice("llvm"),
+                    R.vdevice("maca", 0),
+                    R.vdevice("metal", 0, "global"),
+                    R.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
                 ]
             }
         )
@@ -283,7 +285,7 @@ def test_multi_device():
         ) -> R.Tensor((2, 3), "float32", "maca"):
             with R.dataflow():
                 lv0 = R.add(x, y)
-                lv0 = R.hint_on_device(lv0, tvm.cpu())
+                lv0 = R.hint_on_device(lv0, device_type=1, index=0)
                 lv1 = R.to_vdevice(lv0, "maca")
                 lv2 = R.add(z, z)
                 gv = R.multiply(lv1, lv2)
@@ -296,10 +298,10 @@ def test_multi_device():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("llvm"),
-                    I.vdevice("maca", 0),
-                    I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "maca"}, 0),
+                    R.vdevice("llvm"),
+                    R.vdevice("maca", 0),
+                    R.vdevice("metal", 0, "global"),
+                    R.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
                 ]
             }
         )
@@ -329,10 +331,10 @@ def test_insert_to_vdevice():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("llvm"),
-                    I.vdevice("maca", 0),
-                    I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "maca"}, 0),
+                    R.vdevice("llvm"),
+                    R.vdevice("maca", 0),
+                    R.vdevice("metal", 0, "global"),
+                    R.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
                 ]
             }
         )
@@ -344,11 +346,11 @@ def test_insert_to_vdevice():
             z: R.Tensor((2, 3), "float32"),
         ) -> R.Tensor((2, 3), "float32"):
             with R.dataflow():
-                lv0 = R.hint_on_device(y, tvm.cpu())
+                lv0 = R.hint_on_device(y, device_type=1, index=0)
                 lv1 = R.add(x, lv0)
-                lv2 = R.hint_on_device(lv1, tvm.maca())
+                lv2 = R.hint_on_device(lv1, device_type=22, index=0)
                 lv3 = R.add(lv2, lv2)
-                lv4 = R.hint_on_device(z, tvm.maca())
+                lv4 = R.hint_on_device(z, device_type=22, index=0)
                 gv = R.multiply(lv3, lv4)
                 R.output(gv)
             return gv
@@ -359,10 +361,10 @@ def test_insert_to_vdevice():
         I.module_global_infos(
             {
                 "vdevice": [
-                    I.vdevice("llvm"),
-                    I.vdevice("maca", 0),
-                    I.vdevice("metal", 0, "global"),
-                    I.vdevice({"kind": "maca"}, 0),
+                    R.vdevice("llvm"),
+                    R.vdevice("maca", 0),
+                    R.vdevice("metal", 0, "global"),
+                    R.vdevice({"kind": "cuda", "arch": "sm_80"}, 0),
                 ]
             }
         )
@@ -390,7 +392,7 @@ def test_input_module_is_unmodified():
     def make_module():
         @I.ir_module
         class Module:
-            I.module_global_infos({"vdevice": [I.vdevice("llvm")]})
+            I.module_global_infos({"vdevice": [R.vdevice("llvm")]})
 
             @R.function
             def foo(

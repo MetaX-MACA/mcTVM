@@ -27,24 +27,20 @@ from tvm.support import utils
 def test_add():
     nn = 1024
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Module:
-        @T.prim_func(s_tir=True)
+        @T.function
         def test_fadd(
-            A: T.Buffer((1024,), "float32"),
-            B: T.Buffer((1024,), "float32"),
-            C: T.Buffer((1024,), "float32"),
+            A: T.Tensor((1024,), "float32"),
+            B: T.Tensor((1024,), "float32"),
+            C: T.Tensor((1024,), "float32"),
         ):
             T.func_attr({"tirx.noalias": True})
             for i0 in range(1024):
-                with T.sblock("C"):
-                    v_i0 = T.axis.spatial(1024, i0)
-                    T.reads(A[v_i0], B[v_i0])
-                    T.writes(C[v_i0])
-                    C[v_i0] = A[v_i0] + B[v_i0]
+                C[i0] = A[i0] + B[i0]
 
     def check_c():
-        mhost = tvm.compile(Module, target="c")
+        mhost = tvm.tirx.compile(Module, target="c")
         temp = utils.tempdir()
         path_dso = temp.relpath("temp.so")
         mhost.export_library(path_dso)
@@ -64,23 +60,19 @@ def test_add():
 def test_reinterpret():
     nn = 1024
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Module:
-        @T.prim_func(s_tir=True)
+        @T.function
         def test_reinterpret(
-            A: T.Buffer((1024,), "int32"),
-            B: T.Buffer((1024,), "float32"),
+            A: T.Tensor((1024,), "int32"),
+            B: T.Tensor((1024,), "float32"),
         ):
             T.func_attr({"tirx.noalias": True})
             for i0 in range(1024):
-                with T.sblock("B"):
-                    v_i0 = T.axis.spatial(1024, i0)
-                    T.reads(A[v_i0])
-                    T.writes(B[v_i0])
-                    B[v_i0] = T.reinterpret("float32", A[v_i0] + 2)
+                B[i0] = T.reinterpret(A[i0] + 2, ty="float32")
 
     def check_c():
-        mhost = tvm.compile(Module, target="c")
+        mhost = tvm.tirx.compile(Module, target="c")
         temp = utils.tempdir()
         path_dso = temp.relpath("temp.so")
         mhost.export_library(path_dso)
@@ -99,23 +91,19 @@ def test_reinterpret():
 def test_ceil():
     nn = 1024
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Module:
-        @T.prim_func(s_tir=True)
+        @T.function
         def test_ceil(
-            A: T.Buffer((1024,), "float32"),
-            B: T.Buffer((1024,), "float32"),
+            A: T.Tensor((1024,), "float32"),
+            B: T.Tensor((1024,), "float32"),
         ):
             T.func_attr({"tirx.noalias": True})
             for i0 in range(1024):
-                with T.sblock("B"):
-                    v_i0 = T.axis.spatial(1024, i0)
-                    T.reads(A[v_i0])
-                    T.writes(B[v_i0])
-                    B[v_i0] = T.ceil(A[v_i0])
+                B[i0] = T.ceil(A[i0])
 
     def check_c():
-        mhost = tvm.compile(Module, target="c")
+        mhost = tvm.tirx.compile(Module, target="c")
         temp = utils.tempdir()
         path_dso = temp.relpath("temp.so")
         mhost.export_library(path_dso)
@@ -134,23 +122,19 @@ def test_ceil():
 def test_floor():
     nn = 1024
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Module:
-        @T.prim_func(s_tir=True)
+        @T.function
         def test_floor(
-            A: T.Buffer((1024,), "float32"),
-            B: T.Buffer((1024,), "float32"),
+            A: T.Tensor((1024,), "float32"),
+            B: T.Tensor((1024,), "float32"),
         ):
             T.func_attr({"tirx.noalias": True})
             for i0 in range(1024):
-                with T.sblock("B"):
-                    v_i0 = T.axis.spatial(1024, i0)
-                    T.reads(A[v_i0])
-                    T.writes(B[v_i0])
-                    B[v_i0] = T.floor(A[v_i0])
+                B[i0] = T.floor(A[i0])
 
     def check_c():
-        mhost = tvm.compile(Module, target="c")
+        mhost = tvm.tirx.compile(Module, target="c")
         temp = utils.tempdir()
         path_dso = temp.relpath("temp.so")
         mhost.export_library(path_dso)
@@ -169,23 +153,19 @@ def test_floor():
 def test_round():
     nn = 1024
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Module:
-        @T.prim_func(s_tir=True)
+        @T.function
         def test_round(
-            A: T.Buffer((1024,), "float32"),
-            B: T.Buffer((1024,), "float32"),
+            A: T.Tensor((1024,), "float32"),
+            B: T.Tensor((1024,), "float32"),
         ):
             T.func_attr({"tirx.noalias": True})
             for i0 in range(1024):
-                with T.sblock("B"):
-                    v_i0 = T.axis.spatial(1024, i0)
-                    T.reads(A[v_i0])
-                    T.writes(B[v_i0])
-                    B[v_i0] = T.round(A[v_i0])
+                B[i0] = T.round(A[i0])
 
     def check_c():
-        mhost = tvm.compile(Module, target="c")
+        mhost = tvm.tirx.compile(Module, target="c")
         temp = utils.tempdir()
         path_dso = temp.relpath("temp.so")
         mhost.export_library(path_dso)
@@ -210,18 +190,18 @@ def test_round():
 
 
 def test_subroutine_call():
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Module:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer(1, dtype="float32")):
+        @T.function
+        def main(A: T.Tensor(1, dtype="float32")):
             Module.subroutine(A.data)
 
-        @T.prim_func(private=True, s_tir=True)
+        @T.function(private=True)
         def subroutine(A_data: T.handle("float32")):
-            A = T.decl_buffer(1, dtype="float32", data=A_data)
+            A = T.decl_tensor(A_data, ty_args=[T.Tensor(1, "float32", data=A_data)])
             A[0] = 42.0
 
-    built = tvm.tirx.build(Module, target="c")
+    built = tvm.tirx.compile(Module, target="c").mod
 
     source = built.inspect_source()
     assert source.count("__tvm_ffi_main(void*") == 2, (
@@ -238,15 +218,15 @@ def test_subroutine_call():
 def test_workspace_allocation_cast():
     @I.ir_module
     class Module:
-        @T.prim_func
-        def main(A: T.Buffer((256,), "float32")):
-            workspace = T.alloc_buffer((256,), "float32", scope="global")
+        @T.function
+        def main(A: T.Tensor((256,), "float32")):
+            workspace = T.alloc_tensor(ty_args=[T.Tensor((256,), "float32", scope="global")])
             for i in range(256):
                 workspace[i] = A[i]
             for i in range(256):
                 A[i] = workspace[i]
 
-    built = tvm.tirx.build(Module, target="c")
+    built = tvm.tirx.compile(Module, target="c").mod
     assert "((float*)TVMBackendAllocWorkspace(" in built.inspect_source()
 
     temp = utils.tempdir()
@@ -254,20 +234,16 @@ def test_workspace_allocation_cast():
 
 
 def test_local_alloc_buffer_uses_plain_c_pointer():
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Module:
-        @T.prim_func(s_tir=True)
-        def main(A: T.Buffer((1,), "float32")):
-            B = T.alloc_buffer((1,), "float32", scope="local")
+        @T.function
+        def main(A: T.Tensor((1,), "float32")):
+            B = T.alloc_tensor(ty_args=[T.Tensor((1,), "float32", scope="local")])
             for i in range(1):
-                with T.sblock("copy"):
-                    vi = T.axis.spatial(1, i)
-                    T.reads(A[vi])
-                    T.writes(B[vi], A[vi])
-                    B[vi] = A[vi] + T.float32(1)
-                    A[vi] = B[vi]
+                B[i] = A[i] + T.float32(1)
+                A[i] = B[i]
 
-    built = tvm.tirx.build(Module, target="c")
+    built = tvm.tirx.compile(Module, target="c").mod
     assert "local float*" not in built.inspect_source()
 
     temp = utils.tempdir()
@@ -280,28 +256,28 @@ def test_local_alloc_buffer_uses_plain_c_pointer():
     tvm.testing.assert_allclose(data.numpy(), np.array([2.0], dtype="float32"))
 
 
-def test_vector_access_ptr_address_uses_ramp_base():
-    buffer = tvm.tirx.decl_buffer((8,), "float32x2", name="A")
-    access_ptr = buffer.access_ptr(access_mask=3, offset=2, extent=4)
-    body = tvm.tirx.Evaluate(tvm.tirx.call_extern("void", "consume", access_ptr))
-    func = tvm.tirx.PrimFunc([buffer], body).with_attr("global_symbol", "main")
+def test_vector_pointer_uses_byte_offset():
+    buffer = tvm.tirx.decl_tensor((8,), "float32x2", name="A")
+    pointer = tvm.tirx.ptr_byte_offset(buffer.data, 16, ty=buffer.data.ty)
+    body = tvm.ir.Evaluate(tvm.tirx.call_extern("void", "consume", pointer))
+    func = tvm.tirx.Function([buffer], body).with_attr("global_symbol", "main")
 
-    source = tvm.tirx.build(tvm.IRModule.from_expr(func), target="c").inspect_source()
+    source = tvm.tirx.compile(tvm.IRModule.from_expr(func), target="c").mod.inspect_source()
     call = next(line.strip() for line in source.splitlines() if line.strip().startswith("consume("))
     assert "int32_t2" not in call
     assert "float2*" in call
-    assert " + 4" in call
+    assert " + 16" in call
 
 
 def test_if_then_else_avoids_extraneous_parentheses():
     @I.ir_module
     class Module:
-        @T.prim_func
-        def main(A: T.Buffer((8,), "int32"), B: T.Buffer((8,), "int32")):
+        @T.function
+        def main(A: T.Tensor((8,), "int32"), B: T.Tensor((8,), "int32")):
             for i in range(8):
                 B[i] = T.if_then_else(i == 0, 1, A[i])
 
-    built = tvm.tirx.build(Module, target="c")
+    built = tvm.tirx.compile(Module, target="c").mod
     source = built.inspect_source()
     assert "if ((" not in source, (
         "Generated code contains extraneous parentheses in the if condition, "

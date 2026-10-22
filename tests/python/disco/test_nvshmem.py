@@ -18,7 +18,6 @@
 
 # pylint: disable=missing-docstring
 import multiprocessing
-import os
 import shutil
 import socket
 import subprocess
@@ -32,9 +31,11 @@ from tvm_ffi import Shape
 
 import tvm
 import tvm.testing
+from tvm.ir import TupleType as _TupleType
 from tvm.runtime import disco as di
 from tvm.script import ir as I
 from tvm.script import relax as R
+from tvm.script import s_tir as Ts
 from tvm.script import tirx as T
 from tvm.testing import env
 
@@ -230,15 +231,15 @@ def _compile():
     init_dfunc(uid, num_workers, 0)
     sess.sync_worker_0()
 
-    @T.prim_func(s_tir=True)
-    def main(A: T.Buffer((8, 16), "float32"), B: T.Buffer((16, 8), "float32")):
-        for i in T.thread_binding(T.int64(8), thread="threadIdx.y"):
-            for j in T.thread_binding(T.int64(16), thread="threadIdx.x"):
-                with T.sblock("T_transpose"):
-                    v0 = T.axis.spatial(T.int64(8), i)
-                    v1 = T.axis.spatial(T.int64(16), j)
-                    T.reads(A[v0, v1])
-                    T.writes(B[v1, v0])
+    @Ts.function
+    def main(A: T.Tensor((8, 16), "float32"), B: T.Tensor((16, 8), "float32")):
+        for i in T.parallel(T.int64(8), annotations={"thread_binding": "threadIdx.y"}):
+            for j in T.parallel(T.int64(16), annotations={"thread_binding": "threadIdx.x"}):
+                with Ts.sblock("T_transpose"):
+                    v0 = Ts.axis.spatial(T.int64(8), i)
+                    v1 = Ts.axis.spatial(T.int64(16), j)
+                    Ts.reads(A[v0, v1])
+                    Ts.writes(B[v1, v0])
                     B[v1, v0] = A[v0, v1]
 
     tmpdir = tempfile.mkdtemp()
@@ -286,11 +287,9 @@ extern "C" __global__ void nvshmem_query_kernel(int* my_pe_out, int* n_pes_out) 
 
 
 def _kernel_compile(compile_mode):
-    """Compile and run a kernel that calls NVSHMEM functions.
+    """Compile and run a kernel with an explicit NVSHMEM compiler configuration."""
 
-    Runs in a fresh process, so setting the env var is safe.
-    """
-    os.environ["TVM_CUDA_COMPILE_MODE"] = compile_mode
+    backend_config = {"cuda": {"compiler": compile_mode}}
 
     num_workers = 2
     sess = di.ProcessSession(num_workers=num_workers)
@@ -303,22 +302,23 @@ def _kernel_compile(compile_mode):
 
     try:
 
-        @I.ir_module(s_tir=True)
+        @I.ir_module
         class NvshmemQueryModule:
-            @T.prim_func(s_tir=True)
+            @Ts.function
             def query_pe(
-                my_pe_out: T.Buffer((1,), "int32"),
-                n_pes_out: T.Buffer((1,), "int32"),
+                my_pe_out: T.Tensor((1,), "int32"),
+                n_pes_out: T.Tensor((1,), "int32"),
             ):
-                with T.sblock("root"):
-                    T.reads()
-                    T.writes(my_pe_out[0:1], n_pes_out[0:1])
+                with Ts.sblock("root"):
+                    Ts.reads()
+                    Ts.writes(my_pe_out[0:1], n_pes_out[0:1])
                     T.call_kernel(
                         NVSHMEM_QUERY_KERNEL_SOURCE,
                         ((1,), (1,)),  # grid=(1,), block=(1,)
                         my_pe_out.data,
                         n_pes_out.data,
                         kernel_name="nvshmem_query_kernel",
+                        backend_config=backend_config,
                     )
 
             @R.function
@@ -328,10 +328,7 @@ def _kernel_compile(compile_mode):
                     my_pe = R.call_tir(
                         cls.query_pe,
                         (),
-                        out_ty=[
-                            R.Tensor((1,), "int32"),
-                            R.Tensor((1,), "int32"),
-                        ],
+                        ty_args=[_TupleType([R.Tensor((1,), "int32"), R.Tensor((1,), "int32")])],
                     )
                     R.output(my_pe)
                 return my_pe
@@ -340,8 +337,11 @@ def _kernel_compile(compile_mode):
         try:
             path = tmpdir + "/test_nvshmem_kernel.so"
 
-            target = tvm.target.Target("maca")
-            tvm.compile(NvshmemQueryModule, target=target).export_library(path)
+            target = tvm.target.Target("cuda")
+            tvm.compile(
+                NvshmemQueryModule,
+                target={**tvm.target.Target(target).export(), "backend_config": backend_config},
+            ).export_library(path)
             mod = sess.load_vm_module(path)
             result = mod["main"]()
 

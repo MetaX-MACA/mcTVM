@@ -24,11 +24,10 @@
 #include "maca_fallback_module.h"
 
 #include <tvm/ffi/extra/module.h>
+#include <tvm/support/bytes_io.h>
 
 #include <string>
 #include <utility>
-
-#include "../../../support/bytes_io.h"
 
 namespace tvm {
 namespace target {
@@ -36,11 +35,13 @@ namespace target {
 class MACAFallbackModuleNode : public ffi::ModuleObj {
  public:
   MACAFallbackModuleNode(ffi::Bytes data, ffi::String fmt,
-                         ffi::Map<ffi::String, runtime::FunctionInfo> fmap, ffi::String maca_source)
+                         ffi::Map<ffi::String, runtime::FunctionInfo> fmap, ffi::String maca_source,
+                         ffi::String backend_config)
       : data_(std::move(data)),
         fmt_(std::move(fmt)),
         fmap_(std::move(fmap)),
-        maca_source_(std::move(maca_source)) {}
+        maca_source_(std::move(maca_source)),
+        backend_config_(std::move(backend_config)) {}
 
   const char* kind() const final { return "maca"; }
 
@@ -59,13 +60,15 @@ class MACAFallbackModuleNode : public ffi::ModuleObj {
     stream.Write(fmt_);
     stream.Write(fmap_);
     stream.Write(data_);
+    stream.Write(backend_config_);
     return ffi::Bytes(std::move(buffer));
   }
 
   ffi::String InspectSource(const ffi::String& format) const final {
+    if (format == "backend_config") return backend_config_;
     if (format == fmt_) return ffi::String(data_.data(), data_.size());
-    if (maca_source_.length() != 0) return maca_source_;
-    if (fmt_ == "fatbin") return ffi::String(data_.data(), data_.size());
+    if ((format.empty() || format == "maca") && maca_source_.length() != 0) return maca_source_;
+    if (format.empty() && fmt_ == "fatbin") return ffi::String(data_.data(), data_.size());
     return ffi::String();
   }
 
@@ -74,13 +77,15 @@ class MACAFallbackModuleNode : public ffi::ModuleObj {
   ffi::String fmt_;
   ffi::Map<ffi::String, runtime::FunctionInfo> fmap_;
   ffi::String maca_source_;
+  ffi::String backend_config_;
 };
 
 ffi::Module MACAFallbackModuleCreate(ffi::Bytes data, ffi::String fmt,
                                      ffi::Map<ffi::String, runtime::FunctionInfo> fmap,
-                                     ffi::String maca_source) {
-  auto n = ffi::make_object<MACAFallbackModuleNode>(std::move(data), std::move(fmt),
-                                                    std::move(fmap), std::move(maca_source));
+                                     ffi::String maca_source, ffi::String backend_config) {
+  auto n =
+      ffi::make_object<MACAFallbackModuleNode>(std::move(data), std::move(fmt), std::move(fmap),
+                                               std::move(maca_source), std::move(backend_config));
   return ffi::Module(n);
 }
 

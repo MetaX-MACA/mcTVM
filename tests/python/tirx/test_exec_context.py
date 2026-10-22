@@ -20,8 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from tvm.tirx.exec_context import (
-    CLUSTER,
+from tvm.backend.maca.tile.exec_context import (
     CTA,
     LANE_CTA_THREAD,
     LANE_FLAT,
@@ -45,10 +44,10 @@ from tvm.tirx.exec_context import (
 WARP_FLAT = LaneBinding(axis="warpid", kind=LANE_FLAT, declared_extent=16)
 WG_OUTER = LaneBinding(axis="warpid", kind=LANE_WG_OUTER, declared_extent=4)
 W_INNER = LaneBinding(axis="warpid", kind=LANE_W_INNER, declared_extent=4)
-LANE_BIND = LaneBinding(axis="laneid", kind=LANE_FLAT, declared_extent=32)
+LANE_BIND = LaneBinding(axis="laneid", kind=LANE_FLAT, declared_extent=64)
 CTA_BIND = LaneBinding(axis="cta_id", kind=LANE_FLAT, declared_extent=1)
-CTA_THREAD_BIND = LaneBinding(axis="thread", kind=LANE_CTA_THREAD, declared_extent=256)
-WG_THREAD_BIND = LaneBinding(axis="thread", kind=LANE_WG_THREAD, declared_extent=256)
+CTA_THREAD_BIND = LaneBinding(axis="thread", kind=LANE_CTA_THREAD, declared_extent=512)
+WG_THREAD_BIND = LaneBinding(axis="thread", kind=LANE_WG_THREAD, declared_extent=512)
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +89,6 @@ def test_axis_modulo_filter_two_cta_pair_residues():
         (THREAD, {"laneid", "warpid", "cta_id"}, set()),
         (WARP, {"warpid", "cta_id"}, {"laneid"}),
         (CTA, {"cta_id"}, {"laneid", "warpid"}),
-        (CLUSTER, set(), {"laneid", "warpid", "cta_id"}),
     ],
 )
 def test_scope_switch_trivial(kappa, expected_inter_axes, expected_intra_axes):
@@ -158,15 +156,15 @@ def test_ex_8_1_cta_wg_warp():
     # with T.cta()
     ctx = ctx.with_scope_switch(CTA)
     assert ctx.inter == {"cta_id": AxisRange(1, 0)}
-    assert ctx.intra == {"laneid": AxisRange(32, 0), "warpid": AxisRange(16, 0)}
+    assert ctx.intra == {"laneid": AxisRange(64, 0), "warpid": AxisRange(16, 0)}
     # with T.warpgroup()
     ctx = ctx.with_scope_switch(WARPGROUP)
     assert ctx.inter == {"wgid": AxisRange(4, 0), "cta_id": AxisRange(1, 0)}
-    assert ctx.intra == {"laneid": AxisRange(32, 0), "wid_in_wg": AxisRange(4, 0)}
+    assert ctx.intra == {"laneid": AxisRange(64, 0), "wid_in_wg": AxisRange(4, 0)}
     # with T.warp()
     ctx = ctx.with_scope_switch(WARP)
     assert ctx.inter == {"warpid": AxisRange(16, 0), "cta_id": AxisRange(1, 0)}
-    assert ctx.intra == {"laneid": AxisRange(32, 0)}
+    assert ctx.intra == {"laneid": AxisRange(64, 0)}
 
 
 # ---------------------------------------------------------------------------
@@ -178,12 +176,12 @@ def test_ex_8_2_filter_then_warpgroup():
     ctx = ExecContext.at_kernel_entry(warp_ext=16).with_scope_switch(CTA)
     ctx = ctx.with_filter(WARP_FLAT, 0, 8)
     assert ctx.A.warpid == AxisRange(8, 0)
-    # recompute at cta: intra=(lane:32, warp:8)
-    assert ctx.intra == {"laneid": AxisRange(32, 0), "warpid": AxisRange(8, 0)}
+    # recompute at cta: intra=(lane:64, warp:8)
+    assert ctx.intra == {"laneid": AxisRange(64, 0), "warpid": AxisRange(8, 0)}
     # enter warpgroup: factor(8, 0) -> case 1
     ctx = ctx.with_scope_switch(WARPGROUP)
     assert ctx.inter == {"wgid": AxisRange(2, 0), "cta_id": AxisRange(1, 0)}
-    assert ctx.intra == {"laneid": AxisRange(32, 0), "wid_in_wg": AxisRange(4, 0)}
+    assert ctx.intra == {"laneid": AxisRange(64, 0), "wid_in_wg": AxisRange(4, 0)}
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +195,7 @@ def test_ex_8_3_sugar_warp_range():
     ctx = ctx.with_filter(WARP_FLAT, 2, 4).with_scope_switch(WARP)
     assert ctx.A.warpid == AxisRange(2, 2)
     assert ctx.inter == {"warpid": AxisRange(2, 2), "cta_id": AxisRange(1, 0)}
-    assert ctx.intra == {"laneid": AxisRange(32, 0)}
+    assert ctx.intra == {"laneid": AxisRange(64, 0)}
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +209,7 @@ def test_ex_8_4_widen_warp_to_wg():
     # widen to warpgroup
     ctx = ctx.with_scope_switch(WARPGROUP)
     assert ctx.inter == {"wgid": AxisRange(1, 0), "cta_id": AxisRange(1, 0)}
-    assert ctx.intra == {"laneid": AxisRange(32, 0), "wid_in_wg": AxisRange(4, 0)}
+    assert ctx.intra == {"laneid": AxisRange(64, 0), "wid_in_wg": AxisRange(4, 0)}
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +222,7 @@ def test_ex_8_5_partial_wg():
     ctx = ctx.with_filter(WARP_FLAT, 0, 2).with_scope_switch(WARPGROUP)
     # case 2: 2 <= 4-0
     assert ctx.inter == {"wgid": AxisRange(1, 0), "cta_id": AxisRange(1, 0)}
-    assert ctx.intra == {"laneid": AxisRange(32, 0), "wid_in_wg": AxisRange(2, 0)}
+    assert ctx.intra == {"laneid": AxisRange(64, 0), "wid_in_wg": AxisRange(2, 0)}
 
 
 # ---------------------------------------------------------------------------
@@ -254,10 +252,10 @@ def test_ex_8_7_deep_nested():
     ctx = ctx.with_filter(WARP_FLAT, 0, 2)
     # recompute at warpgroup: factor(2, 0) -> case 2
     assert ctx.inter == {"wgid": AxisRange(1, 0), "cta_id": AxisRange(1, 0)}
-    assert ctx.intra == {"laneid": AxisRange(32, 0), "wid_in_wg": AxisRange(2, 0)}
+    assert ctx.intra == {"laneid": AxisRange(64, 0), "wid_in_wg": AxisRange(2, 0)}
     ctx = ctx.with_scope_switch(WARP)
     assert ctx.inter == {"warpid": AxisRange(2, 0), "cta_id": AxisRange(1, 0)}
-    assert ctx.intra == {"laneid": AxisRange(32, 0)}
+    assert ctx.intra == {"laneid": AxisRange(64, 0)}
     ctx = ctx.with_filter(LANE_BIND, 0, 8)
     assert ctx.intra == {"laneid": AxisRange(8, 0)}
     assert ctx.inter == {"warpid": AxisRange(2, 0), "cta_id": AxisRange(1, 0)}
@@ -274,44 +272,45 @@ def test_ex_8_8_fa4_pattern():
     # Branch 1: warp 12 (single warp, tcgen05 MMA elected)
     b1 = root.with_filter(WARP_FLAT, 12, 13)
     assert b1.A.warpid == AxisRange(1, 12)
-    assert b1.intra == {"laneid": AxisRange(32, 0), "warpid": AxisRange(1, 12)}
+    assert b1.intra == {"laneid": AxisRange(64, 0), "warpid": AxisRange(1, 12)}
 
     # Branch 2: softmax warpgroups (warps 0-7)
     b2 = root.with_filter(WARP_FLAT, 0, 8).with_scope_switch(WARPGROUP)
     assert b2.inter == {"wgid": AxisRange(2, 0), "cta_id": AxisRange(1, 0)}
-    assert b2.intra == {"laneid": AxisRange(32, 0), "wid_in_wg": AxisRange(4, 0)}
+    assert b2.intra == {"laneid": AxisRange(64, 0), "wid_in_wg": AxisRange(4, 0)}
 
     # Branch 3: correction warpgroup (warps 8-11 = wg2)
     b3 = root.with_filter(WARP_FLAT, 8, 12)
     assert b3.A.warpid == AxisRange(4, 8)
-    assert b3.intra == {"laneid": AxisRange(32, 0), "warpid": AxisRange(4, 8)}
+    assert b3.intra == {"laneid": AxisRange(64, 0), "warpid": AxisRange(4, 8)}
     # And should factor cleanly when entering warpgroup
     b3wg = b3.with_scope_switch(WARPGROUP)
     assert b3wg.inter == {"wgid": AxisRange(1, 2), "cta_id": AxisRange(1, 0)}
-    assert b3wg.intra == {"laneid": AxisRange(32, 0), "wid_in_wg": AxisRange(4, 0)}
+    assert b3wg.intra == {"laneid": AxisRange(64, 0), "wid_in_wg": AxisRange(4, 0)}
 
 
 # ---------------------------------------------------------------------------
-# §8.9 -- Cross-CTA with widening to cluster
+# MACA does not support cluster scope.
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="MACA does not support cluster scope")
 def test_ex_8_9_cross_cta_cluster():
     ctx = ExecContext.at_kernel_entry(warp_ext=16, cta_ext=4).with_scope_switch(CTA)
     assert ctx.inter == {"cta_id": AxisRange(4, 0)}
     # filter to warp 0, then warp
     w = ctx.with_filter(WARP_FLAT, 0, 1).with_scope_switch(WARP)
     assert w.inter == {"warpid": AxisRange(1, 0), "cta_id": AxisRange(4, 0)}
-    assert w.intra == {"laneid": AxisRange(32, 0)}
+    assert w.intra == {"laneid": AxisRange(64, 0)}
 
     # back at cta scope, enter warpgroup
     wg = ctx.with_scope_switch(WARPGROUP)
     assert wg.inter == {"wgid": AxisRange(4, 0), "cta_id": AxisRange(4, 0)}
     # widen to cluster
-    cl = wg.with_scope_switch(CLUSTER)
+    cl = wg.with_scope_switch("cluster")
     assert cl.inter == {}
     assert cl.intra == {
-        "laneid": AxisRange(32, 0),
+        "laneid": AxisRange(64, 0),
         "warpid": AxisRange(16, 0),
         "cta_id": AxisRange(4, 0),
     }
@@ -351,8 +350,8 @@ def test_filter_out_of_range_rejected():
 
 def test_filter_flat_cta_thread_full_warp_range():
     A = initial_A(warp_ext=8)
-    A = filter_narrow(A, CTA_THREAD_BIND, 0, 256)
-    assert A.warpid == AxisRange(4, 0)
+    A = filter_narrow(A, CTA_THREAD_BIND, 0, 512)
+    assert A.warpid == AxisRange(8, 0)
     assert A.laneid == AxisRange(64, 0)
 
 
@@ -372,14 +371,14 @@ def test_filter_flat_cta_thread_nonrectangular_rejected():
 def test_filter_flat_warpgroup_thread_range_inside_one_warpgroup():
     A = initial_A(warp_ext=8)
     A = filter_narrow(A, WG_OUTER, 1, 2)
-    A = filter_narrow(A, WG_THREAD_BIND, 64, 128)
-    assert A.warpid == AxisRange(1, 5)
+    A = filter_narrow(A, WG_THREAD_BIND, 128, 256)
+    assert A.warpid == AxisRange(2, 6)
     assert A.laneid == AxisRange(64, 0)
 
 
 def test_filter_flat_warpgroup_thread_full_range_across_warpgroups_is_noop():
     A = initial_A(warp_ext=8)
-    A2 = filter_narrow(A, WG_THREAD_BIND, 0, 256)
+    A2 = filter_narrow(A, WG_THREAD_BIND, 0, 512)
     assert A2.warpid == AxisRange(8, 0)
     assert A2.laneid == AxisRange(64, 0)
 

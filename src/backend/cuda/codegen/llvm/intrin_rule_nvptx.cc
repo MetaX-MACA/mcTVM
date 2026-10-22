@@ -24,10 +24,9 @@
 
 #include <tvm/ffi/function.h>
 #include <tvm/ir/op.h>
-#include <tvm/ir/prim/builtin.h>
 #include <tvm/ir/prim/expr.h>
-#include <tvm/tirx/builtin.h>
-#include <tvm/tirx/op.h>
+#include <tvm/ir/prim/op.h>
+#include <tvm/tirx/op/abi.h>
 #include <tvm/tirx/op_attr_types.h>
 
 #include <sstream>
@@ -46,7 +45,7 @@ inline PrimExpr DispatchPureExternLibDevice(const PrimExpr& e) {
   const OpNode* op = call->op.as<OpNode>();
   TVM_FFI_ICHECK(op != nullptr);
   std::string name = op->name;
-  TVM_FFI_ICHECK(name.substr(0, 5) == "tirx." || name == "prim.ceil" || name == "prim.log2")
+  TVM_FFI_ICHECK(name.substr(0, 5) == "tirx." || name.substr(0, 5) == "prim.")
       << "Unexpected intrinsic name: " << name;
 
   std::ostringstream intrinsic_name;
@@ -55,89 +54,93 @@ inline PrimExpr DispatchPureExternLibDevice(const PrimExpr& e) {
 
   ffi::Array<Expr> new_args = {StringImm(intrinsic_name.str())};
   new_args.insert(new_args.end(), call->args.begin(), call->args.end());
-  return Call(call_ty, builtin::call_pure_extern(), new_args).as_or_throw<PrimExpr>();
+  return Call(call_ty, tirx::call_pure_extern_op(), new_args).as_or_throw<PrimExpr>();
 }
 
 namespace llvm {
 using tirx::FLowerIntrinsic;
 
-TVM_REGISTER_OP("tirx.floor")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+TVM_FFI_STATIC_INIT_BLOCK() {
+  // clang-format off
+  OpDef("prim.floor")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("prim.ceil")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.ceil")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.round")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", [](const PrimExpr& e) -> PrimExpr {
-      // Redirect to nearbyint (ties-to-even) to match constant-folding semantics.
-      using namespace tirx;
-      const CallNode* call = e.as<CallNode>();
-      TVM_FFI_ICHECK(call != nullptr);
-      static const Op& nearbyint_op = Op::Get("tirx.nearbyint");
-      auto new_call =
-          Call(call->ty.as_or_throw<PrimType>(), nearbyint_op, call->args).as_or_throw<PrimExpr>();
-      return DispatchPureExternLibDevice(new_call);
-    });
+  OpDef("prim.round")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", [](const PrimExpr& e) -> PrimExpr {
+        // Redirect to nearbyint (ties-to-even) to match constant-folding semantics.
+        using namespace tirx;
+        const CallNode* call = e.as<CallNode>();
+        TVM_FFI_ICHECK(call != nullptr);
+        static const Op nearbyint_op = Op::Get("prim.nearbyint");
+        auto new_call = Call(call->ty.as_or_throw<PrimType>(), nearbyint_op, call->args)
+                            .as_or_throw<PrimExpr>();
+        return DispatchPureExternLibDevice(new_call);
+      });
 
-TVM_REGISTER_OP("tirx.nearbyint")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.nearbyint")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.trunc")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.trunc")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.fabs")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.fabs")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.exp")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.exp")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.exp2")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.exp2")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.exp10")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.exp10")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.erf")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.erf")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.fma")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.fma")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.log")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.log")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("prim.log2")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.log2")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.log10")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.log10")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.sqrt")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.sqrt")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.pow")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.pow")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.tanh")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.tanh")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.tan")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.tan")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.cos")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.cos")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.cosh")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.cosh")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.sin")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.sin")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.sinh")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.sinh")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
 
-TVM_REGISTER_OP("tirx.atan")
-    .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  OpDef("prim.atan")
+      .set_attr<FLowerIntrinsic>("nvptx.FLowerIntrinsic", DispatchPureExternLibDevice);
+  // clang-format on
+}
 
 }  // namespace llvm
 }  // namespace codegen

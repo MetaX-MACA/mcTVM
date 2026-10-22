@@ -23,10 +23,9 @@
  *  builtin intrinsic operators specific to MACA target.
  */
 #include <tvm/ffi/function.h>
+#include <tvm/ir/expr.h>
+#include <tvm/ir/op.h>
 #include <tvm/runtime/base.h>
-#include <tvm/tirx/builtin.h>
-#include <tvm/tirx/op.h>
-#include <tvm/tirx/op_attr_types.h>
 
 #include <string>
 
@@ -34,103 +33,119 @@ namespace tvm {
 namespace tirx {
 namespace builtin {
 
-#define TIRX_DEFINE_BUILTIN_FUNC(OpName)                                           \
-  OpRegEntry::RegisterOrGet("tirx." #OpName)                                       \
-      .set_name()                                                                  \
-      .set_attr<TScriptPrinterName>("TScriptPrinterName", ffi::String(#OpName), 1) \
-      .set_attr<TIRxOpCategory>("TIRxOpCategory", ffi::String("builtin"), /*plevel=*/1)
-
 namespace {
-void RegisterDeviceIntrinsicAliases();
+Type InferTypeMacaAxis(const CallNode* call) {
+  TVM_FFI_CHECK_EQ(call->args.size(), 1U, ValueError);
+  const auto* axis = call->args[0].as<StringImmNode>();
+  TVM_FFI_CHECK(axis && (axis->value == "x" || axis->value == "y" || axis->value == "z"),
+                ValueError)
+      << "MACA index axis must be x, y, or z";
+  return PrimType::Int(32);
 }
 
-void RegisterMACATargetBuiltins() {
-  // clang-format off
-static bool registered = false;
-if (registered) return;
-registered = true;
-
-RegisterDeviceIntrinsicAliases();
-  // clang-format on
+template <size_t N>
+Type InferTypeReturnArgType(const CallNode* call) {
+  TVM_FFI_CHECK_GT(call->args.size(), N, ValueError)
+      << "Return type inference requires argument " << N;
+  return call->args[N]->ty;
 }
 
-namespace {
+void RegisterDeviceIntrinsicAttrs(OpDef& def, CallEffectKind effect_kind) {
+  def.set_attr<TCallEffectKind>(tvm::op_attr::kCallEffectKind, static_cast<int64_t>(effect_kind));
+}
 
-struct DeviceIntrinsicRegistration {
-  const char* name;
-  const char* namespace_name;
-  CallEffectKind effect_kind;
-};
+template <typename... Specs>
+OpDef& RegisterDeviceIntrinsic(OpDef&& def, CallEffectKind effect_kind, const Specs&... specs) {
+  def.signature(specs...);
+  RegisterDeviceIntrinsicAttrs(def, effect_kind);
+  return def;
+}
 
-void RegisterDeviceIntrinsic(const DeviceIntrinsicRegistration& reg) {
-  std::string name(reg.name);
-  std::string namespace_name(reg.namespace_name);
-  std::string prefix = namespace_name + "_";
-  std::string suffix = name;
-  if (suffix.rfind(prefix, 0) == 0) {
-    suffix = suffix.substr(prefix.size());
+void RegisterDeviceIntrinsics() {
+  for (const char* name : {"block_idx", "thread_idx", "grid_dim", "block_dim"}) {
+    RegisterDeviceIntrinsic(OpDef(std::string("tirx.maca.") + name), CallEffectKind::kPure,
+                            sig::arg<StringImm>("axis"))
+        .set_attr<FInferType>(tvm::op_attr::kInferType,
+                              FInferType::FromNative<&InferTypeMacaAxis>());
+  }
+  for (const char* name : {"linear_thread_id", "warp_id", "lane_id", "warpgroup_id",
+                           "warp_in_warpgroup", "thread_in_warpgroup"}) {
+    RegisterDeviceIntrinsic(OpDef(std::string("tirx.maca.") + name), CallEffectKind::kPure)
+        .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::Int(32));
   }
 
-  std::string canonical_op_name = "tirx." + namespace_name + "." + suffix;
-  ffi::String namespace_attr(namespace_name);
-  ffi::String printer_name(namespace_name + "." + suffix);
-  int64_t effect = static_cast<int64_t>(reg.effect_kind);
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.func_call"), CallEffectKind::kOpaque,
+                          sig::arg<StringImm>("func_name"), sig::var_args("args"));
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.warp_reduce"), CallEffectKind::kOpaque,
+                          sig::arg("value"), sig::arg<StringImm>("op"), sig::arg<IntExpr>("width"))
+      .set_attr<FInferType>(tvm::op_attr::kInferType,
+                            FInferType::FromNative<&InferTypeReturnArgType<0>>());
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.cta_reduce"), CallEffectKind::kOpaque, sig::arg("value"),
+                          sig::arg<StringImm>("op"), sig::arg<IntExpr>("num_waves"),
+                          sig::arg("scratch"))
+      .set_attr<FInferType>(tvm::op_attr::kInferType,
+                            FInferType::FromNative<&InferTypeReturnArgType<0>>());
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.thread_fence"), CallEffectKind::kOpaque)
+      .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::Void());
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.atomic_add"), CallEffectKind::kOpaque,
+                          sig::arg("address"), sig::arg("value"))
+      .set_attr<FInferType>(tvm::op_attr::kInferType,
+                            FInferType::FromNative<&InferTypeReturnArgType<1>>());
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.atomic_cas"), CallEffectKind::kOpaque,
+                          sig::arg("address"), sig::arg("compare"), sig::arg("value"))
+      .set_attr<FInferType>(tvm::op_attr::kInferType,
+                            FInferType::FromNative<&InferTypeReturnArgType<1>>());
+  // ldg has both a value-returning form and a vector-store form.
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.ldg"), CallEffectKind::kOpaque, sig::var_args("args"));
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.warp_sync"), CallEffectKind::kOpaque)
+      .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::Void());
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.cta_sync"), CallEffectKind::kOpaque)
+      .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::Void());
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.copy_bytes"), CallEffectKind::kOpaque, sig::arg("dst"),
+                          sig::arg("src"), sig::arg<IntExpr>("num_bytes"))
+      .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::Void());
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.copy_async_32b"), CallEffectKind::kOpaque,
+                          sig::arg("dst"), sig::arg("src"))
+      .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::Void());
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.copy_async_64b"), CallEffectKind::kOpaque,
+                          sig::arg("dst"), sig::arg("src"))
+      .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::Void());
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.copy_async_128b"), CallEffectKind::kOpaque,
+                          sig::arg("dst"), sig::arg("src"))
+      .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::Void());
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.copy_async_32b_zfill"), CallEffectKind::kOpaque,
+                          sig::arg("dst"), sig::arg("src"), sig::arg("predicate"))
+      .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::Void());
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.copy_async_64b_zfill"), CallEffectKind::kOpaque,
+                          sig::arg("dst"), sig::arg("src"), sig::arg("predicate"))
+      .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::Void());
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.copy_async_128b_zfill"), CallEffectKind::kOpaque,
+                          sig::arg("dst"), sig::arg("src"), sig::arg("predicate"))
+      .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::Void());
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.async_wait_gvmcnt"), CallEffectKind::kOpaque,
+                          sig::arg<IntExpr>("count"))
+      .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::Void());
+  RegisterDeviceIntrinsic(OpDef("tirx.maca.barrier_inst"), CallEffectKind::kOpaque)
+      .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::Void());
 
-  auto register_one = [&](const std::string& op_name) {
-    OpRegEntry::RegisterOrGet(op_name)
-        .set_name()
-        .set_attr<TIRxOpCategory>("TIRxOpCategory", ffi::String("device_intrin"),
-                                  /*plevel=*/15)
-        .set_attr<TDeviceIntrinsicNamespace>("TDeviceIntrinsicNamespace", namespace_attr,
-                                             /*plevel=*/15)
-        .set_attr<TCallEffectKind>("TCallEffectKind", effect, /*plevel=*/15)
-        .set_attr<TScriptPrinterName>("TScriptPrinterName", printer_name, /*plevel=*/15);
-  };
-
-  register_one(canonical_op_name);
-}
-
-#define TIRX_DEVICE_INTRIN_ALIAS(OpName, Namespace, EffectKind) \
-  {#OpName, #Namespace, CallEffectKind::EffectKind}
-
-const DeviceIntrinsicRegistration kDeviceIntrinsics[] = {
-    TIRX_DEVICE_INTRIN_ALIAS(maca_func_call, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_warp_reduce, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_cta_reduce, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_thread_fence, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_atomic_add, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_atomic_cas, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_ldg, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_warp_sync, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_cta_sync, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_copy_bytes, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_copy_async_32b, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_copy_async_64b, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_copy_async_128b, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_copy_async_32b_zfill, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_copy_async_64b_zfill, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_copy_async_128b_zfill, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_async_wait_gvmcnt, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_barrier_inst, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_mma_m16n16k16_f16_f32, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_mma_m16n16k16_bf16_f32, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_mma_m16n16k16_i8_i32, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_mma_m16n16k4_f32_f32, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_mma_m16n16k8_tf32_f32, maca, kOpaque),
-    TIRX_DEVICE_INTRIN_ALIAS(maca_mma_m16n16k4_f64_f64, maca, kOpaque),
-};
-
-void RegisterDeviceIntrinsicAliases() {
-  for (const auto& reg : kDeviceIntrinsics) {
-    RegisterDeviceIntrinsic(reg);
+  for (const char* name :
+       {"mma_m16n16k16_f16_f32", "mma_m16n16k16_bf16_f32", "mma_m16n16k16_i8_i32",
+        "mma_m16n16k4_f32_f32", "mma_m16n16k8_tf32_f32", "mma_m16n16k4_f64_f64"}) {
+    RegisterDeviceIntrinsic(OpDef(std::string("tirx.maca.") + name), CallEffectKind::kOpaque,
+                            sig::arg("d"), sig::arg("a"), sig::arg("b"), sig::arg("c"))
+        .set_attr<TFixedReturnType>(tvm::op_attr::kFixedReturnType, PrimType::Void());
   }
 }
-
-#undef TIRX_DEVICE_INTRIN_ALIAS
 
 }  // namespace
 
-#undef TIRX_DEFINE_BUILTIN_FUNC
+void RegisterMACATargetBuiltins() {
+  static bool registered = false;
+  if (registered) return;
+  registered = true;
+
+  RegisterDeviceIntrinsics();
+}
 
 TVM_FFI_STATIC_INIT_BLOCK() { RegisterMACATargetBuiltins(); }
 

@@ -23,8 +23,17 @@
 #include "codegen_c.h"
 
 #include <tvm/ffi/cast.h>
+#include <tvm/ffi/extra/structural_equal.h>
+#include <tvm/ir/function.h>
+#include <tvm/ir/prim/op.h>
 #include <tvm/ir/unique_name_supply.h>
 #include <tvm/sym/analyzer.h>
+#include <tvm/tirx/function.h>
+#include <tvm/tirx/op/abi.h>
+#include <tvm/tirx/op/gpu.h>
+#include <tvm/tirx/op/memory.h>
+#include <tvm/tirx/op/region.h>
+#include <tvm/tirx/stmt.h>
 #include <tvm/tirx/type.h>
 
 #include <cctype>
@@ -32,7 +41,6 @@
 #include <limits>
 
 #include "../../sym/pattern_match.h"
-#include "../../tirx/ir/buffer_common.h"
 #include "codegen_params.h"
 
 namespace tvm {
@@ -43,7 +51,8 @@ using namespace tirx;
 
 void CodeGenC::Init(bool output_ssa) { print_ssa_form_ = output_ssa; }
 
-void CodeGenC::InitFuncState(const PrimFunc& f) {
+void CodeGenC::InitFuncState(const Function& f) {
+  thread_extents_.clear();
   alloc_storage_scope_.clear();
   handle_data_type_.clear();
   pointer_offset_vars_.clear();
@@ -82,14 +91,19 @@ void CodeGenC::ReserveKeywordsAsUnique() {
   name_supply_->ReserveName("return");
 }
 
-void CodeGenC::PrintFunctionSignature(const ffi::String& function_name, const PrimFunc& func,
+void CodeGenC::PrintFunctionSignature(const ffi::String& function_name, const Function& func,
                                       std::ostream& os) {
   PrintFuncPrefix(os);
   PrintType(func->ret_type, os);
   PrintExtraAttrs(func, os);
-  os << " " << function_name << "(";
+  os << " " << function_name;
+  PrintFunctionParameters(func, os);
+}
+
+void CodeGenC::PrintFunctionParameters(const Function& func, std::ostream& os) {
+  os << "(";
   for (size_t i = 0; i < func->params.size(); ++i) {
-    tirx::Var v = func->params[i];
+    tvm::Var v = func->params[i];
 
     if (i > 0) {
       os << ", ";
@@ -100,7 +114,7 @@ void CodeGenC::PrintFunctionSignature(const ffi::String& function_name, const Pr
     }
 
     auto is_tensormap_ptr = [&]() -> bool {
-      if (auto* ptr = v->ty.as<PointerTypeNode>()) {
+      if (auto* ptr = v->ty.as<PtrTypeNode>()) {
         return ptr->element_type.as<tirx::TensorMapTypeNode>();
       }
       return false;
@@ -111,9 +125,9 @@ void CodeGenC::PrintFunctionSignature(const ffi::String& function_name, const Pr
       PrintType(v->ty, os);
     }
 
-    bool no_alias = func->HasNonzeroAttr(tirx::attr::kNoAlias);
-    bool is_handle = v->ty.as<PointerTypeNode>();
-    auto* ptr = v->ty.as<PointerTypeNode>();
+    bool no_alias = func->HasNonzeroAttr(tvm::tirx::attr::kNoAlias);
+    bool is_handle = v->ty.as<PtrTypeNode>();
+    auto* ptr = v->ty.as<PtrTypeNode>();
     if (ptr && ptr->element_type.as<tirx::TensorMapTypeNode>()) {
       is_handle = false;
     }
@@ -129,7 +143,7 @@ void CodeGenC::PrintFunctionSignature(const ffi::String& function_name, const Pr
   // TODO(tvm-team): consider simply keep type info in the
   // type annotation(via a normalizing rewriting).
   for (const auto& param : func->params) {
-    if (auto* ptr = param->ty.as<PointerTypeNode>()) {
+    if (auto* ptr = param->ty.as<PtrTypeNode>()) {
       if (auto* prim = ptr->element_type.as<PrimTypeNode>()) {
         RegisterHandleType(param.get(), ffi::GetRef<PrimType>(prim));
       }
@@ -137,10 +151,8 @@ void CodeGenC::PrintFunctionSignature(const ffi::String& function_name, const Pr
   }
 }
 
-void CodeGenC::DeclareFunction(const GlobalVar& gvar, const PrimFunc& func) {
-  if (internal_functions_.count(gvar)) {
-    return;
-  }
+bool CodeGenC::RegisterFunctionName(const GlobalVar& gvar, const Function& func) {
+  if (internal_functions_.count(gvar)) return false;
 
   auto function_name = [&]() -> ffi::String {
     if (auto global_symbol = func->GetAttr<ffi::String>(tvm::attr::kGlobalSymbol)) {
@@ -159,9 +171,13 @@ void CodeGenC::DeclareFunction(const GlobalVar& gvar, const PrimFunc& func) {
     has_tvm_ffi_main_func_ = true;
   }
   internal_functions_.insert({gvar, function_name});
+  return true;
+}
 
+void CodeGenC::DeclareFunction(const GlobalVar& gvar, const Function& func) {
+  if (!RegisterFunctionName(gvar, func)) return;
   InitFuncState(func);
-  PrintFunctionSignature(function_name, func, fwd_decl_stream);
+  PrintFunctionSignature(GetFunctionName(gvar), func, fwd_decl_stream);
   fwd_decl_stream << ";\n";
 }
 
@@ -173,10 +189,11 @@ ffi::String CodeGenC::GetFunctionName(const GlobalVar& gvar) {
   return it->second;
 }
 
-void CodeGenC::AddFunction(const GlobalVar& gvar, const PrimFunc& f) {
+void CodeGenC::AddFunction(const GlobalVar& gvar, const Function& f) {
   // If the function has already been forward-declared, this is a
   // no-op.
   DeclareFunction(gvar, f);
+  if (!f->body.has_value()) return;
   auto function_name = GetFunctionName(gvar);
 
   // clear previous generated state.
@@ -186,7 +203,7 @@ void CodeGenC::AddFunction(const GlobalVar& gvar, const PrimFunc& f) {
   stream << " {\n";
   this->PreFunctionBody(f);
   int func_scope = this->BeginScope();
-  this->PrintStmt(f->body);
+  this->PrintStmt(f->body.value());
   this->EndScope(func_scope);
   this->PrintIndent();
   this->stream << "}\n\n";
@@ -194,7 +211,7 @@ void CodeGenC::AddFunction(const GlobalVar& gvar, const PrimFunc& f) {
 
 void CodeGenC::PrintFuncPrefix(std::ostream& os) {}
 
-void CodeGenC::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {}
+void CodeGenC::PrintExtraAttrs(const Function& f, std::ostream& os) {}
 
 std::string CodeGenC::Finish() {
   std::ostringstream code;
@@ -266,7 +283,7 @@ std::string CodeGenC::GetBufferRef(const PrimType& t, const VarNode* buffer, Pri
     return ptr_os.str();
   };
 
-  const PrimType& buffer_element_dtype = GetBufferVar(buffer)->dtype;
+  const PrimType& buffer_element_dtype = GetTensorVar(buffer)->dtype;
 
   std::string buffer_str = vid;
   if (!HandleTypeMatch(buffer_var, buffer_element_dtype) || is_vol) {
@@ -307,12 +324,12 @@ std::string CodeGenC::GetBufferRef(const PrimType& t, const VarNode* buffer, Pri
 // Print a reference expression to a buffer.
 std::string CodeGenC::GetStructRef(const Type& t, const Expr& buffer, const PrimExpr& index,
                                    int kind) {
-  if (kind < tirx::builtin::kDLTensorKindBound_) {
+  if (kind < tirx::kDLTensorKindBound_) {
     std::ostringstream os;
     os << "(((DLTensor*)";
     this->PrintExpr(buffer, os);
     os << ")";
-    if (kind == tirx::builtin::kDLTensorAddr) {
+    if (kind == tirx::kDLTensorAddr) {
       os << " + ";
       this->PrintExpr(index, os);
       os << ")";
@@ -323,34 +340,34 @@ std::string CodeGenC::GetStructRef(const Type& t, const Expr& buffer, const Prim
     os << "].";
     // other case: get fields.
     switch (kind) {
-      case tirx::builtin::kDLTensorData:
+      case tirx::kDLTensorData:
         os << "data";
         break;
-      case tirx::builtin::kDLTensorShape:
+      case tirx::kDLTensorShape:
         os << "shape";
         break;
-      case tirx::builtin::kDLTensorStrides:
+      case tirx::kDLTensorStrides:
         os << "strides";
         break;
-      case tirx::builtin::kDLTensorNDim:
+      case tirx::kDLTensorNDim:
         os << "ndim";
         break;
-      case tirx::builtin::kDLTensorTypeCode:
+      case tirx::kDLTensorTypeCode:
         os << "dtype.code";
         break;
-      case tirx::builtin::kDLTensorTypeBits:
+      case tirx::kDLTensorTypeBits:
         os << "dtype.bits";
         break;
-      case tirx::builtin::kDLTensorByteOffset:
+      case tirx::kDLTensorByteOffset:
         os << "byte_offset";
         break;
-      case tirx::builtin::kDLTensorTypeLanes:
+      case tirx::kDLTensorTypeLanes:
         os << "dtype.lanes";
         break;
-      case tirx::builtin::kDLTensorDeviceId:
+      case tirx::kDLTensorDeviceId:
         os << "device.device_id";
         break;
-      case tirx::builtin::kDLTensorDeviceType:
+      case tirx::kDLTensorDeviceType:
         os << "device.device_type";
         break;
       default:
@@ -358,24 +375,24 @@ std::string CodeGenC::GetStructRef(const Type& t, const Expr& buffer, const Prim
     }
     os << ')';
     return os.str();
-  } else if (kind == tirx::builtin::kTVMFFIAnyTypeIndex) {
+  } else if (kind == tirx::kTVMFFIAnyTypeIndex) {
     std::ostringstream os;
     os << "(((TVMFFIAny*)";
     this->PrintExpr(buffer, os);
     os << ")[" << index << "].type_index)";
     return os.str();
-  } else if (kind == tirx::builtin::kTVMFFIAnyZeroPadding) {
+  } else if (kind == tirx::kTVMFFIAnyZeroPadding) {
     std::ostringstream os;
     os << "(((TVMFFIAny*)";
     this->PrintExpr(buffer, os);
     os << ")[" << index << "].zero_padding)";
     return os.str();
-  } else if (kind == tirx::builtin::kTVMFFIAnyUnionValue) {
+  } else if (kind == tirx::kTVMFFIAnyUnionValue) {
     std::ostringstream os;
     os << "(((TVMFFIAny*)";
     this->PrintExpr(buffer, os);
     os << ")[" << index << "].";
-    if (t.as<PointerTypeNode>()) {
+    if (t.as<PtrTypeNode>()) {
       os << "v_ptr";
     } else if (PrimType prim_type = t.as_or_throw<PrimType>();
                prim_type.MatchesCode(DLDataTypeCode::kDLFloat)) {
@@ -387,7 +404,7 @@ std::string CodeGenC::GetStructRef(const Type& t, const Expr& buffer, const Prim
     }
     os << ")";
     return os.str();
-  } else if (kind == tirx::builtin::kInt64ArrayElem) {
+  } else if (kind == tirx::kInt64ArrayElem) {
     std::ostringstream os;
     os << "(((int64_t*)";
     this->PrintExpr(buffer, os);
@@ -416,20 +433,17 @@ void CodeGenC::RegisterHandleType(const VarNode* buf_var, const PrimType& t) {
   }
 }
 
-void CodeGenC::RegisterHandleTypeFromPointer(const tirx::Var& var, const Expr* value) {
+void CodeGenC::RegisterHandleTypeFromPointer(const tvm::Var& var, const Expr* value) {
   if (value == nullptr) return;
-  std::optional<PrimType> value_dtype = [&]() {
-    if (auto prim_value = value->as<PrimExpr>()) {
-      return tirx::GetPointerType(GetType(prim_value.value()));
-    }
-    return tirx::GetPointerType((*value)->ty);
-  }();
-  if (!value_dtype.has_value()) return;
+  const auto* pointer_type = (*value)->ty.as<PtrTypeNode>();
+  if (!pointer_type) return;
+  const auto* value_dtype = pointer_type->element_type.as<PrimTypeNode>();
+  if (!value_dtype) return;
   auto* call = value->as<CallNode>();
-  if (call != nullptr && call->op.same_as(tirx::builtin::ptr_byte_offset())) {
+  if (call != nullptr && call->op.same_as(tirx::ptr_byte_offset_op())) {
     pointer_offset_vars_.insert(var.get());
   }
-  RegisterHandleType(var.get(), value_dtype.value());
+  RegisterHandleType(var.get(), ffi::GetRef<PrimType>(value_dtype));
 }
 
 void CodeGenC::PrintVecElemLoad(const std::string& vec, const PrimType& t, int i,
@@ -467,7 +481,7 @@ std::string CodeGenC::CastFromTo(std::string value, const PrimType& from, const 
   return os.str();
 }
 
-void CodeGenC::BindThreadIndex(const IterVar& iv) {
+void CodeGenC::BindThreadIndex(const PrimVar& var, const ffi::String& thread_tag) {
   TVM_FFI_THROW(InternalError) << "not implemented";
 }
 
@@ -667,6 +681,12 @@ void CodeGenC::Dispatch_(const prim::BitwiseXorNode* op, std::ostream& os) {  //
   PrintBinaryExpr(op, "^", os, this);
 }
 void CodeGenC::Dispatch_(const prim::BitwiseNotNode* op, std::ostream& os) {  // NOLINT(*)
+  if (op->a.ty().MatchesCode(DLDataTypeCode::kDLBool)) {
+    // C promotes ~bool to int. Comparing against false preserves the boolean
+    // complement and uses the target's elementwise path for vector operands.
+    PrintExpr(prim::EQ(op->a, prim::MakeConst(op->a.ty(), false)), os);
+    return;
+  }
   os << "(~";
   PrintExpr(op->a, os);
   os << ')';
@@ -675,7 +695,7 @@ void CodeGenC::Dispatch_(const prim::BitwiseNotNode* op, std::ostream& os) {  //
 void CodeGenC::PrintCallExtern(Type ret_type, ffi::String global_symbol,
                                const ffi::Array<Expr>& args, bool skip_first_arg,
                                std::ostream& os) {  // NOLINT(*)
-  bool cast_pointer_return = ret_type.as<PointerTypeNode>();
+  bool cast_pointer_return = ret_type.as<PtrTypeNode>();
   if (cast_pointer_return) {
     os << "((";
     PrintType(ret_type, os);
@@ -695,23 +715,19 @@ void CodeGenC::PrintCallExtern(Type ret_type, ffi::String global_symbol,
 }
 
 void CodeGenC::Dispatch_(const CallNode* op, std::ostream& os) {  // NOLINT(*)
-  TVM_FFI_ICHECK(!op->op.same_as(tirx::builtin::masked_load()))
+  TVM_FFI_ICHECK(!op->op.same_as(tirx::masked_load_op()))
       << "Predicated buffer load is not supported.";
-  TVM_FFI_ICHECK(!op->op.same_as(tirx::builtin::masked_store()))
+  TVM_FFI_ICHECK(!op->op.same_as(tirx::masked_store_op()))
       << "Predicated buffer store is not supported.";
   if (auto opt_call_op = op->op.as<Op>()) {
     auto call_op = opt_call_op.value();
 
-    if (op->op.same_as(tirx::builtin::buffer_data())) {
+    if (op->op.same_as(tirx::tensor_data_ptr_op())) {
       TVM_FFI_ICHECK_EQ(op->args.size(), 1U);
       const auto* buffer = op->args[0].as<VarNode>();
-      TVM_FFI_ICHECK(buffer && buffer->ty.as<BufferTypeNode>())
-          << "buffer_data expects a Var with BufferType";
+      TVM_FFI_ICHECK(buffer && buffer->ty.as<TensorTypeNode>())
+          << "tensor_data_ptr expects a Var with TensorType";
       os << GetVarID(buffer);
-    } else if (op->op.same_as(tirx::builtin::continue_loop())) {
-      os << "continue;";
-    } else if (op->op.same_as(tirx::builtin::break_loop())) {
-      os << "break;";
     } else if (op->op.same_as(builtin_call_extern_) || op->op.same_as(builtin_call_pure_extern_)) {
       TVM_FFI_ICHECK_GE(op->args.size(), 1U);
       auto func = op->args[0].as_or_throw<StringImm>();
@@ -723,13 +739,7 @@ void CodeGenC::Dispatch_(const CallNode* op, std::ostream& os) {  // NOLINT(*)
       if (!func_name_supply_->ContainsName(func->value)) {
         ffi::Array<Type> arg_types;
         for (size_t i = 1; i < op->args.size(); i++) {
-          if (auto prim = op->args[i].as<PrimExpr>()) {
-            arg_types.push_back(GetType(prim.value()));
-          } else if (auto var = op->args[i].as<Var>()) {
-            arg_types.push_back(var.value()->ty);
-          } else {
-            arg_types.push_back(op->args[i]->ty);
-          }
+          arg_types.push_back(op->args[i]->ty);
         }
         Type ret_type = op->ty;
         this->GenerateForwardFunctionDeclarations(func->value, arg_types, ret_type);
@@ -738,7 +748,7 @@ void CodeGenC::Dispatch_(const CallNode* op, std::ostream& os) {  // NOLINT(*)
       // call extern if the op itself have a global symbol.
       ffi::Array<Expr> args = op->args;
       this->PrintCallExtern(op->ty, op_attr_global_symbol_[call_op], args, false, os);
-    } else if (op->op.same_as(prim::builtin::if_then_else())) {
+    } else if (op->op.same_as(prim::if_then_else_op())) {
       // conditional that skips eval if cond evals to false
       std::string result = name_supply_->FreshName("condval");
       std::string cond = PrintExpr(op->args[0]);
@@ -770,7 +780,7 @@ void CodeGenC::Dispatch_(const CallNode* op, std::ostream& os) {  // NOLINT(*)
         this->stream << "}\n";
       }
       os << result;
-    } else if (op->op.same_as(tirx::builtin::address_of())) {
+    } else if (op->op.same_as(tirx::address_of_op())) {
       const TensorLoadNode* load = op->args[0].as<TensorLoadNode>();
       TVM_FFI_ICHECK(op->args.size() == 1);
       if (load) {
@@ -782,9 +792,9 @@ void CodeGenC::Dispatch_(const CallNode* op, std::ostream& os) {  // NOLINT(*)
         if (const prim::RampNode* ramp = index.as<prim::RampNode>()) {
           index = ramp->base;
         }
-        const VarNode* data = load->source.as_or_throw<tvm::tirx::BufferVar>().get();
+        const VarNode* data = load->source.as_or_throw<tvm::tirx::TensorVar>().get();
         if (pointer_offset_vars_.count(data) &&
-            HandleTypeMatch(data, load->source.as_or_throw<tvm::tirx::BufferVar>()->dtype) &&
+            HandleTypeMatch(data, load->source.as_or_throw<tvm::tirx::TensorVar>()->dtype) &&
             !IsVolatile(data)) {
           os << "(" << GetVarID(data) << " + ";
           this->PrintExpr(index, os);
@@ -792,15 +802,15 @@ void CodeGenC::Dispatch_(const CallNode* op, std::ostream& os) {  // NOLINT(*)
         } else {
           os << "(&("
              << GetBufferRef(load->ty.as_or_throw<PrimType>(),
-                             load->source.as_or_throw<tvm::tirx::BufferVar>().get(), index)
+                             load->source.as_or_throw<tvm::tirx::TensorVar>().get(), index)
              << "))";
         }
       } else {
-        auto* var = op->args[0].as<tirx::VarNode>();
+        auto* var = op->args[0].as<tvm::VarNode>();
         TVM_FFI_ICHECK(var)
             << "Builtin address_of() expects the argument to be a TensorLoad or Var, but "
             << "received argument " << op->args[0];
-        if (auto* ptr = var->ty.as<PointerTypeNode>()) {
+        if (auto* ptr = var->ty.as<PtrTypeNode>()) {
           if (ptr->element_type.as<tirx::TensorMapTypeNode>()) {
             os << "((unsigned long long)(&(";
             this->PrintExpr(op->args[0], os);
@@ -816,33 +826,37 @@ void CodeGenC::Dispatch_(const CallNode* op, std::ostream& os) {  // NOLINT(*)
           os << "))";
         }
       }
-    } else if (op->op.same_as(tirx::builtin::tvm_struct_get())) {
+    } else if (op->op.same_as(tirx::abi_field_get_op())) {
       TVM_FFI_ICHECK_EQ(op->args.size(), 3U);
       os << GetStructRef(op->ty, op->args[0], op->args[1].as_or_throw<PrimExpr>(),
                          op->args[2].as<IntImmNode>()->value.as<int>().value());
-    } else if (op->op.same_as(tirx::builtin::isnullptr())) {
+    } else if (op->op.same_as(tirx::isnullptr_op())) {
       TVM_FFI_ICHECK_EQ(op->args.size(), 1U);
       os << "(";
       this->PrintExpr(op->args[0], os);
       os << " == NULL)";
-    } else if (op->op.same_as(tirx::builtin::ptr_byte_offset())) {
-      TVM_FFI_ICHECK_EQ(op->args.size(), 3U);
+    } else if (op->op.same_as(tirx::ptr_byte_offset_op())) {
+      TVM_FFI_ICHECK_EQ(op->args.size(), 2U);
+      const auto& pointer_type = op->ty.as_or_throw<PtrType>();
       os << "((";
-      PrintType(op->args[2].as_or_throw<PrimExpr>().ty(), os);
-      os << "*)(((char*)";
+      if (IsScopePartOfType()) PrintStorageScope(pointer_type->storage_scope, os);
+      PrintType(pointer_type->element_type, os);
+      os << "*)(((";
+      if (IsScopePartOfType()) PrintStorageScope(pointer_type->storage_scope, os);
+      os << "char*)";
       this->PrintExpr(op->args[0], os);
       os << ") + ";
       this->PrintExpr(op->args[1], os);
       os << "))";
-    } else if (op->op.same_as(tirx::builtin::handle_add_byte_offset())) {
+    } else if (op->op.same_as(tirx::handle_add_byte_offset_op())) {
       TVM_FFI_ICHECK_EQ(op->args.size(), 2U);
       os << "((void*)((char*)";
       this->PrintExpr(op->args[0], os);
       os << " + ";
       this->PrintExpr(op->args[1], os);
       os << "))";
-    } else if (op->op.same_as(tirx::builtin::reinterpret())) {
-      if (const auto* pointer_type = op->ty.as<PointerTypeNode>()) {
+    } else if (op->op.same_as(tirx::reinterpret_op())) {
+      if (const auto* pointer_type = op->ty.as<PtrTypeNode>()) {
         os << "((";
         if (IsScopePartOfType()) {
           PrintStorageScope(pointer_type->storage_scope, os);
@@ -858,7 +872,7 @@ void CodeGenC::Dispatch_(const CallNode* op, std::ostream& os) {  // NOLINT(*)
         return;
       }
       PrimType target_dtype = op->ty.as_or_throw<PrimType>();
-      if (op->args[0]->ty.as<PointerTypeNode>()) {
+      if (op->args[0]->ty.as<PtrTypeNode>()) {
         TVM_FFI_ICHECK(target_dtype.IsScalar() && target_dtype.bits() == 64 &&
                        target_dtype.MatchesCode(DLDataTypeCode::kDLInt, DLDataTypeCode::kDLUInt))
             << "Pointer reinterpret requires a scalar 64-bit integer target, but got "
@@ -880,18 +894,13 @@ void CodeGenC::Dispatch_(const CallNode* op, std::ostream& os) {  // NOLINT(*)
       this->PrintType(target_dtype, os);
       os << " *)(&(" << rhs << ")))";
       EndScope(ssa_scope);
-    } else if (op->op.same_as(tirx::builtin::isnan())) {
+    } else if (op->op.same_as(prim::isnan_op())) {
       os << "(";
       this->PrintExpr(op->args[0], os);
       os << " != ";
       this->PrintExpr(op->args[0], os);
       os << ")";
-    } else if (op->op.same_as(tirx::builtin::lookup_param())) {
-      TVM_FFI_ICHECK_EQ(op->args.size(), 1);
-      const StringImmNode* str = op->args[0].as<StringImmNode>();
-      TVM_FFI_ICHECK(str != nullptr);
-      os << "__tvm_param__" << str->value;
-    } else if (op->op.same_as(tirx::builtin::tvm_thread_invariant())) {
+    } else if (op->op.same_as(tirx::gpu_thread_invariant_op())) {
       os << "(";
       this->PrintExpr(op->args[0], os);
       os << ")";
@@ -927,40 +936,52 @@ void CodeGenC::PrintVecBinaryOp(const std::string& op, const PrimType& t, PrimEx
   }
 }
 
-void CodeGenC::Dispatch_(const DeclBufferNode* op) {
-  const VarNode* source = op->data.as<VarNode>();
-  if (const auto* call = op->data.as<CallNode>();
-      call && call->op.same_as(tirx::builtin::buffer_data()) && call->args.size() == 1) {
+void CodeGenC::DispatchDeclTensor(const BindNode* op, const CallNode* buffer_call) {
+  Expr data = buffer_call->args[0];
+  DLDataType dtype = buffer_call->ty_args[0].as_or_throw<tirx::TensorType>()->dtype->dtype;
+  ffi::String scope = buffer_call->ty_args[0].as_or_throw<tirx::TensorType>()->storage_scope;
+  TensorVar buffer = op->var.as_or_throw<TensorVar>();
+  const VarNode* source = data.as<VarNode>();
+  if (const auto* call = data.as<CallNode>();
+      call && call->op.same_as(tirx::tensor_data_ptr_op()) && call->args.size() == 1) {
     source = call->args[0].as<VarNode>();
   }
   if (source && var_idmap_.count(source)) {
-    TVM_FFI_ICHECK(!var_idmap_.count(op->buffer.get()));
-    var_idmap_[op->buffer.get()] = GetVarID(source);
+    TVM_FFI_ICHECK(!var_idmap_.count(buffer.get()));
     if (auto it = alloc_storage_scope_.find(source); it != alloc_storage_scope_.end()) {
-      alloc_storage_scope_[op->buffer.get()] = it->second;
-    } else {
-      alloc_storage_scope_[op->buffer.get()] = op->buffer.scope();
+      scope = it->second;
     }
     if (IsVolatile(source)) {
-      MarkVolatile(op->buffer.get());
+      MarkVolatile(buffer.get());
     }
-    auto it = handle_data_type_.find(source);
-    RegisterHandleType(op->buffer.get(),
-                       it == handle_data_type_.end() ? op->buffer->dtype : it->second);
-    return;
+    // Reuse the name only when it already has the view's element type.
+    // Otherwise declare a typed view without changing the backing allocation.
+    if (HandleTypeMatch(source, PrimType(dtype))) {
+      var_idmap_[buffer.get()] = GetVarID(source);
+      alloc_storage_scope_[buffer.get()] = scope;
+      RegisterHandleType(buffer.get(), PrimType(dtype));
+      return;
+    }
   }
 
-  std::string scope = op->buffer.scope();
-  alloc_storage_scope_[op->buffer.get()] = scope;
+  alloc_storage_scope_[buffer.get()] = scope;
   this->PrintIndent();
   if (IsScopePartOfType()) {
     PrintStorageScope(scope, stream);
   }
-  PrintType(op->buffer.DataPointerType(), stream);
-  stream << ' ' << AllocVarID(op->buffer.get()) << " = ";
-  PrintExpr(Call(op->buffer.DataPointerType(), tirx::builtin::reinterpret(), {op->data}), stream);
+  PtrType pointer_type(PrimType(dtype), scope);
+  PrintType(pointer_type, stream);
+  stream << ' ' << AllocVarID(buffer.get()) << " = ";
+  // Packed argument decoding may already have established this typed view.
+  const auto* cast = data.as<CallNode>();
+  if (cast && cast->op.same_as(tirx::reinterpret_op()) &&
+      ffi::StructuralEqual()(cast->ty, pointer_type)) {
+    PrintExpr(data, stream);
+  } else {
+    PrintExpr(Call(pointer_type, tirx::reinterpret_op(), {data}), stream);
+  }
   stream << ";\n";
-  RegisterHandleType(op->buffer.get(), op->buffer->dtype);
+  RegisterHandleType(buffer.get(), PrimType(dtype));
 }
 
 void CodeGenC::Dispatch_(const TensorLoadNode* op, std::ostream& os) {  // NOLINT(*)
@@ -968,14 +989,14 @@ void CodeGenC::Dispatch_(const TensorLoadNode* op, std::ostream& os) {  // NOLIN
 
   PrimType value_ty = op->ty.as_or_throw<PrimType>();
   PrimExpr index = op->indices[0];
-  Var buffer_var = op->source.as_or_throw<tvm::tirx::BufferVar>().var();
-  const PrimType& element_ty = op->source.as_or_throw<tvm::tirx::BufferVar>()->dtype;
+  Var buffer_var = op->source.as_or_throw<tvm::tirx::TensorVar>().var();
+  const PrimType& element_ty = op->source.as_or_throw<tvm::tirx::TensorVar>()->dtype;
 
   int lanes = value_ty.lanes();
   // delcare type.
   if (value_ty.lanes() == element_ty.lanes()) {
     std::string ref = GetBufferRef(op->ty.as_or_throw<PrimType>(),
-                                   op->source.as_or_throw<tvm::tirx::BufferVar>().get(), index);
+                                   op->source.as_or_throw<tvm::tirx::TensorVar>().get(), index);
     if (value_ty.MatchesCode(DLDataTypeCode::kDLFloat4_e2m1fn) && value_ty.lanes() == 1) {
       // GetBufferRef returns an lvalue: *(ptr + index/2), which reads the
       // full byte.  Extract the correct nibble (low for even, high for odd).
@@ -1008,7 +1029,7 @@ void CodeGenC::Dispatch_(const TensorLoadNode* op, std::ostream& os) {  // NOLIN
     if (can_vector_load) {
       std::string ref =
           GetVecLoad(op->ty.as_or_throw<PrimType>(),
-                     op->source.as_or_throw<tvm::tirx::BufferVar>().get(), base.Eval());
+                     op->source.as_or_throw<tvm::tirx::TensorVar>().get(), base.Eval());
       HandleVolatileLoads(ref, op, os);
     } else {
       std::ostringstream svalue_expr;
@@ -1019,7 +1040,7 @@ void CodeGenC::Dispatch_(const TensorLoadNode* op, std::ostream& os) {  // NOLIN
         std::ostringstream value_temp;
         if (!HandleTypeMatch(buffer_var.get(), elem_type)) {
           value_temp << "((";
-          if (buffer_var->ty.as<PointerTypeNode>()) {
+          if (buffer_var->ty.as<PtrTypeNode>()) {
             auto it = alloc_storage_scope_.find(buffer_var.get());
             if (it != alloc_storage_scope_.end()) {
               PrintStorageScope(it->second, value_temp);
@@ -1040,17 +1061,18 @@ void CodeGenC::Dispatch_(const TensorLoadNode* op, std::ostream& os) {  // NOLIN
   }
 }
 
-void CodeGenC::Dispatch_(const BufferStoreNode* op) {
+void CodeGenC::Dispatch_(const TensorStoreNode* op) {
   TVM_FFI_ICHECK_EQ(op->indices.size(), 1) << "Store to non-flat memory not supported.";
 
   PrimType value_ty = op->value.ty();
-  const PrimType& element_ty = op->buffer->dtype;
+  const PrimType& element_ty = op->dest.as_or_throw<TensorVar>()->dtype;
   PrimExpr index_expr = op->indices[0];
-  Var buffer_var = op->buffer.var();
+  Var buffer_var = op->dest.as_or_throw<TensorVar>().var();
 
   if (value_ty.lanes() == element_ty.lanes()) {
     std::string value = this->PrintExpr(op->value);
-    std::string ref = this->GetBufferRef(value_ty, op->buffer.get(), index_expr);
+    std::string ref =
+        this->GetBufferRef(value_ty, op->dest.as_or_throw<TensorVar>().get(), index_expr);
     this->PrintIndent();
     stream << ref << " = " << value << ";\n";
   } else {
@@ -1059,7 +1081,7 @@ void CodeGenC::Dispatch_(const BufferStoreNode* op) {
     if (sym::ramp(base, 1, value_ty.lanes()).Match(index_expr) &&
         value_ty.code() != DLDataTypeCode::kDLFloat4_e2m1fn) {
       std::string value = this->PrintExpr(op->value);
-      this->PrintVecStore(op->buffer.get(), value_ty, base.Eval(), value);
+      this->PrintVecStore(op->dest.as_or_throw<TensorVar>().get(), value_ty, base.Eval(), value);
     } else {
       // The assignment below introduces side-effect, and the resulting value cannot
       // be reused across multiple expression, thus a new scope is needed
@@ -1074,7 +1096,7 @@ void CodeGenC::Dispatch_(const BufferStoreNode* op) {
         PrimType elem_type = value_ty.WithLanes(1);
         if (!HandleTypeMatch(buffer_var.get(), elem_type)) {
           stream << "((";
-          if (buffer_var->ty.as<PointerTypeNode>()) {
+          if (buffer_var->ty.as<PtrTypeNode>()) {
             auto it = alloc_storage_scope_.find(buffer_var.get());
             if (it != alloc_storage_scope_.end()) {
               PrintStorageScope(it->second, stream);
@@ -1111,7 +1133,7 @@ void CodeGenC::Dispatch_(const prim::LetNode* op, std::ostream& os) {  // NOLINT
     var_idmap_[op->var.get()] = value;
   } else {
     PrintIndent();
-    bool is_pointer = op->var->ty.as<PointerTypeNode>();
+    bool is_pointer = op->var->ty.as<PtrTypeNode>();
     if (is_pointer && handle_data_type_.count(op->var.get())) {
       PrintType(handle_data_type_.at(op->var.get()), this->stream);
       this->stream << "* " << AllocVarID(op->var.get()) << " = (";
@@ -1230,6 +1252,10 @@ void CodeGenC::Dispatch_(const prim::SelectNode* op, std::ostream& os) {  // NOL
 }
 
 void CodeGenC::Dispatch_(const BindNode* op) {
+  if (const auto* call = op->value.as<CallNode>(); call) {
+    if (call->op.same_as(tirx::alloc_tensor_op())) return DispatchAllocTensor(op, call);
+    if (call->op.same_as(tirx::decl_tensor_op())) return DispatchDeclTensor(op, call);
+  }
   RegisterHandleTypeFromPointer(op->var, &op->value);
   std::string value = PrintExpr(op->value);
   if (print_ssa_form_) {
@@ -1237,7 +1263,7 @@ void CodeGenC::Dispatch_(const BindNode* op) {
     var_idmap_[op->var.get()] = value;
   } else {
     PrintIndent();
-    bool is_pointer = op->var->ty.as<PointerTypeNode>();
+    bool is_pointer = op->var->ty.as<PtrTypeNode>();
     if (is_pointer && handle_data_type_.count(op->var.get())) {
       PrintType(handle_data_type_.at(op->var.get()), stream);
       stream << "* " << AllocVarID(op->var.get()) << " = (";
@@ -1250,47 +1276,59 @@ void CodeGenC::Dispatch_(const BindNode* op) {
   }
 }
 
-void CodeGenC::Dispatch_(const AllocBufferNode* op) {
-  TVM_FFI_ICHECK(op->buffer.defined());
-  std::string vid = AllocVarID(op->buffer.get(), op->buffer.name() + "_ptr");
+void CodeGenC::DispatchAllocTensor(const BindNode* op, const CallNode* buffer_call) {
+  tvm::Tuple shape = tvm::Tuple(buffer_call->ty_args[0].as_or_throw<tirx::TensorType>()->shape);
+  DLDataType dtype = buffer_call->ty_args[0].as_or_throw<tirx::TensorType>()->dtype->dtype;
+  ffi::String scope = buffer_call->ty_args[0].as_or_throw<tirx::TensorType>()->storage_scope;
+  TensorVar buffer = op->var.as_or_throw<TensorVar>();
+  DictAttrs annotations = buffer_call->attrs.as_or_throw<DictAttrs>();
+  TVM_FFI_ICHECK(buffer.defined());
+  std::string vid = AllocVarID(buffer.get(), buffer.name() + "_ptr");
 
   this->PrintIndent();
-  const auto& shape = op->buffer->shape;
   size_t constant_size = 1;
-  for (const auto& dim : shape) {
+  for (const auto& dim : shape->fields) {
     const IntImmNode* dim_imm = dim.as<IntImmNode>();
     TVM_FFI_ICHECK(dim_imm) << "Can only handle constant size stack allocation for now";
     constant_size *= dim_imm->value.as<size_t>().value();
   }
   TVM_FFI_ICHECK_GT(constant_size, 0) << "Can only handle constant size stack allocation for now";
 
-  auto scope = op->buffer.scope();
-  alloc_storage_scope_[op->buffer.get()] = scope;
+  alloc_storage_scope_[buffer.get()] = scope;
   PrintStorageScope(scope, stream);
 
-  PrintType(op->buffer->dtype, stream);
+  PrintType(PrimType(dtype), stream);
   stream << ' ' << vid << '[' << constant_size << "];\n";
 
-  RegisterHandleType(op->buffer.get(), op->buffer->dtype);
-  if (op->annotations.count(tirx::attr::kVolatile)) {
-    MarkVolatile(op->buffer.get());
+  RegisterHandleType(buffer.get(), PrimType(dtype));
+  if (annotations->dict.count(tvm::tirx::attr::kVolatile)) {
+    MarkVolatile(buffer.get());
   }
 }
 
-void CodeGenC::Dispatch_(const AttrStmtNode* op) {
-  if (op->attr_key == tirx::attr::thread_extent) {
-    IterVar iv = op->node.as_or_throw<IterVar>();
-    if (iv->thread_tag.length() != 0) {
-      if (!var_idmap_.count(iv->var.get())) {
-        BindThreadIndex(iv);
-      }
-    }
-  } else if (op->attr_key == tirx::attr::pragma_import_c) {
-    const StringImmNode* value = op->value.as<StringImmNode>();
-    TVM_FFI_ICHECK(value != nullptr);
-    decl_stream << value->value;
+void CodeGenC::Dispatch_(const RegionStmtNode* op) {
+  if (op->op.same_as(tirx::launch_thread_op())) {
+    TVM_FFI_CHECK(std::string(op->args[0].as_or_throw<StringImm>()->value).rfind("vthread", 0) != 0,
+                  ValueError)
+        << "Virtual thread launches must be lowered before code generation";
+    PrimVar var = op->body_params[0].as_or_throw<PrimVar>();
+    ffi::String tag = op->args[0].as_or_throw<StringImm>()->value;
+    PrimExpr extent = op->args[1].as_or_throw<PrimExpr>();
+    auto [it, inserted] = thread_extents_.emplace(tag, extent);
+    sym::Analyzer analyzer;
+    TVM_FFI_CHECK(inserted || analyzer->CanProveEqual(it->second, extent), ValueError)
+        << "Conflicting launch extents for " << tag;
+    TVM_FFI_ICHECK(!var_idmap_.count(var.get())) << "Launch variable is already defined";
+    BindThreadIndex(var, tag);
+    this->PrintStmt(op->body);
+    var_idmap_.erase(var.get());
+  } else if (op->op.same_as(tirx::device_context_op()) ||
+             op->op.same_as(tirx::compute_scope_op()) ||
+             op->op.same_as(tirx::parallel_launch_op())) {
+    this->PrintStmt(op->body);
+  } else {
+    TVM_FFI_THROW(ValueError) << "Unsupported region op " << op->op;
   }
-  this->PrintStmt(op->body);
 }
 
 void CodeGenC::PrintEscapedCString(const std::string& str, std::ostream& os) {
@@ -1371,7 +1409,7 @@ void CodeGenC::Dispatch_(const AssertStmtNode* op) {
 
 void CodeGenC::Dispatch_(const ForNode* op) {
   std::string begin_str = PrintExpr(op->min);
-  PrimExpr end = is_zero(op->min) ? op->extent : sym::Analyzer()->Simplify(op->min + op->extent);
+  PrimExpr end = IsZero(op->min) ? op->extent : sym::Analyzer()->Simplify(op->min + op->extent);
   std::string end_str = PrintExpr(end);
   std::string step_str = op->step.has_value() ? PrintExpr(*op->step) : "";
   PrintIndent();
@@ -1424,7 +1462,7 @@ void CodeGenC::Dispatch_(const ContinueNode* op) {
   stream << "continue;\n";
 }
 
-void CodeGenC::Dispatch_(const IfThenElseNode* op) {
+void CodeGenC::Dispatch_(const IfNode* op) {
   std::string cond = PrintExpr(op->condition);
   PrintIndent();
   if (cond[0] == '(' && cond[cond.length() - 1] == ')') {
@@ -1454,13 +1492,17 @@ void CodeGenC::Dispatch_(const SeqStmtNode* op) {
 }
 
 void CodeGenC::Dispatch_(const EvaluateNode* op) {
-  if (auto value = op->value.as<PrimExpr>(); value && is_const_int(value.value())) return;
+  if (auto value = op->value.as<PrimExpr>(); value && IsConstInt(value.value())) return;
   const CallNode* call = op->value.as<CallNode>();
   if (call) {
-    if (call->op.same_as(tirx::builtin::tvm_storage_sync())) {
+    if (call->op.same_as(tirx::assume_aligned_op())) {
+      // Alignment facts do not require a runtime statement on C-family targets.
+      return;
+    }
+    if (call->op.same_as(tirx::gpu_storage_sync_op())) {
       this->PrintStorageSync(call);
       return;
-    } else if (call->op.same_as(tirx::builtin::tvm_struct_set())) {
+    } else if (call->op.same_as(tirx::abi_field_set_op())) {
       TVM_FFI_ICHECK_EQ(call->args.size(), 4);
       int kind = call->args[2].as<IntImmNode>()->value.as<int>().value();
       Type store_ty = call->args[3]->ty;
@@ -1470,9 +1512,9 @@ void CodeGenC::Dispatch_(const EvaluateNode* op) {
       std::string cast;
 
       auto store_prim_type = store_ty.as<PrimType>();
-      bool clears_union = store_ty.as<PointerTypeNode>() ||
-                          (store_prim_type && store_prim_type.value().bits() < 64);
-      if (kind == tirx::builtin::kTVMFFIAnyUnionValue && clears_union) {
+      bool clears_union =
+          store_ty.as<PtrTypeNode>() || (store_prim_type && store_prim_type.value().bits() < 64);
+      if (kind == tirx::kTVMFFIAnyUnionValue && clears_union) {
         this->PrintIndent();
         // when we set any union value, we need to be careful to
         // clear off the union value to zero if the set size is less than 64 bits
@@ -1481,10 +1523,10 @@ void CodeGenC::Dispatch_(const EvaluateNode* op) {
                      << " = 0;\n";
       }
 
-      if (kind == tirx::builtin::kDLTensorStrides) {
+      if (kind == tirx::kDLTensorStrides) {
         // cast void* to int64_t*
-        cast = store_ty.as<PointerTypeNode>() ? "(int64_t*)" : "";
-      } else if (kind == tirx::builtin::kDLTensorDeviceType) {
+        cast = store_ty.as<PtrTypeNode>() ? "(int64_t*)" : "";
+      } else if (kind == tirx::kDLTensorDeviceType) {
         // cast int to enum
         cast = "(DLDeviceType)";
       }

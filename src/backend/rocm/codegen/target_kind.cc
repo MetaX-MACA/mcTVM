@@ -47,19 +47,18 @@ std::string ExtractStringWithPrefix(const std::string& str, const std::string& p
   return str.substr(prefix.length(), pos - prefix.length());
 }
 
-bool DetectDeviceFlag(Device device, runtime::DeviceAttrKind flag, ffi::Any* val) {
+bool DetectDeviceFlag(Device device, const ffi::String& name, ffi::Any* val) {
   using runtime::DeviceAPI;
   DeviceAPI* api = DeviceAPI::Get(device, true);
   if (api == nullptr) {
     return false;
   }
-  api->GetAttr(device, runtime::kExist, val);
-  int exists = val->cast<int>();
+  bool exists = api->GetAttr(device, "exist").cast<bool>();
   if (!exists) {
     return false;
   }
-  DeviceAPI::Get(device)->GetAttr(device, flag, val);
-  return true;
+  *val = api->GetAttr(device, name);
+  return val->type_index() != kTVMFFINone;
 }
 
 void CheckOrSetAttr(ffi::Map<ffi::String, ffi::Any>* attrs, const ffi::String& name,
@@ -92,7 +91,7 @@ ffi::Map<ffi::String, ffi::Any> UpdateROCmAttrs(ffi::Map<ffi::String, ffi::Any> 
 
   ffi::Any val;
   int version;
-  if (!DetectDeviceFlag({kDLROCM, 0}, runtime::kApiVersion, &val)) {
+  if (!DetectDeviceFlag({kDLROCM, 0}, "api_version", &val)) {
     LOG(WARNING) << "Unable to detect ROCm version, assuming >= 3.5";
     version = 305;
   } else {
@@ -109,23 +108,6 @@ ffi::Map<ffi::String, ffi::Any> UpdateROCmAttrs(ffi::Map<ffi::String, ffi::Any> 
   return target;
 }
 
-void RegisterTargetKind() {
-  namespace refl = tvm::ffi::reflection;
-
-  TVM_REGISTER_TARGET_KIND("rocm", kDLROCM)
-      .add_attr_option<ffi::String>("mcpu")
-      .add_attr_option<ffi::String>("mtriple")
-      .add_attr_option<ffi::Array<ffi::String>>("mattr")
-      // TODO(masahi): Support querying from a target device
-      // On RDNA cards, thread_warp_size should be 32
-      .add_attr_option<int64_t>("max_num_threads", refl::DefaultValue(256))
-      .add_attr_option<int64_t>("max_threads_per_block", refl::DefaultValue(256))
-      .add_attr_option<int64_t>("max_shared_memory_per_block", refl::DefaultValue(65536))
-      .add_attr_option<int64_t>("thread_warp_size", refl::DefaultValue(64))
-      .set_default_keys({"rocm", "gpu"})
-      .set_target_canonicalizer(UpdateROCmAttrs);
-}
-
 }  // namespace rocm
 }  // namespace backend
 
@@ -140,7 +122,23 @@ void RegisterROCMIntrinRules();
 }  // namespace tvm
 
 TVM_FFI_STATIC_INIT_BLOCK() {
-  tvm::backend::rocm::RegisterTargetKind();
+  using namespace tvm;
+  using namespace tvm::backend::rocm;
+  namespace refl = tvm::ffi::reflection;
+
+  TargetKindDef("rocm")
+      .set_default_device_type(kDLROCM)
+      .def_option<ffi::String>("mcpu")
+      .def_option<ffi::String>("mtriple")
+      .def_option<ffi::Array<ffi::String>>("mattr")
+      // TODO(masahi): Support querying from a target device
+      // On RDNA cards, thread_warp_size should be 32
+      .def_option<int64_t>("max_num_threads", refl::DefaultValue(256))
+      .def_option<int64_t>("max_threads_per_block", refl::DefaultValue(256))
+      .def_option<int64_t>("max_shared_memory_per_block", refl::DefaultValue(65536))
+      .def_option<int64_t>("thread_warp_size", refl::DefaultValue(64))
+      .set_default_keys({"rocm", "gpu"})
+      .set_target_canonicalizer(UpdateROCmAttrs);
 #ifdef TVM_LLVM_VERSION
   tvm::codegen::llvm::RegisterROCMIntrinRules();
   tvm::codegen::RegisterAMDGPUCodegen();

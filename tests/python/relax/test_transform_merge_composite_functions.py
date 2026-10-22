@@ -20,6 +20,7 @@ import tvm
 from tvm import relax
 from tvm.script import ir as I
 from tvm.script import relax as R
+from tvm.script import s_tir as Ts
 from tvm.script import tirx as T
 
 
@@ -1015,7 +1016,7 @@ def test_mixed_non_composite():
 
 def test_reshape():
     # Verify that the non-CallNode input (shape in reshape) can be handled properly.
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Module:
         @R.function(private=True)
         def fused_relax_matmul(
@@ -1055,7 +1056,7 @@ def test_reshape():
                 R.output(gv)
             return gv
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Expected:
         @R.function
         def fused_relax_reshape_relax_matmul_tensorrt(
@@ -1123,14 +1124,14 @@ def test_handle_existence_of_call_tir():
 
     """
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Before:
         @R.function
         def main(A: R.Tensor([10], dtype="float32")) -> R.Tensor([10], dtype="float32"):
             cls = Before
             with R.dataflow():
                 B = cls.fused_relax_nn_relu(A)
-                C = R.call_tir(cls.relu, (B,), out_ty=R.Tensor([10], dtype="float32"))
+                C = R.call_tir(cls.relu, (B,), ty_args=[R.Tensor([10], dtype="float32")])
                 D = cls.fused_relax_nn_gelu(C)
                 R.output(D)
             return D
@@ -1145,15 +1146,15 @@ def test_handle_existence_of_call_tir():
                 R.output(Output)
             return Output
 
-        @T.prim_func(private=True, s_tir=True)
+        @Ts.function(private=True)
         def relu(
-            Input: T.Buffer(T.int64(10), "float32"),
-            Output: T.Buffer(T.int64(10), "float32"),
+            Input: T.Tensor(T.int64(10), "float32"),
+            Output: T.Tensor(T.int64(10), "float32"),
         ):
             T.func_attr({"tirx.noalias": True})
             for i in range(T.int64(10)):
-                with T.sblock("compute"):
-                    vi = T.axis.remap("S", [i])
+                with Ts.sblock("compute"):
+                    vi = Ts.axis.remap("S", [i])
                     Output[vi] = T.max(Input[vi], T.float32(0))
 
         @R.function(private=True)
@@ -1166,14 +1167,14 @@ def test_handle_existence_of_call_tir():
                 R.output(Output)
             return Output
 
-    @I.ir_module(s_tir=True)
+    @I.ir_module
     class Expected:
         @R.function
         def main(A: R.Tensor([10], dtype="float32")) -> R.Tensor([10], dtype="float32"):
             cls = Expected
             with R.dataflow():
                 B = cls.fused_relax_nn_relu1_compiler_A(A)
-                C = R.call_tir(cls.relu, (B,), out_ty=R.Tensor([10], dtype="float32"))
+                C = R.call_tir(cls.relu, (B,), ty_args=[R.Tensor([10], dtype="float32")])
                 D = cls.fused_relax_nn_gelu1_compiler_A(C)
                 R.output(D)
             return D
@@ -1197,15 +1198,15 @@ def test_handle_existence_of_call_tir():
             Output = composite_lambda(Input)
             return Output
 
-        @T.prim_func(private=True, s_tir=True)
+        @Ts.function(private=True)
         def relu(
-            Input: T.Buffer(T.int64(10), "float32"),
-            Output: T.Buffer(T.int64(10), "float32"),
+            Input: T.Tensor(T.int64(10), "float32"),
+            Output: T.Tensor(T.int64(10), "float32"),
         ):
             T.func_attr({"tirx.noalias": True})
             for i in range(T.int64(10)):
-                with T.sblock("compute"):
-                    vi = T.axis.remap("S", [i])
+                with Ts.sblock("compute"):
+                    vi = Ts.axis.remap("S", [i])
                     Output[vi] = T.max(Input[vi], T.float32(0))
 
         @R.function
@@ -1258,7 +1259,7 @@ def test_tuple_projection_merging():
                 parts = cls.split(x)
                 left = parts[0]
                 right = parts[1]
-                repacked = R.tuple(left, right)
+                repacked = (left, right)
                 reordered_left = repacked[0]
                 reordered_right = repacked[1]
                 difference = cls.subtract(reordered_right, reordered_left)
@@ -1374,7 +1375,7 @@ def test_tuple_projection_rejects_escaping_tuple():
                 alias = parts
                 left = alias[0]
                 out = cls.relu(left)
-                result = R.tuple(alias, out)
+                result = (alias, out)
                 R.output(result)
             return result
 

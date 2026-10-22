@@ -23,15 +23,13 @@
 #include <tvm/ffi/extra/structural_equal.h>
 #include <tvm/ffi/extra/structural_hash.h>
 #include <tvm/ir/prim/expr.h>
+#include <tvm/ir/prim/op.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/sym/analyzer.h>
 #include <tvm/tirx/layout.h>
-#include <tvm/tirx/op.h>
 
 #include <numeric>
 #include <vector>
-
-#include "../../../ir/attr_registry.h"
 
 namespace tvm {
 namespace tirx {
